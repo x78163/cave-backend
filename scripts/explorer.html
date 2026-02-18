@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cave Explorer — First Person</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0a12; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+
+        #blocker {
+            position: fixed; inset: 0; z-index: 100;
+            background: rgba(10, 10, 18, 0.92);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+        #blocker h1 { font-size: 28px; margin-bottom: 12px; font-weight: 400; }
+        #blocker .subtitle { color: #888; font-size: 14px; margin-bottom: 30px; }
+        #blocker .controls-grid {
+            display: grid; grid-template-columns: auto auto; gap: 8px 24px;
+            font-size: 14px; margin-bottom: 30px;
+        }
+        #blocker .key { background: #2a2a3e; padding: 4px 10px; border-radius: 4px; text-align: center; font-family: monospace; }
+        #blocker .action { color: #aaa; }
+        #blocker .start-btn {
+            background: #3a5a3a; border: 1px solid #5a8a5a; padding: 12px 32px;
+            border-radius: 6px; color: #cfc; font-size: 16px; cursor: pointer;
+        }
+        #blocker .start-btn:hover { background: #4a6a4a; }
+
+        #hud {
+            position: fixed; top: 10px; left: 10px; z-index: 50;
+            background: rgba(0,0,0,0.6); padding: 8px 14px; border-radius: 6px;
+            font-size: 12px; font-family: monospace; line-height: 1.6;
+            pointer-events: none;
+        }
+        #hud .label { color: #666; }
+
+        #minimap {
+            position: fixed; bottom: 15px; right: 15px; z-index: 50;
+            width: 180px; height: 180px; border-radius: 50%;
+            border: 2px solid #333; background: rgba(0,0,0,0.7);
+            overflow: hidden;
+        }
+        #minimap canvas { width: 100%; height: 100%; }
+
+        #crosshair {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 50; pointer-events: none; opacity: 0.3;
+        }
+
+        #toolbar {
+            position: fixed; top: 10px; right: 10px; z-index: 50;
+            display: flex; gap: 6px;
+        }
+        #toolbar button {
+            background: rgba(0,0,0,0.6); border: 1px solid #333; color: #ccc;
+            padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        #toolbar button:hover { background: rgba(60,60,80,0.8); }
+        #toolbar button.active { background: rgba(60,90,60,0.8); border-color: #5a8a5a; }
+
+        #loading {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 200; text-align: center;
+        }
+        .spinner {
+            border: 3px solid #333; border-top-color: #7c6; width: 40px; height: 40px;
+            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <!-- Click-to-start overlay -->
+    <div id="blocker">
+        <h1>Cave Explorer</h1>
+        <div class="subtitle">First-person cave walkthrough</div>
+        <div class="controls-grid">
+            <span class="key">W A S D</span><span class="action">Move</span>
+            <span class="key">Mouse</span><span class="action">Look around</span>
+            <span class="key">Shift</span><span class="action">Sprint</span>
+            <span class="key">Space</span><span class="action">Jump</span>
+            <span class="key">F</span><span class="action">Toggle flashlight</span>
+            <span class="key">V</span><span class="action">Toggle noclip (fly mode)</span>
+            <span class="key">ESC</span><span class="action">Pause / Release mouse</span>
+        </div>
+        <div style="margin-bottom: 20px;">
+            <label style="font-size: 13px; color: #888;">Mesh: </label>
+            <select id="meshSelect" style="background: #2a2a3e; color: #ccc; border: 1px solid #444; padding: 4px 8px; border-radius: 4px; font-size: 13px;">
+                <option value="textured_mesh.glb">Textured (camera projected)</option>
+                <option value="dense_pcd_mesh.glb">Dense PCD (rock color)</option>
+                <option value="keyframe_mesh.glb">Keyframe merge (sparse)</option>
+            </select>
+        </div>
+        <button class="start-btn" id="startBtn">Click to Enter Cave</button>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" style="display:none;">
+        <span class="label">Pos:</span> <span id="hud-pos">0, 0, 0</span><br>
+        <span class="label">FPS:</span> <span id="hud-fps">0</span><br>
+        <span class="label">Mode:</span> <span id="hud-mode">Walk</span>
+    </div>
+
+    <!-- Crosshair -->
+    <svg id="crosshair" width="20" height="20" style="display:none;">
+        <circle cx="10" cy="10" r="3" stroke="#aaa" stroke-width="1" fill="none"/>
+        <line x1="10" y1="3" x2="10" y2="7" stroke="#aaa" stroke-width="1"/>
+        <line x1="10" y1="13" x2="10" y2="17" stroke="#aaa" stroke-width="1"/>
+        <line x1="3" y1="10" x2="7" y2="10" stroke="#aaa" stroke-width="1"/>
+        <line x1="13" y1="10" x2="17" y2="10" stroke="#aaa" stroke-width="1"/>
+    </svg>
+
+    <!-- Toolbar -->
+    <div id="toolbar" style="display:none;">
+        <button id="btn-wireframe">Wireframe</button>
+        <button id="btn-flashlight">Flashlight</button>
+        <button id="btn-ambient" class="active">Ambient+</button>
+        <button id="btn-noclip">Noclip</button>
+    </div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading cave mesh...</div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // ─── Scene setup ───
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050508);
+        scene.fog = new THREE.FogExp2(0x050508, 0.08);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 200);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        document.body.appendChild(renderer.domElement);
+
+        // ─── Lighting ───
+        // Ambient lighting (default ON, bright enough to see the cave)
+        const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambient);
+
+        // Flashlight (attached to camera, default OFF)
+        const flashlight = new THREE.SpotLight(0xffeedd, 3.0, 30, Math.PI / 5, 0.4, 1.5);
+        flashlight.castShadow = true;
+        flashlight.shadow.mapSize.set(1024, 1024);
+        flashlight.visible = false;
+        camera.add(flashlight);
+        camera.add(flashlight.target);
+        flashlight.position.set(0, 0, 0);
+        flashlight.target.position.set(0, 0, -1);
+        scene.add(camera);
+
+        // Subtle fill light from below (simulates reflected light)
+        const fillLight = new THREE.PointLight(0x334455, 0.1, 15);
+        fillLight.position.set(0, -2, 0);
+        camera.add(fillLight);
+
+        // ─── Controls ───
+        const controls = new PointerLockControls(camera, document.body);
+
+        const blocker = document.getElementById('blocker');
+        const hud = document.getElementById('hud');
+        const crosshair = document.getElementById('crosshair');
+        const toolbar = document.getElementById('toolbar');
+
+        document.getElementById('startBtn').addEventListener('click', () => {
+            controls.lock();
+        });
+
+        controls.addEventListener('lock', () => {
+            blocker.style.display = 'none';
+            hud.style.display = 'block';
+            crosshair.style.display = 'block';
+            toolbar.style.display = 'flex';
+        });
+
+        controls.addEventListener('unlock', () => {
+            blocker.style.display = 'flex';
+            hud.style.display = 'none';
+            crosshair.style.display = 'none';
+            toolbar.style.display = 'none';
+        });
+
+        // ─── Physics constants ───
+        const PLAYER_HEIGHT = 1.6;       // Eye height above ground (meters)
+        const PLAYER_RADIUS = 0.3;       // Collision radius for wall checks
+        const GRAVITY = 9.8;             // m/s²
+        const JUMP_VELOCITY = 4.0;       // m/s upward
+        const SPEED = 2.0;
+        const SPRINT_MULT = 2.5;
+        const DAMPING = 8.0;
+        const WALL_PUSH = 0.05;          // Push-back distance from walls
+
+        // ─── Movement state ───
+        const moveState = { forward: false, backward: false, left: false, right: false, sprint: false, jump: false };
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        let noclip = false;
+        let onGround = false;
+        let verticalVelocity = 0;
+
+        // ─── Raycasters for physics ───
+        const downRay = new THREE.Raycaster();
+        const wallRays = [];  // Created per-frame in movement direction
+        const hudMode = document.getElementById('hud-mode');
+
+        document.addEventListener('keydown', (e) => {
+            switch (e.code) {
+                case 'KeyW': moveState.forward = true; break;
+                case 'KeyS': moveState.backward = true; break;
+                case 'KeyA': moveState.left = true; break;
+                case 'KeyD': moveState.right = true; break;
+                case 'Space': moveState.jump = true; e.preventDefault(); break;
+                case 'ShiftLeft': case 'ShiftRight': moveState.sprint = true; break;
+                case 'KeyF': toggleFlashlight(); break;
+                case 'KeyV': toggleNoclip(); break;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            switch (e.code) {
+                case 'KeyW': moveState.forward = false; break;
+                case 'KeyS': moveState.backward = false; break;
+                case 'KeyA': moveState.left = false; break;
+                case 'KeyD': moveState.right = false; break;
+                case 'Space': moveState.jump = false; break;
+                case 'ShiftLeft': case 'ShiftRight': moveState.sprint = false; break;
+            }
+        });
+
+        function toggleNoclip() {
+            noclip = !noclip;
+            verticalVelocity = 0;
+            hudMode.textContent = noclip ? 'Noclip' : 'Walk';
+            document.getElementById('btn-noclip').classList.toggle('active', noclip);
+        }
+
+        // ─── Flashlight toggle ───
+        let flashlightOn = false;
+        function toggleFlashlight() {
+            flashlightOn = !flashlightOn;
+            flashlight.visible = flashlightOn;
+            document.getElementById('btn-flashlight').classList.toggle('active', flashlightOn);
+        }
+
+        // ─── Toolbar ───
+        let meshes = [];
+
+        document.getElementById('btn-wireframe').addEventListener('click', function() {
+            this.classList.toggle('active');
+            const wire = this.classList.contains('active');
+            meshes.forEach(m => { m.material.wireframe = wire; });
+        });
+
+        document.getElementById('btn-flashlight').addEventListener('click', toggleFlashlight);
+
+        document.getElementById('btn-ambient').addEventListener('click', function() {
+            this.classList.toggle('active');
+            ambient.intensity = this.classList.contains('active') ? 0.8 : 0.1;
+        });
+
+        document.getElementById('btn-noclip').addEventListener('click', function() {
+            toggleNoclip();
+            this.classList.toggle('active', noclip);
+        });
+
+        // ─── Spawn data ───
+        let spawnData = null;
+        const BASE_URL = window.location.origin + '/media/reconstruction/';
+
+        async function loadSpawnData() {
+            try {
+                const resp = await fetch(BASE_URL + 'spawn.json');
+                if (resp.ok) {
+                    spawnData = await resp.json();
+                    console.log('Spawn data loaded:', spawnData.spawn);
+                }
+            } catch (e) {
+                console.warn('No spawn.json found, using mesh center');
+            }
+        }
+
+        /**
+         * Convert a SLAM position [x, y, z] (Z-up) to Three.js (Y-up).
+         * SLAM: X=right, Y=forward, Z=up → Three.js: X=right, Y=up, Z=-forward
+         */
+        function slamToThreePos(pos) {
+            return new THREE.Vector3(pos[0], pos[2], -pos[1]);
+        }
+
+        /**
+         * Convert a SLAM quaternion [qx, qy, qz, qw] (Z-up) to Three.js (Y-up).
+         * Apply the same -90° X rotation to the quaternion.
+         */
+        function slamToThreeQuat(orient) {
+            const qSlam = new THREE.Quaternion(orient[0], orient[1], orient[2], orient[3]);
+            // Rotation that converts Z-up to Y-up: -90° around X
+            const coordSwap = new THREE.Quaternion().setFromAxisAngle(
+                new THREE.Vector3(1, 0, 0), -Math.PI / 2
+            );
+            return coordSwap.multiply(qSlam);
+        }
+
+        // ─── Load cave mesh ───
+        const loader = new GLTFLoader();
+        let currentModel = null;
+        let collisionMeshes = [];  // Separate list for raycasting (world-space meshes)
+        let fallbackFloorY = 0;   // Invisible floor for gaps in the mesh
+
+        const meshSelect = document.getElementById('meshSelect');
+        meshSelect.addEventListener('change', () => {
+            if (currentModel) {
+                scene.remove(currentModel);
+                meshes.length = 0;
+                collisionMeshes.length = 0;
+            }
+            const url = BASE_URL + meshSelect.value;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loading').innerHTML = '<div class="spinner"></div><div>Loading cave mesh...</div>';
+            loadCave(url).then(() => {
+                document.getElementById('loading').style.display = 'none';
+            }).catch(err => {
+                document.getElementById('loading').innerHTML = `<div style="color: #f66">Failed: ${err.message}</div>`;
+            });
+        });
+
+        function loadCave(url) {
+            return new Promise((resolve, reject) => {
+                loader.load(url, (gltf) => {
+                    const model = gltf.scene;
+
+                    // Override materials for cave look
+                    model.traverse((child) => {
+                        if (child.isMesh) {
+                            meshes.push(child);
+                            child.castShadow = true;
+                            child.receiveShadow = true;
+
+                            if (child.material) {
+                                child.material.roughness = 0.85;
+                                child.material.metalness = 0.05;
+                                child.material.side = THREE.DoubleSide;
+                            }
+                        }
+                    });
+
+                    // Rotate from SLAM Z-up to Three.js Y-up
+                    model.rotation.x = -Math.PI / 2;
+                    model.updateMatrixWorld(true);
+
+                    scene.add(model);
+                    currentModel = model;
+
+                    // Build collision mesh list (needs world matrices updated)
+                    collisionMeshes.length = 0;
+                    model.traverse((child) => {
+                        if (child.isMesh) collisionMeshes.push(child);
+                    });
+
+                    // Position camera
+                    const box = new THREE.Box3().setFromObject(model);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+
+                    // Set invisible fallback floor slightly below the mesh bottom
+                    fallbackFloorY = box.min.y - 0.5;
+
+                    if (spawnData) {
+                        // Use first keyframe position (converted from SLAM coords)
+                        const spawnPos = slamToThreePos(spawnData.spawn.position);
+                        camera.position.copy(spawnPos);
+
+                        // Apply spawn orientation
+                        const spawnQuat = slamToThreeQuat(spawnData.spawn.orientation);
+                        const euler = new THREE.Euler().setFromQuaternion(spawnQuat, 'YXZ');
+                        camera.rotation.set(euler.x, euler.y, 0, 'YXZ');
+
+                        // Snap to floor inside the cave: raycast down from spawn
+                        const floorY = findFloor(camera.position);
+                        if (floorY !== null) {
+                            camera.position.y = floorY + PLAYER_HEIGHT;
+                        }
+                        // Initialize grounded position
+                        lastGroundedPos.copy(camera.position);
+                        hasGroundedPos = true;
+                        onGround = true;
+                        verticalVelocity = 0;
+
+                        console.log(`Spawned at keyframe 0: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
+                    } else {
+                        // No spawn data — place at center of mesh
+                        camera.position.copy(center);
+                        const floorY = findFloor(camera.position);
+                        if (floorY !== null) {
+                            camera.position.y = floorY + PLAYER_HEIGHT;
+                        }
+                        lastGroundedPos.copy(camera.position);
+                        hasGroundedPos = true;
+                        onGround = true;
+                        verticalVelocity = 0;
+                    }
+
+                    resolve({ center, size });
+                }, undefined, reject);
+            });
+        }
+
+        // Load spawn data first, then load the cave
+        loadSpawnData().then(() => {
+            const initialUrl = BASE_URL + meshSelect.value;
+            return loadCave(initialUrl);
+        })
+            .then(({ center, size }) => {
+                document.getElementById('loading').style.display = 'none';
+                console.log(`Cave loaded: center=(${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}), size=(${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)})`);
+            })
+            .catch(err => {
+                document.getElementById('loading').innerHTML =
+                    `<div style="color: #f66">Failed to load cave mesh.<br>${err.message}</div>`;
+            });
+
+        // ─── Physics helpers ───
+        const _rayOrigin = new THREE.Vector3();
+        const _rayDir = new THREE.Vector3();
+        const lastGroundedPos = new THREE.Vector3();
+        let hasGroundedPos = false;
+        const MAX_FALL_DISTANCE = 10;  // Teleport back after falling this far
+
+        /**
+         * Cast a ray downward from the player's feet to find the floor.
+         * For a cave (enclosed mesh), we cast from the player's feet position
+         * downward — NOT from above, which would hit the ceiling first.
+         * Returns fallbackFloorY when no mesh surface is found (gaps in LiDAR).
+         */
+        function findFloor(pos) {
+            if (collisionMeshes.length === 0) return fallbackFloorY;
+            // Cast from feet level (eye pos minus player height, plus small offset)
+            _rayOrigin.set(pos.x, pos.y - PLAYER_HEIGHT + 0.3, pos.z);
+            _rayDir.set(0, -1, 0);
+            downRay.set(_rayOrigin, _rayDir);
+            downRay.far = MAX_FALL_DISTANCE;
+            const hits = downRay.intersectObjects(collisionMeshes, false);
+            if (hits.length > 0) return hits[0].point.y;
+            // No mesh below — use invisible fallback floor
+            return fallbackFloorY;
+        }
+
+        /**
+         * Check for wall collisions in a given horizontal direction.
+         * Returns true if movement is blocked.
+         */
+        function checkWallCollision(pos, moveDir) {
+            if (collisionMeshes.length === 0) return false;
+            // Cast rays at multiple heights (feet, waist, head)
+            const heights = [0.2, PLAYER_HEIGHT * 0.5, PLAYER_HEIGHT * 0.9];
+            const ray = new THREE.Raycaster();
+            ray.far = PLAYER_RADIUS + 0.1;
+
+            for (const h of heights) {
+                _rayOrigin.set(pos.x, pos.y - PLAYER_HEIGHT + h, pos.z);
+                ray.set(_rayOrigin, moveDir);
+                const hits = ray.intersectObjects(collisionMeshes, false);
+                if (hits.length > 0 && hits[0].distance < PLAYER_RADIUS) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // ─── FPS counter ───
+        let frameCount = 0, lastFpsTime = 0;
+        const hudPos = document.getElementById('hud-pos');
+        const hudFps = document.getElementById('hud-fps');
+
+        // ─── Animation loop ───
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = Math.min(clock.getDelta(), 0.1);
+
+            if (controls.isLocked) {
+                const speed = SPEED * (moveState.sprint ? SPRINT_MULT : 1.0);
+
+                // ─── Horizontal movement direction ───
+                direction.set(0, 0, 0);
+                if (moveState.forward) direction.z -= 1;
+                if (moveState.backward) direction.z += 1;
+                if (moveState.left) direction.x -= 1;
+                if (moveState.right) direction.x += 1;
+
+                if (direction.lengthSq() > 0) {
+                    direction.normalize();
+                    const euler = new THREE.Euler(0, camera.rotation.y, 0, 'YXZ');
+                    direction.applyEuler(euler);
+
+                    velocity.x += direction.x * speed * delta;
+                    velocity.z += direction.z * speed * delta;
+                }
+
+                // Horizontal damping
+                velocity.x *= Math.max(0, 1 - DAMPING * delta);
+                velocity.z *= Math.max(0, 1 - DAMPING * delta);
+
+                if (noclip) {
+                    // ─── Noclip mode: free fly, no collision ───
+                    if (moveState.jump) velocity.y += speed * delta;
+                    velocity.y *= Math.max(0, 1 - DAMPING * delta);
+                    camera.position.add(velocity);
+                } else {
+                    // ─── Walk mode: gravity + collisions ───
+
+                    // Wall collision — test X and Z independently
+                    const newPos = camera.position.clone();
+
+                    // Test X movement
+                    if (Math.abs(velocity.x) > 0.001) {
+                        _rayDir.set(Math.sign(velocity.x), 0, 0);
+                        if (!checkWallCollision(camera.position, _rayDir)) {
+                            newPos.x += velocity.x;
+                        } else {
+                            velocity.x = 0;
+                        }
+                    }
+
+                    // Test Z movement
+                    if (Math.abs(velocity.z) > 0.001) {
+                        _rayDir.set(0, 0, Math.sign(velocity.z));
+                        if (!checkWallCollision(newPos, _rayDir)) {
+                            newPos.z += velocity.z;
+                        } else {
+                            velocity.z = 0;
+                        }
+                    }
+
+                    camera.position.x = newPos.x;
+                    camera.position.z = newPos.z;
+
+                    // Gravity
+                    verticalVelocity -= GRAVITY * delta;
+
+                    // Jump
+                    if (moveState.jump && onGround) {
+                        verticalVelocity = JUMP_VELOCITY;
+                        onGround = false;
+                    }
+
+                    camera.position.y += verticalVelocity * delta;
+
+                    // Floor snap (always finds a floor — real mesh or fallback)
+                    const floorY = findFloor(camera.position);
+                    const targetY = floorY + PLAYER_HEIGHT;
+                    if (camera.position.y <= targetY) {
+                        camera.position.y = targetY;
+                        verticalVelocity = 0;
+                        onGround = true;
+                    } else {
+                        onGround = false;
+                    }
+
+                    // Ceiling check — prevent going through ceiling
+                    _rayOrigin.copy(camera.position);
+                    _rayDir.set(0, 1, 0);
+                    downRay.set(_rayOrigin, _rayDir);
+                    downRay.far = 0.3;
+                    const ceilHits = downRay.intersectObjects(collisionMeshes, false);
+                    if (ceilHits.length > 0) {
+                        camera.position.y = ceilHits[0].point.y - 0.1;
+                        if (verticalVelocity > 0) verticalVelocity = 0;
+                    }
+                }
+
+                // Update HUD
+                const p = camera.position;
+                hudPos.textContent = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+            }
+
+            // FPS
+            frameCount++;
+            const now = performance.now();
+            if (now - lastFpsTime >= 500) {
+                hudFps.textContent = Math.round(frameCount / ((now - lastFpsTime) / 1000));
+                frameCount = 0;
+                lastFpsTime = now;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // ─── Resize ───
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

@@ -73,6 +73,7 @@ celerybeat.pid
 
 # Node (for frontend)
 node_modules/
+frontend/dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

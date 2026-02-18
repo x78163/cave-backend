@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cave Reconstruction — Side-by-Side Comparison</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+
+        .header {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            background: rgba(26, 26, 46, 0.95); padding: 10px 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid #333;
+        }
+        .header h1 { font-size: 16px; font-weight: 500; }
+        .header .controls { display: flex; gap: 15px; font-size: 13px; }
+        .header .controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
+        .container {
+            display: flex; width: 100vw; height: 100vh; padding-top: 44px;
+        }
+        .panel {
+            flex: 1; position: relative; border-right: 1px solid #333;
+        }
+        .panel:last-child { border-right: none; }
+        .panel canvas { width: 100% !important; height: 100% !important; }
+
+        .panel-label {
+            position: absolute; top: 10px; left: 10px; z-index: 10;
+            background: rgba(0,0,0,0.7); padding: 6px 12px; border-radius: 4px;
+            font-size: 13px;
+        }
+        .panel-label .stat { color: #88a; font-size: 11px; display: block; margin-top: 2px; }
+
+        .instructions {
+            position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%);
+            z-index: 100; background: rgba(0,0,0,0.8); padding: 8px 16px;
+            border-radius: 6px; font-size: 12px; color: #aaa; text-align: center;
+        }
+
+        #loading {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 200; background: rgba(0,0,0,0.9); padding: 30px 50px;
+            border-radius: 10px; text-align: center;
+        }
+        #loading .spinner {
+            border: 3px solid #333; border-top-color: #7c6; width: 40px; height: 40px;
+            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Cave Reconstruction — Mesh Quality Comparison</h1>
+        <div class="controls">
+            <label><input type="checkbox" id="syncCameras" checked> Sync cameras</label>
+            <label><input type="checkbox" id="wireframe"> Wireframe</label>
+            <label><input type="checkbox" id="showGrid"> Grid</label>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="panel" id="panel-left">
+            <div class="panel-label">
+                <strong>A: Keyframe Merge (Sparse)</strong>
+                <span class="stat" id="stat-left">Loading...</span>
+            </div>
+        </div>
+        <div class="panel" id="panel-right">
+            <div class="panel-label">
+                <strong>B: Dense SLAM PCD</strong>
+                <span class="stat" id="stat-right">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="instructions">
+        Left-click + drag to orbit &nbsp;|&nbsp; Scroll to zoom &nbsp;|&nbsp; Right-click + drag to pan
+    </div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading meshes...</div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // ─── Setup two scenes ───
+        function createScene(container) {
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+
+            // Lighting
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambient);
+
+            const dir1 = new THREE.DirectionalLight(0xffffff, 0.8);
+            dir1.position.set(5, 10, 5);
+            scene.add(dir1);
+
+            const dir2 = new THREE.DirectionalLight(0x8888ff, 0.3);
+            dir2.position.set(-5, -3, -5);
+            scene.add(dir2);
+
+            // Camera
+            const rect = container.getBoundingClientRect();
+            const camera = new THREE.PerspectiveCamera(60, rect.width / rect.height, 0.01, 100);
+            camera.position.set(3, 3, 3);
+
+            // Renderer
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(rect.width, rect.height);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Controls
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.1;
+
+            return { scene, camera, renderer, controls };
+        }
+
+        const left = createScene(document.getElementById('panel-left'));
+        const right = createScene(document.getElementById('panel-right'));
+
+        // ─── Grid ───
+        const gridLeft = new THREE.GridHelper(10, 20, 0x444444, 0x333333);
+        const gridRight = new THREE.GridHelper(10, 20, 0x444444, 0x333333);
+        gridLeft.visible = false;
+        gridRight.visible = false;
+        left.scene.add(gridLeft);
+        right.scene.add(gridRight);
+
+        // ─── Load models ───
+        const loader = new GLTFLoader();
+        let leftMeshes = [];
+        let rightMeshes = [];
+
+        function loadModel(url, sceneObj, statEl, meshArray) {
+            return new Promise((resolve, reject) => {
+                loader.load(url, (gltf) => {
+                    const model = gltf.scene;
+                    sceneObj.scene.add(model);
+
+                    // Gather stats
+                    let totalVerts = 0, totalTris = 0;
+                    model.traverse((child) => {
+                        if (child.isMesh) {
+                            meshArray.push(child);
+                            const geo = child.geometry;
+                            totalVerts += geo.attributes.position.count;
+                            totalTris += geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
+                        }
+                    });
+
+                    statEl.textContent = `${totalVerts.toLocaleString()} vertices, ${Math.round(totalTris).toLocaleString()} triangles`;
+
+                    // Center and fit camera
+                    const box = new THREE.Box3().setFromObject(model);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+
+                    sceneObj.controls.target.copy(center);
+                    sceneObj.camera.position.copy(center).add(
+                        new THREE.Vector3(maxDim, maxDim * 0.8, maxDim)
+                    );
+                    sceneObj.controls.update();
+
+                    resolve();
+                }, undefined, reject);
+            });
+        }
+
+        // Load both models
+        const origin = window.location.origin;
+        Promise.all([
+            loadModel(origin + '/media/reconstruction/keyframe_mesh.glb', left, document.getElementById('stat-left'), leftMeshes),
+            loadModel(origin + '/media/reconstruction/dense_pcd_mesh.glb', right, document.getElementById('stat-right'), rightMeshes),
+        ]).then(() => {
+            document.getElementById('loading').style.display = 'none';
+        }).catch(err => {
+            document.getElementById('loading').innerHTML = `<div style="color: #f66">Error loading models: ${err.message}<br><br>Make sure you run the reconstruction script first,<br>then serve from the cave-backend directory.</div>`;
+        });
+
+        // ─── Sync cameras ───
+        const syncCheckbox = document.getElementById('syncCameras');
+        let isSyncing = false;
+
+        function syncCamera(source, target) {
+            if (!syncCheckbox.checked || isSyncing) return;
+            isSyncing = true;
+            target.camera.position.copy(source.camera.position);
+            target.camera.quaternion.copy(source.camera.quaternion);
+            target.controls.target.copy(source.controls.target);
+            target.controls.update();
+            isSyncing = false;
+        }
+
+        left.controls.addEventListener('change', () => syncCamera(left, right));
+        right.controls.addEventListener('change', () => syncCamera(right, left));
+
+        // ─── Wireframe toggle ───
+        document.getElementById('wireframe').addEventListener('change', (e) => {
+            const wire = e.target.checked;
+            [...leftMeshes, ...rightMeshes].forEach(m => {
+                m.material.wireframe = wire;
+            });
+        });
+
+        // ─── Grid toggle ───
+        document.getElementById('showGrid').addEventListener('change', (e) => {
+            gridLeft.visible = e.target.checked;
+            gridRight.visible = e.target.checked;
+        });
+
+        // ─── Resize ───
+        window.addEventListener('resize', () => {
+            [left, right].forEach(s => {
+                const rect = s.renderer.domElement.parentElement.getBoundingClientRect();
+                s.camera.aspect = rect.width / rect.height;
+                s.camera.updateProjectionMatrix();
+                s.renderer.setSize(rect.width, rect.height);
+            });
+        });
+
+        // ─── Render loop ───
+        function animate() {
+            requestAnimationFrame(animate);
+            left.controls.update();
+            right.controls.update();
+            left.renderer.render(left.scene, left.camera);
+            right.renderer.render(right.scene, right.camera);
+        }
+        animate();
+    </script>
+</body>
+</html>

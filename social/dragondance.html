@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+/* Container */
+.dragon-wrapper {
+  width: 600px;
+  aspect-ratio: 1/1;
+  position: relative;
+}
+
+/* Animated gradient layer */
+.dragon-wrapper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    #a855f7,
+    #3b82f6,
+    #22c55e,
+    #a855f7
+  );
+  background-size: 300% 100%;
+  animation: sweep 6s linear infinite;
+}
+
+/* Mask using your image */
+.dragon {
+  position: absolute;
+  inset: 0;
+  background: black;
+  -webkit-mask: url("your-dragon.png") center/contain no-repeat;
+  mask: url("your-dragon.png") center/contain no-repeat;
+}
+
+/* Animation */
+@keyframes sweep {
+  0% {
+    background-position: 0% 0;
+  }
+  100% {
+    background-position: 300% 0;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="dragon-wrapper">
+  <div class="dragon"></div>
+</div>
+
+</body>
+</html>
