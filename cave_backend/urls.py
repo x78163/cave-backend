@@ -27,6 +27,7 @@ def api_status(request):
             'sync_chunked': '/api/sync/chunked/',
             'reconstruction': '/api/reconstruction/',
             'social': '/api/social/',
+            'routing': '/api/caves/<cave_id>/routes/',
         }
     })
 
@@ -42,6 +43,7 @@ urlpatterns = [
     path('api/sync/', include('sync.urls')),
     path('api/reconstruction/', include('reconstruction.urls')),
     path('api/social/', include('social.urls')),
+    path('api/', include('routing.urls')),
 ]
 
 if settings.DEBUG:

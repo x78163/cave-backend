@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import CaveMapCanvas from './CaveMapCanvas'
+import RouteBuilder from './RouteBuilder'
 
 const POI_TYPES = [
   { value: 'entrance', label: 'Entrance', color: '#4ade80' },
@@ -51,6 +52,9 @@ export default function CaveMapSection({ caveId }) {
   const [availableModes, setAvailableModes] = useState([])
   const [currentMode, setCurrentMode] = useState(null)
   const [photoPickerPoiId, setPhotoPickerPoiId] = useState(null)
+  const [routeOverlay, setRouteOverlay] = useState(null)
+  const [routePlaceMode, setRoutePlaceMode] = useState(false)
+  const [routePlacedPoint, setRoutePlacedPoint] = useState(null)
   const canvasRef = useRef(null)
   const poiListRef = useRef(null)
 
@@ -93,13 +97,36 @@ export default function CaveMapSection({ caveId }) {
     fetchMapData(mode)
   }, [currentMode, fetchMapData])
 
-  // Handle map tap (crosshair mode -> place POI)
+  // Handle map tap (crosshair mode -> place POI or route waypoint)
   const handleMapTap = useCallback((world) => {
-    if (!crosshairMode || !mapData) return
+    if (!mapData) return
+    if (routePlaceMode) {
+      setRoutePlacedPoint({ x: world.x, y: world.y })
+      return
+    }
+    if (!crosshairMode) return
     const level = mapData.levels[selectedLevel]
     setAddPoiCoords({ x: world.x, y: world.y, z: level ? level.z_center : 0 })
     setCrosshairMode(false)
-  }, [crosshairMode, mapData, selectedLevel])
+  }, [crosshairMode, routePlaceMode, mapData, selectedLevel])
+
+  // Route builder callbacks
+  const handleRouteComputed = useCallback((routeData) => {
+    const computed = routeData.computed_route || {}
+    setRouteOverlay({
+      path: computed.path || [],
+      waypoints: routeData.waypoints || [],
+      junctions: computed.junctions || [],
+      instructions: computed.instructions || [],
+      activeInstruction: routeData.activeInstruction ?? null,
+    })
+  }, [])
+
+  const handleRouteClear = useCallback(() => {
+    setRouteOverlay(null)
+    setRoutePlaceMode(false)
+    setRoutePlacedPoint(null)
+  }, [])
 
   // Handle POI tap on map: center + zoom to 1m + highlight
   const handlePoiTap = useCallback((poi) => {
@@ -353,6 +380,21 @@ export default function CaveMapSection({ caveId }) {
           </div>
         )}
 
+        {/* Route builder panel */}
+        <RouteBuilder
+          caveId={caveId}
+          mapData={mapData}
+          mapMode={currentMode}
+          pois={pois}
+          selectedLevel={selectedLevel}
+          onRouteComputed={handleRouteComputed}
+          onRouteClear={handleRouteClear}
+          onEnterPlaceMode={() => setRoutePlaceMode(true)}
+          onExitPlaceMode={() => setRoutePlaceMode(false)}
+          placedPoint={routePlacedPoint}
+          onPlacedPointConsumed={() => setRoutePlacedPoint(null)}
+        />
+
         {/* Canvas */}
         <CaveMapCanvas
           ref={canvasRef}
@@ -362,9 +404,10 @@ export default function CaveMapSection({ caveId }) {
           mode={currentMode}
           onPoiTap={handlePoiTap}
           onMapTap={handleMapTap}
-          crosshairMode={crosshairMode}
+          crosshairMode={crosshairMode || routePlaceMode}
           compact={!fullscreen}
           selectedPoiId={selectedPoi?.id}
+          routeOverlay={routeOverlay}
         />
 
         {/* Add POI dialog */}

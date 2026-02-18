@@ -32,6 +32,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   crosshairMode = false,
   compact = true,
   selectedPoiId = null,
+  routeOverlay = null,       // { path, waypoints, junctions, instructions, activeInstruction }
 }, ref) {
   const canvasRef = useRef(null)
   const containerRef = useRef(null)
@@ -324,6 +325,95 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
         ctx.textAlign = 'center'
         ctx.fillText(`${fromName} \u2194 ${toName}`, tr.x, -tr.y - sz - 5 / vp.scale)
         ctx.restore()
+      }
+    }
+
+    // Draw route overlay (path, waypoints, direction arrows)
+    if (routeOverlay && routeOverlay.path && routeOverlay.path.length >= 2) {
+      const currentLevelIdx = mapData.levels[selectedLevel]?.index
+      const routePathOnLevel = routeOverlay.path.filter(p => p[2] === currentLevelIdx)
+
+      // Route path — thick cyan dashed line
+      if (routePathOnLevel.length >= 2) {
+        ctx.beginPath()
+        ctx.moveTo(routePathOnLevel[0][0], routePathOnLevel[0][1])
+        for (let i = 1; i < routePathOnLevel.length; i++) {
+          ctx.lineTo(routePathOnLevel[i][0], routePathOnLevel[i][1])
+        }
+        ctx.strokeStyle = '#00e5ff'
+        ctx.lineWidth = 3 / vp.scale
+        ctx.setLineDash([8 / vp.scale, 4 / vp.scale])
+        ctx.stroke()
+        ctx.setLineDash([])
+
+        // Direction arrows along the path every ~2m
+        const arrowSpacing = 2.0 // metres
+        let distAcc = 0
+        for (let i = 1; i < routePathOnLevel.length; i++) {
+          const dx = routePathOnLevel[i][0] - routePathOnLevel[i - 1][0]
+          const dy = routePathOnLevel[i][1] - routePathOnLevel[i - 1][1]
+          const segLen = Math.sqrt(dx * dx + dy * dy)
+          distAcc += segLen
+          if (distAcc >= arrowSpacing && segLen > 0) {
+            distAcc = 0
+            const mx = (routePathOnLevel[i][0] + routePathOnLevel[i - 1][0]) / 2
+            const my = (routePathOnLevel[i][1] + routePathOnLevel[i - 1][1]) / 2
+            const angle = Math.atan2(dy, dx)
+            const aSize = 6 / vp.scale
+            ctx.beginPath()
+            ctx.moveTo(mx + aSize * Math.cos(angle), my + aSize * Math.sin(angle))
+            ctx.lineTo(mx + aSize * Math.cos(angle + 2.5), my + aSize * Math.sin(angle + 2.5))
+            ctx.lineTo(mx + aSize * Math.cos(angle - 2.5), my + aSize * Math.sin(angle - 2.5))
+            ctx.closePath()
+            ctx.fillStyle = '#00e5ff'
+            ctx.fill()
+          }
+        }
+      }
+
+      // Waypoint markers — numbered circles
+      if (routeOverlay.waypoints) {
+        for (let i = 0; i < routeOverlay.waypoints.length; i++) {
+          const wp = routeOverlay.waypoints[i]
+          const wpLevel = wp.level ?? 0
+          if (wpLevel !== currentLevelIdx) continue
+          const r = 10 / vp.scale
+          // Circle
+          ctx.beginPath()
+          ctx.arc(wp.slam_x, wp.slam_y, r, 0, Math.PI * 2)
+          ctx.fillStyle = '#00e5ff'
+          ctx.fill()
+          ctx.strokeStyle = '#0a0a12'
+          ctx.lineWidth = 2 / vp.scale
+          ctx.stroke()
+          // Number
+          ctx.save()
+          ctx.scale(1, -1)
+          ctx.fillStyle = '#0a0a12'
+          ctx.font = `bold ${r * 1.2}px system-ui`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(`${i + 1}`, wp.slam_x, -wp.slam_y)
+          ctx.restore()
+        }
+      }
+
+      // Active instruction highlight (pulsing ring)
+      if (routeOverlay.activeInstruction != null && routeOverlay.instructions) {
+        const inst = routeOverlay.instructions[routeOverlay.activeInstruction]
+        if (inst && (inst.level ?? 0) === currentLevelIdx) {
+          const pulseR = 14 / vp.scale
+          ctx.beginPath()
+          ctx.arc(inst.slam_x, inst.slam_y, pulseR, 0, Math.PI * 2)
+          ctx.strokeStyle = '#ff00c8'
+          ctx.lineWidth = 2.5 / vp.scale
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.arc(inst.slam_x, inst.slam_y, pulseR * 1.5, 0, Math.PI * 2)
+          ctx.strokeStyle = '#ff00c840'
+          ctx.lineWidth = 1.5 / vp.scale
+          ctx.stroke()
+        }
       }
     }
 

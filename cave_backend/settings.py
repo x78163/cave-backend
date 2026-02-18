@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'sync',
     'social',
     'reconstruction',
+    'routing',
 ]
 
 MIDDLEWARE = [
