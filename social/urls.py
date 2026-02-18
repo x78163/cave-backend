@@ -13,6 +13,10 @@ urlpatterns = [
         'caves/<uuid:cave_id>/ratings/<uuid:rating_id>/',
         views.cave_rating_detail, name='cave_rating_detail',
     ),
+    path(
+        'users/<int:user_id>/ratings/',
+        views.user_ratings, name='user_ratings',
+    ),
     # Follows
     path(
         'users/<int:user_id>/follow/',

@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { MarkdownHooks as Markdown } from 'react-markdown'
 import RichTextEditor from '../components/RichTextEditor'
@@ -12,6 +12,9 @@ import { apiFetch } from '../hooks/useApi'
 export default function CaveDetail() {
   const navigate = useNavigate()
   const { caveId } = useParams()
+  const [searchParams] = useSearchParams()
+  const preloadRouteId = searchParams.get('route')
+  const [preloadedRoute, setPreloadedRoute] = useState(null)
   const [cave, setCave] = useState(null)
   const [loading, setLoading] = useState(true)
   const [newComment, setNewComment] = useState('')
@@ -76,6 +79,14 @@ export default function CaveDetail() {
   }
 
   useEffect(() => { fetchCave(); fetchRatings() }, [caveId])
+
+  // Fetch preloaded route from ?route= query param
+  useEffect(() => {
+    if (!preloadRouteId || !caveId) return
+    apiFetch(`/caves/${caveId}/routes/${preloadRouteId}/`)
+      .then(data => setPreloadedRoute(data))
+      .catch(() => setPreloadedRoute(null))
+  }, [preloadRouteId, caveId])
 
   // Fetch cave map data + POIs when overlay is toggled on
   useEffect(() => {
@@ -411,7 +422,7 @@ export default function CaveDetail() {
 
         {/* Cave Map (interactive 2D) */}
         {cave.has_map && (
-          <CaveMapSection caveId={caveId} />
+          <CaveMapSection caveId={caveId} preloadedRoute={preloadedRoute} />
         )}
 
         {/* Equipment note */}

@@ -6,8 +6,9 @@ import Explore from './pages/Explore'
 import Expeditions from './pages/Expeditions'
 import Feed from './pages/Feed'
 
-// Lazy-load CaveDetail — it imports Three.js, Leaflet, TipTap (heavy)
+// Lazy-load heavy pages — they import Three.js, Leaflet, TipTap, etc.
 const CaveDetail = lazy(() => import('./pages/CaveDetail'))
+const Profile = lazy(() => import('./pages/Profile'))
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -65,6 +66,7 @@ function App() {
               <Route path="/caves/:caveId" element={<CaveDetail />} />
               <Route path="/expeditions" element={<Expeditions />} />
               <Route path="/feed" element={<Feed />} />
+              <Route path="/profile" element={<Profile />} />
             </Routes>
           </Suspense>
         </main>

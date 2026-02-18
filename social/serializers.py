@@ -3,13 +3,15 @@ from .models import CaveRating, UserFollow, Activity, Expedition, ExpeditionMemb
 
 
 class CaveRatingSerializer(serializers.ModelSerializer):
+    cave_name = serializers.CharField(source='cave.name', read_only=True)
+
     class Meta:
         model = CaveRating
         fields = [
-            'id', 'cave', 'user', 'rating', 'review_text',
+            'id', 'cave', 'cave_name', 'user', 'rating', 'review_text',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'cave_name', 'created_at', 'updated_at']
 
 
 class UserFollowSerializer(serializers.ModelSerializer):

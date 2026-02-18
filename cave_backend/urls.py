@@ -28,6 +28,9 @@ def api_status(request):
             'reconstruction': '/api/reconstruction/',
             'social': '/api/social/',
             'routing': '/api/caves/<cave_id>/routes/',
+            'user_routes': '/api/users/<user_id>/routes/',
+            'route_export': '/api/caves/<cave_id>/routes/<route_id>/export/',
+            'user_ratings': '/api/social/users/<user_id>/ratings/',
         }
     })
 

@@ -38,7 +38,7 @@ const MODE_ORDER = ['quick', 'standard', 'detailed', 'heatmap', 'edges', 'raw_sl
 // Scale that makes the scale bar show ~1m
 const ONE_METER_SCALE = 80
 
-export default function CaveMapSection({ caveId }) {
+export default function CaveMapSection({ caveId, preloadedRoute }) {
   const [mapData, setMapData] = useState(null)
   const [pois, setPois] = useState([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +55,8 @@ export default function CaveMapSection({ caveId }) {
   const [routeOverlay, setRouteOverlay] = useState(null)
   const [routePlaceMode, setRoutePlaceMode] = useState(false)
   const [routePlacedPoint, setRoutePlacedPoint] = useState(null)
+  const [savedRoutes, setSavedRoutes] = useState([])
+  const [savedRoutesLoading, setSavedRoutesLoading] = useState(false)
   const canvasRef = useRef(null)
   const poiListRef = useRef(null)
 
@@ -90,6 +92,40 @@ export default function CaveMapSection({ caveId }) {
       .then(data => setPois(data.pois || []))
       .catch(() => {})
   }, [caveId])
+
+  // Load preloaded route as overlay
+  useEffect(() => {
+    if (!preloadedRoute) return
+    const computed = preloadedRoute.computed_route || {}
+    setRouteOverlay({
+      path: computed.path || [],
+      waypoints: preloadedRoute.waypoints || [],
+      junctions: computed.junctions || [],
+      instructions: computed.instructions || [],
+      activeInstruction: null,
+    })
+  }, [preloadedRoute])
+
+  // Fetch saved routes for this cave
+  useEffect(() => {
+    setSavedRoutesLoading(true)
+    fetch(`/api/caves/${caveId}/routes/`)
+      .then(res => res.ok ? res.json() : { routes: [] })
+      .then(data => setSavedRoutes(data.routes || []))
+      .catch(() => {})
+      .finally(() => setSavedRoutesLoading(false))
+  }, [caveId])
+
+  const loadSavedRoute = useCallback((route) => {
+    const computed = route.computed_route || {}
+    setRouteOverlay({
+      path: computed.path || [],
+      waypoints: route.waypoints || [],
+      junctions: computed.junctions || [],
+      instructions: computed.instructions || [],
+      activeInstruction: null,
+    })
+  }, [])
 
   // Switch map mode (no viewport reset)
   const switchMode = useCallback((mode) => {
@@ -428,6 +464,44 @@ export default function CaveMapSection({ caveId }) {
           />
         )}
       </div>
+
+      {/* Saved Routes Panel — below the map */}
+      {!fullscreen && savedRoutes.length > 0 && (
+        <div className="mx-4 mb-3">
+          <h3 className="text-white font-semibold text-sm mb-2">
+            Saved Routes ({savedRoutes.length})
+          </h3>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {savedRoutes.map(route => {
+              const computed = route.computed_route || {}
+              return (
+                <button
+                  key={route.id}
+                  onClick={() => loadSavedRoute(route)}
+                  className="flex-shrink-0 cyber-card p-3 text-left hover:border-[var(--cyber-cyan)] transition-all"
+                  style={{ minWidth: '160px' }}
+                >
+                  <div className="text-white text-xs font-semibold truncate">
+                    {route.name || 'Unnamed'}
+                  </div>
+                  <div className="flex gap-2 mt-1">
+                    {computed.total_distance_m != null && (
+                      <span className="text-[var(--cyber-cyan)] text-[10px]">
+                        {computed.total_distance_m.toFixed(1)}m
+                      </span>
+                    )}
+                    {route.waypoints?.length > 0 && (
+                      <span className="text-[var(--cyber-text-dim)] text-[10px]">
+                        {route.waypoints.length} pts
+                      </span>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* POI List Cards — below the map */}
       {!fullscreen && pois.length > 0 && (

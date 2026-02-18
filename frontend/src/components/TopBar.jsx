@@ -5,6 +5,7 @@ const navItems = [
   { path: '/explore', label: 'Explore' },
   { path: '/expeditions', label: 'Expeditions' },
   { path: '/feed', label: 'Feed' },
+  { path: '/profile', label: 'Profile' },
 ]
 
 export default function TopBar() {

@@ -2,9 +2,11 @@
 
 import json
 import logging
+import math
 from pathlib import Path
 
 from django.conf import settings as django_settings
+from django.contrib.auth.models import User
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -13,12 +15,17 @@ from caves.models import Cave
 from mapping.models import PointOfInterest
 
 from .models import CaveRoute
-from .serializers import CaveRouteSerializer
+from .serializers import CaveRouteSerializer, UserCaveRouteSerializer
 from .engine import build_costmaps_from_map_data, route_through_waypoints
 from .junctions import detect_junctions
 from .instructions import generate_instructions
 
 logger = logging.getLogger(__name__)
+
+
+def _get_default_user():
+    """Get default user for route ownership (until auth is implemented)."""
+    return User.objects.filter(is_superuser=False).first()
 
 
 def _load_map_data(cave, mode='heatmap'):
@@ -44,6 +51,46 @@ def _load_spawn_data(cave):
     with open(spawn_path) as f:
         return json.load(f)
 
+
+# ---------------------------------------------------------------------------
+# Cross-cave user route listing
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+def user_routes(request, user_id):
+    """List all routes created by a user across all caves.
+
+    Query params:
+        ?cave=<uuid> — filter by cave
+        ?limit=50 — max results (default 50)
+        ?offset=0 — pagination offset
+    """
+    routes = (
+        CaveRoute.objects.filter(created_by_id=user_id)
+        .select_related('cave')
+    )
+
+    cave_id = request.query_params.get('cave')
+    if cave_id:
+        routes = routes.filter(cave_id=cave_id)
+
+    total = routes.count()
+    limit = int(request.query_params.get('limit', 50))
+    offset = int(request.query_params.get('offset', 0))
+    routes = routes[offset:offset + limit]
+
+    serializer = UserCaveRouteSerializer(routes, many=True)
+    return Response({
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'results': serializer.data,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Route computation
+# ---------------------------------------------------------------------------
 
 @api_view(['POST'])
 def compute_route(request, cave_id):
@@ -179,6 +226,10 @@ def compute_route(request, cave_id):
     })
 
 
+# ---------------------------------------------------------------------------
+# Route CRUD
+# ---------------------------------------------------------------------------
+
 @api_view(['GET', 'POST'])
 def route_list(request, cave_id):
     """List saved routes or save a new route."""
@@ -197,7 +248,8 @@ def route_list(request, cave_id):
         data['cave'] = str(cave.id)
         serializer = CaveRouteSerializer(data=data)
         if serializer.is_valid():
-            serializer.save()
+            default_user = _get_default_user()
+            serializer.save(created_by=default_user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -218,6 +270,130 @@ def route_detail(request, cave_id, route_id):
         route.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+
+# ---------------------------------------------------------------------------
+# Device export (JSON + ROS2 nav_msgs/Path)
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+def route_export_device(request, cave_id, route_id):
+    """Export a route for device navigation.
+
+    Query params:
+        ?format=json (default) — full route with waypoints, path, instructions
+        ?format=ros2 — ROS2 nav_msgs/Path compatible (PoseStamped array)
+    """
+    try:
+        route = CaveRoute.objects.select_related('cave').get(
+            pk=route_id, cave_id=cave_id
+        )
+    except CaveRoute.DoesNotExist:
+        return Response({'error': 'Route not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    export_format = request.query_params.get('format', 'json')
+    computed = route.computed_route or {}
+    path_points = computed.get('path', [])
+
+    if export_format == 'ros2':
+        response_data = _build_ros2_export(route, computed, path_points)
+    else:
+        response_data = _build_json_export(route, computed)
+
+    safe_name = route.name.replace(' ', '_')[:50]
+    suffix = 'ros2' if export_format == 'ros2' else ''
+    filename = f'route_{safe_name}{("." + suffix) if suffix else ""}.json'
+
+    response = Response(response_data)
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _build_json_export(route, computed):
+    """Build standard JSON export with full route data."""
+    return {
+        'route_id': str(route.id),
+        'route_name': route.name,
+        'cave_id': str(route.cave_id),
+        'cave_name': route.cave.name,
+        'format': 'json',
+        'waypoints': route.waypoints,
+        'path': computed.get('path', []),
+        'instructions': computed.get('instructions', []),
+        'segments': computed.get('segments', []),
+        'junctions': computed.get('junctions', []),
+        'stats': {
+            'total_distance_m': computed.get('total_distance_m'),
+            'total_time_s': computed.get('total_time_s'),
+            'speed_kmh': route.speed_kmh,
+            'levels_used': computed.get('levels_used', []),
+        },
+    }
+
+
+def _build_ros2_export(route, computed, path_points):
+    """Build ROS2 nav_msgs/Path compatible export.
+
+    Each path point becomes a geometry_msgs/PoseStamped.
+    Orientation is computed from heading between consecutive points.
+    """
+    poses = []
+    for i, pt in enumerate(path_points):
+        # pt is [x, y, level] from the route engine
+        x = pt[0] if isinstance(pt, list) else pt.get('x', 0.0)
+        y = pt[1] if isinstance(pt, list) else pt.get('y', 0.0)
+        z = 0.0
+
+        # Compute orientation from heading to next point
+        qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0
+        if i < len(path_points) - 1:
+            nx = path_points[i + 1][0] if isinstance(path_points[i + 1], list) else path_points[i + 1].get('x', 0.0)
+            ny = path_points[i + 1][1] if isinstance(path_points[i + 1], list) else path_points[i + 1].get('y', 0.0)
+            yaw = math.atan2(ny - y, nx - x)
+            qz = math.sin(yaw / 2)
+            qw = math.cos(yaw / 2)
+
+        poses.append({
+            'header': {
+                'seq': i,
+                'stamp': {'secs': 0, 'nsecs': 0},
+                'frame_id': 'map',
+            },
+            'pose': {
+                'position': {'x': round(x, 4), 'y': round(y, 4), 'z': z},
+                'orientation': {
+                    'x': round(qx, 6), 'y': round(qy, 6),
+                    'z': round(qz, 6), 'w': round(qw, 6),
+                },
+            },
+        })
+
+    return {
+        'route_id': str(route.id),
+        'route_name': route.name,
+        'cave_id': str(route.cave_id),
+        'cave_name': route.cave.name,
+        'format': 'ros2_nav_msgs_path',
+        'path': {
+            'header': {
+                'stamp': {'secs': 0, 'nsecs': 0},
+                'frame_id': 'map',
+            },
+            'poses': poses,
+        },
+        'waypoints': route.waypoints,
+        'instructions': (route.computed_route or {}).get('instructions', []),
+        'metadata': {
+            'total_distance_m': (route.computed_route or {}).get('total_distance_m'),
+            'total_time_s': (route.computed_route or {}).get('total_time_s'),
+            'speed_kmh': route.speed_kmh,
+            'levels_used': (route.computed_route or {}).get('levels_used', []),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# PDF export
+# ---------------------------------------------------------------------------
 
 @api_view(['GET'])
 def route_export_pdf(request, cave_id, route_id):

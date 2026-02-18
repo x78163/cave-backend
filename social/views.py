@@ -18,6 +18,29 @@ from .serializers import (
 # ── Cave Ratings ──────────────────────────────────────────────
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def user_ratings(request, user_id):
+    """List all ratings by a user across all caves."""
+    ratings = (
+        CaveRating.objects.filter(user_id=user_id)
+        .select_related('cave')
+    )
+
+    total = ratings.count()
+    limit = int(request.query_params.get('limit', 50))
+    offset = int(request.query_params.get('offset', 0))
+    ratings = ratings[offset:offset + limit]
+
+    serializer = CaveRatingSerializer(ratings, many=True)
+    return Response({
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'results': serializer.data,
+    })
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cave_ratings(request, cave_id):
