@@ -31,6 +31,17 @@ def api_status(request):
             'user_routes': '/api/users/<user_id>/routes/',
             'route_export': '/api/caves/<cave_id>/routes/<route_id>/export/',
             'user_ratings': '/api/social/users/<user_id>/ratings/',
+            'posts': '/api/social/posts/',
+            'post_detail': '/api/social/posts/<post_id>/',
+            'post_react': '/api/social/posts/<post_id>/react/',
+            'post_comments': '/api/social/posts/<post_id>/comments/',
+            'grotto_apply': '/api/users/grottos/<grotto_id>/apply/',
+            'grotto_invite': '/api/users/grottos/<grotto_id>/invite/',
+            'auth_register': '/api/users/auth/register/',
+            'auth_login': '/api/users/auth/login/',
+            'auth_refresh': '/api/users/auth/refresh/',
+            'auth_verify': '/api/users/auth/verify/',
+            'me': '/api/users/me/',
         }
     })
 

@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path('resolve-map-url/', views.resolve_map_url, name='resolve_map_url'),
     path('', views.cave_list, name='cave_list'),
     path('<uuid:cave_id>/', views.cave_detail, name='cave_detail'),
     path('<uuid:cave_id>/photos/', views.cave_photo_upload, name='cave_photo_upload'),
@@ -11,4 +12,6 @@ urlpatterns = [
     path('<uuid:cave_id>/permissions/', views.cave_permissions, name='cave_permissions'),
     path('<uuid:cave_id>/share/', views.cave_share, name='cave_share'),
     path('<uuid:cave_id>/map-data/', views.cave_map_data, name='cave_map_data'),
+    path('<uuid:cave_id>/land-owner/', views.cave_land_owner, name='cave_land_owner'),
+    path('<uuid:cave_id>/land-owner/gis-lookup/', views.cave_land_owner_gis_lookup, name='cave_land_owner_gis_lookup'),
 ]

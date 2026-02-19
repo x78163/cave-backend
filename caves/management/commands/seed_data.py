@@ -9,7 +9,6 @@ Usage:  python manage.py seed_data
 """
 
 from django.core.management.base import BaseCommand
-from django.contrib.auth.models import User
 from django.utils import timezone
 from datetime import timedelta
 import random
@@ -21,6 +20,7 @@ from caves.models import (
 from users.models import UserProfile, Grotto, GrottoMembership
 from social.models import (
     CaveRating, UserFollow, Activity, Expedition, ExpeditionMember,
+    Post, PostReaction, PostComment,
 )
 
 
@@ -470,6 +470,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if options['flush']:
             self.stdout.write('Flushing existing data...')
+            PostComment.objects.all().delete()
+            PostReaction.objects.all().delete()
+            Post.objects.all().delete()
             ExpeditionMember.objects.all().delete()
             Expedition.objects.all().delete()
             Activity.objects.all().delete()
@@ -482,37 +485,29 @@ class Command(BaseCommand):
             Cave.objects.all().delete()
             GrottoMembership.objects.all().delete()
             Grotto.objects.all().delete()
-            UserProfile.objects.all().delete()
-            User.objects.filter(is_superuser=False).delete()
-            # Keep existing superuser if any
+            UserProfile.objects.filter(is_superuser=False).delete()
             self.stdout.write(self.style.WARNING('  Data flushed.'))
 
         # ── Create users ──
         self.stdout.write('Creating users...')
         users = {}
         for u in USERS:
-            user, created = User.objects.get_or_create(
+            user, created = UserProfile.objects.get_or_create(
                 username=u['username'],
                 defaults={
                     'email': u['email'],
                     'is_staff': u.get('is_staff', False),
                     'is_superuser': u.get('is_superuser', False),
+                    'bio': u.get('bio', ''),
+                    'location': u.get('location', ''),
                 },
             )
             if created:
                 user.set_password(PASSWORD)
                 user.save()
-
-            profile, _ = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={
-                    'bio': u.get('bio', ''),
-                    'location': u.get('location', ''),
-                },
-            )
             users[u['username']] = user
-            status = 'created' if created else 'exists'
-            self.stdout.write(f'  {u["username"]} ({status})')
+            user_status = 'created' if created else 'exists'
+            self.stdout.write(f'  {u["username"]} ({user_status})')
 
         # ── Create grotto ──
         self.stdout.write('Creating grotto...')
@@ -703,14 +698,223 @@ class Command(BaseCommand):
                     )
                 self.stdout.write(f'  {exp_data["name"][:50]}... (created)')
 
+        # ── Create posts ──
+        self.stdout.write('Creating posts...')
+        posts_data = [
+            {
+                'author': 'elena_karst',
+                'text': 'Just returned from a 3-day survey in the lower levels of Postojna. Found a previously unmapped side passage — about 200m of pristine phreatic tube. More details coming in our report!',
+                'cave': 'Postojna Cave',
+                'visibility': 'public',
+                'hours_ago': 2,
+            },
+            {
+                'author': 'marco_deepcave',
+                'text': 'Training at depth is going well. 14-hour push to -1400m today — my personal best for a single-day descent. Krubera 2026 push is on track.',
+                'visibility': 'public',
+                'hours_ago': 5,
+            },
+            {
+                'author': 'sarah_mapping',
+                'text': 'New cave-mapper firmware v2.3 is live! Major improvements to point cloud density and IMU drift correction. Testing in Mammoth Cave next week.',
+                'cave': 'Mammoth Cave System',
+                'visibility': 'public',
+                'hours_ago': 8,
+            },
+            {
+                'author': 'jun_aquifer',
+                'text': 'Incredible vis at Dos Ojos today — 80m+ in the fresh layer. Shot some amazing video of the halocline. Will post it once edited.',
+                'cave': 'Cenote Dos Ojos',
+                'visibility': 'public',
+                'hours_ago': 12,
+            },
+            {
+                'author': 'priya_bio',
+                'text': 'Paper accepted! "Novel troglobitic amphipod from the Meghalaya caves" in Journal of Cave Biology. Three years of fieldwork finally published.',
+                'visibility': 'public',
+                'hours_ago': 18,
+            },
+            {
+                'author': 'elena_karst',
+                'text': 'Team meeting tomorrow at 10am to discuss logistics for the Mammoth Cave LiDAR survey. Please review the equipment checklist I shared.',
+                'grotto': True,
+                'visibility': 'group',
+                'hours_ago': 24,
+            },
+            {
+                'author': 'marco_deepcave',
+                'text': 'Anyone else notice the new passage notation system in the cave-mapper update? Much cleaner than the old junction markers. Great work @sarah_mapping!',
+                'visibility': 'public',
+                'hours_ago': 30,
+            },
+            {
+                'author': 'sarah_mapping',
+                'text': 'Comparison: old vs new LiDAR reconstruction pipeline. The Poisson surface is SO much smoother now. Night and day difference.',
+                'visibility': 'public',
+                'hours_ago': 36,
+            },
+            {
+                'author': 'jun_aquifer',
+                'text': 'Safety reminder: always check your gas mixes before cave dives. Had a student bring a wrong-labeled cylinder today. Could have been serious.',
+                'visibility': 'public',
+                'hours_ago': 48,
+            },
+            {
+                'author': 'priya_bio',
+                'text': 'Setting up camera traps in the Waitomo caves to study glowworm behavior. The bioluminescence patterns change with humidity — fascinating!',
+                'cave': 'Waitomo Glowworm Caves',
+                'visibility': 'public',
+                'hours_ago': 60,
+            },
+            {
+                'author': 'elena_karst',
+                'text': 'The Eisriesenwelt ice formations are retreating measurably year over year. Climate change is reaching even the deepest ice caves. We need long-term monitoring data.',
+                'cave': 'Eisriesenwelt',
+                'visibility': 'public',
+                'hours_ago': 72,
+            },
+            {
+                'author': 'marco_deepcave',
+                'text': 'Son Doong expedition photos are finally processed. The underground jungle section is unreal — trees 30m tall with sunlight streaming through the doline.',
+                'cave': 'Son Doong Cave',
+                'visibility': 'public',
+                'hours_ago': 96,
+            },
+            {
+                'author': 'sarah_mapping',
+                'text': 'Equipment list for the upcoming Mammoth Cave survey is finalized. We are bringing 3 cave-mapper units plus a backup. 28 batteries should cover the full week.',
+                'grotto': True,
+                'visibility': 'group',
+                'hours_ago': 120,
+            },
+            {
+                'author': 'jun_aquifer',
+                'text': 'New personal project: mapping every accessible cenote within 50km of Tulum. Started with 12 so far, only 200+ to go...',
+                'visibility': 'followers',
+                'hours_ago': 144,
+            },
+            {
+                'author': 'priya_bio',
+                'text': 'Heading to Lechuguilla next month for a microbiology sampling trip. The extremophile bacteria down there could have implications for astrobiology.',
+                'cave': 'Lechuguilla Cave',
+                'visibility': 'public',
+                'hours_ago': 168,
+            },
+        ]
+
+        created_posts = []
+        for pd in posts_data:
+            author = users.get(pd['author'])
+            if not author:
+                continue
+            cave = caves.get(pd.get('cave')) if pd.get('cave') else None
+            grotto_ref = grotto if pd.get('grotto') else None
+            post, created = Post.objects.get_or_create(
+                author=author,
+                text=pd['text'],
+                defaults={
+                    'cave': cave,
+                    'grotto': grotto_ref,
+                    'visibility': pd['visibility'],
+                    'created_at': now - timedelta(hours=pd['hours_ago']),
+                },
+            )
+            created_posts.append(post)
+        self.stdout.write(f'  {len(created_posts)} posts created')
+
+        # ── Create post reactions ──
+        self.stdout.write('Creating post reactions...')
+        reaction_count = 0
+        # Deterministic reactions based on post index
+        reaction_map = [
+            # (post_index, username, reaction_type)
+            (0, 'marco_deepcave', 'like'), (0, 'sarah_mapping', 'like'),
+            (0, 'priya_bio', 'like'), (0, 'jun_aquifer', 'like'),
+            (1, 'elena_karst', 'like'), (1, 'jun_aquifer', 'like'),
+            (2, 'elena_karst', 'like'), (2, 'marco_deepcave', 'like'),
+            (2, 'jun_aquifer', 'like'), (2, 'priya_bio', 'like'),
+            (3, 'marco_deepcave', 'like'), (3, 'priya_bio', 'like'),
+            (4, 'elena_karst', 'like'), (4, 'marco_deepcave', 'like'),
+            (4, 'sarah_mapping', 'like'), (4, 'jun_aquifer', 'like'),
+            (5, 'sarah_mapping', 'like'), (5, 'marco_deepcave', 'like'),
+            (6, 'sarah_mapping', 'like'), (6, 'elena_karst', 'like'),
+            (7, 'elena_karst', 'like'), (7, 'marco_deepcave', 'like'),
+            (8, 'elena_karst', 'like'), (8, 'priya_bio', 'like'),
+            (8, 'marco_deepcave', 'dislike'),
+            (9, 'elena_karst', 'like'), (9, 'jun_aquifer', 'like'),
+            (10, 'priya_bio', 'like'), (10, 'sarah_mapping', 'like'),
+            (11, 'elena_karst', 'like'), (11, 'jun_aquifer', 'like'),
+            (11, 'priya_bio', 'like'),
+            (12, 'elena_karst', 'like'), (12, 'marco_deepcave', 'like'),
+            (14, 'elena_karst', 'like'), (14, 'marco_deepcave', 'like'),
+        ]
+        for post_idx, username, rtype in reaction_map:
+            if post_idx < len(created_posts):
+                _, created = PostReaction.objects.get_or_create(
+                    post=created_posts[post_idx],
+                    user=users[username],
+                    defaults={'reaction_type': rtype},
+                )
+                if created:
+                    reaction_count += 1
+        self.stdout.write(f'  {reaction_count} reactions created')
+
+        # ── Create post comments ──
+        self.stdout.write('Creating post comments...')
+        post_comments_data = [
+            (0, 'marco_deepcave', 'Amazing find! How wide is the new passage?'),
+            (0, 'sarah_mapping', 'Would love to get the cave-mapper in there. Is it accessible with equipment?'),
+            (0, 'elena_karst', '@marco about 3-4m wide, classic phreatic tube. @sarah yes, good walking passage!'),
+            (2, 'marco_deepcave', 'The drift correction is a game changer. My last scan had almost zero loop closure error.'),
+            (2, 'elena_karst', 'Can you share the release notes? I want to update our units before the survey.'),
+            (4, 'jun_aquifer', 'Congrats Priya! Cant wait to read it. Is the new species from the deeper chambers?'),
+            (4, 'priya_bio', 'Thanks! Yes, it was found in the phreatic zone below the main river passage.'),
+            (8, 'elena_karst', 'This is so important. Had a near-miss myself years ago with a mislabeled stage bottle.'),
+            (11, 'priya_bio', 'The scale of those dolines is incredible. Any signs of new species in the jungle?'),
+        ]
+        pc_count = 0
+        for post_idx, username, text in post_comments_data:
+            if post_idx < len(created_posts):
+                _, created = PostComment.objects.get_or_create(
+                    post=created_posts[post_idx],
+                    author=users[username],
+                    text=text,
+                )
+                if created:
+                    pc_count += 1
+        self.stdout.write(f'  {pc_count} post comments created')
+
+        # ── Create pending grotto application ──
+        self.stdout.write('Creating test grotto applicant...')
+        newcaver, created = UserProfile.objects.get_or_create(
+            username='newcaver_test',
+            defaults={
+                'email': 'newcaver@test.io',
+                'bio': 'Beginner caver looking to join a group!',
+                'location': 'Denver, CO',
+            },
+        )
+        if created:
+            newcaver.set_password(PASSWORD)
+            newcaver.save()
+        GrottoMembership.objects.get_or_create(
+            user=newcaver, grotto=grotto,
+            defaults={'status': 'pending_application', 'role': 'member'},
+        )
+        users['newcaver_test'] = newcaver
+        self.stdout.write(f'  newcaver_test ({"created" if created else "exists"})')
+
         # ── Summary ──
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('Seed data complete!'))
-        self.stdout.write(f'  Users:       {User.objects.count()}')
+        self.stdout.write(f'  Users:       {UserProfile.objects.count()}')
         self.stdout.write(f'  Caves:       {Cave.objects.count()}')
         self.stdout.write(f'  Comments:    {CaveComment.objects.count()}')
         self.stdout.write(f'  Ratings:     {CaveRating.objects.count()}')
         self.stdout.write(f'  Follows:     {UserFollow.objects.count()}')
         self.stdout.write(f'  Expeditions: {Expedition.objects.count()}')
+        self.stdout.write(f'  Posts:       {Post.objects.count()}')
+        self.stdout.write(f'  Reactions:   {PostReaction.objects.count()}')
+        self.stdout.write(f'  Post Cmnts:  {PostComment.objects.count()}')
         self.stdout.write(f'  Activities:  {Activity.objects.count()}')
         self.stdout.write(f'\n  All passwords: {PASSWORD}')

@@ -1,114 +1,106 @@
+import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { useApi } from '../hooks/useApi'
+import { useApi, apiFetch } from '../hooks/useApi'
+import PostCard from '../components/PostCard'
+import PostComposer from '../components/PostComposer'
+import useAuthStore from '../stores/authStore'
 
 export default function Home() {
-  const { data: status } = useApi('/status/')
-  const { data: feed } = useApi('/social/feed/?limit=5')
-  const { data: caves } = useApi('/caves/')
+  const { user } = useAuthStore()
+  const [offset, setOffset] = useState(0)
+  const limit = 20
+  const { data, loading, refetch } = useApi(
+    `/social/posts/?limit=${limit}&offset=${offset}`
+  )
+  const posts = data?.results ?? []
+  const total = data?.total ?? 0
 
-  const recentCaves = caves?.caves ?? caves?.results ?? caves ?? []
+  const handleDelete = useCallback(async (post) => {
+    if (!confirm('Delete this post?')) return
+    try {
+      await apiFetch(`/social/posts/${post.id}/`, { method: 'DELETE' })
+      refetch()
+    } catch { /* ignore */ }
+  }, [refetch])
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      {/* Hero */}
-      <div className="text-center mb-10">
-        <h1
-          className="text-4xl font-bold mb-2"
-          style={{ color: 'var(--cyber-cyan)' }}
-        >
-          Cave Backend
-        </h1>
-        <p className="text-[var(--cyber-text-dim)]">
-          Cloud platform for cave mapping, exploration &amp; community
-        </p>
-        {status && (
-          <span
-            className="cyber-badge mt-3"
-            style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
-          >
-            API {status.version} — {status.status}
-          </span>
-        )}
-      </div>
-
-      {/* Quick nav cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-        <Link to="/explore" className="cyber-card p-5 no-underline block text-center">
-          <div className="text-2xl mb-2">🗺️</div>
-          <h3 className="font-semibold text-[var(--cyber-text)]">Explore Caves</h3>
-          <p className="text-sm text-[var(--cyber-text-dim)] mt-1">
-            Browse and search the cave database
-          </p>
-        </Link>
-        <Link to="/expeditions" className="cyber-card p-5 no-underline block text-center">
-          <div className="text-2xl mb-2">⛏️</div>
-          <h3 className="font-semibold text-[var(--cyber-text)]">Expeditions</h3>
-          <p className="text-sm text-[var(--cyber-text-dim)] mt-1">
-            Plan group caving trips
-          </p>
-        </Link>
-        <Link to="/feed" className="cyber-card p-5 no-underline block text-center">
-          <div className="text-2xl mb-2">📡</div>
-          <h3 className="font-semibold text-[var(--cyber-text)]">Activity Feed</h3>
-          <p className="text-sm text-[var(--cyber-text-dim)] mt-1">
-            See what the community is up to
-          </p>
-        </Link>
-      </div>
-
-      {/* Recent caves */}
-      {recentCaves.length > 0 && (
-        <section className="mb-10">
-          <h2 className="text-lg font-semibold mb-4">Recent Caves</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {recentCaves.slice(0, 6).map(cave => (
-              <Link
-                key={cave.id}
-                to={`/caves/${cave.id}`}
-                className="cyber-card p-4 no-underline block"
-              >
-                <h3 className="font-semibold text-[var(--cyber-text)]">{cave.name}</h3>
-                <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
-                  {cave.region && `${cave.region}, `}{cave.country || 'Unknown location'}
-                </p>
-                <div className="flex gap-3 mt-2 text-xs text-[var(--cyber-text-dim)]">
-                  {cave.total_length && <span>{cave.total_length}m</span>}
-                  {cave.photo_count > 0 && <span>{cave.photo_count} photos</span>}
-                  {cave.rating_count > 0 && (
-                    <span>★ {Number(cave.average_rating).toFixed(1)}</span>
-                  )}
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Recent activity */}
-      {feed?.results?.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold mb-4">Recent Activity</h2>
-          <div className="space-y-2">
-            {feed.results.map(activity => (
-              <div
-                key={activity.id}
-                className="cyber-card p-3 flex items-center gap-3"
-              >
-                <span className="text-sm">{activity.message}</span>
-                <span className="ml-auto text-xs text-[var(--cyber-text-dim)]">
-                  {new Date(activity.created_at).toLocaleDateString()}
-                </span>
-              </div>
-            ))}
-          </div>
-          <Link
-            to="/feed"
-            className="inline-block mt-3 text-sm no-underline"
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      {/* Compact hero */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1
+            className="text-2xl font-bold"
             style={{ color: 'var(--cyber-cyan)' }}
           >
-            View all activity →
+            Cave Backend
+          </h1>
+          <p className="text-sm text-[var(--cyber-text-dim)]">
+            Your caving community feed
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Link
+            to="/explore"
+            className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs no-underline"
+            style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
+          >
+            Explore
           </Link>
-        </section>
+          <Link
+            to="/groups"
+            className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs no-underline"
+            style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
+          >
+            Groups
+          </Link>
+        </div>
+      </div>
+
+      {/* Post composer */}
+      <PostComposer onPostCreated={refetch} />
+
+      {/* Feed */}
+      {loading ? (
+        <p className="text-center text-[var(--cyber-text-dim)] py-12">Loading feed...</p>
+      ) : posts.length === 0 ? (
+        <p className="text-center text-[var(--cyber-text-dim)] py-12">
+          No posts yet. Follow some users or create a post!
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {posts.map(post => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUserId={user?.id}
+              onReact={refetch}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {total > limit && (
+        <div className="flex justify-center gap-4 mt-6">
+          <button
+            className="cyber-btn cyber-btn-ghost px-4 py-2 text-sm"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - limit))}
+          >
+            Previous
+          </button>
+          <span className="text-sm text-[var(--cyber-text-dim)] flex items-center">
+            {offset + 1}–{Math.min(offset + limit, total)} of {total}
+          </span>
+          <button
+            className="cyber-btn cyber-btn-ghost px-4 py-2 text-sm"
+            disabled={offset + limit >= total}
+            onClick={() => setOffset(offset + limit)}
+          >
+            Next
+          </button>
+        </div>
       )}
     </div>
   )

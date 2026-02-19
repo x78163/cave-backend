@@ -1,31 +1,33 @@
 import { useState, useEffect, useCallback } from 'react'
-
-const BASE = '/api'
+import api from '../services/api'
 
 export async function apiFetch(path, options = {}) {
-  const url = path.startsWith('http') ? path : `${BASE}${path}`
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`${res.status}: ${body}`)
+  const { method = 'GET', body, headers, ...rest } = options
+  const config = { method, url: path, headers, ...rest }
+  if (body) {
+    if (body instanceof FormData) {
+      config.data = body
+    } else if (typeof body === 'string') {
+      config.data = JSON.parse(body)
+    } else {
+      config.data = body
+    }
   }
-  if (res.status === 204) return null
-  return res.json()
+  const res = await api(config)
+  return res.data
 }
 
 export function useApi(path) {
   const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!!path)
   const [error, setError] = useState(null)
 
   const refetch = useCallback(() => {
+    if (!path) { setLoading(false); return }
     setLoading(true)
     setError(null)
-    apiFetch(path)
-      .then(setData)
+    api.get(path)
+      .then((res) => setData(res.data))
       .catch(setError)
       .finally(() => setLoading(false))
   }, [path])

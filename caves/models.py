@@ -119,6 +119,99 @@ class Cave(models.Model):
         return self.latitude is not None and self.longitude is not None
 
 
+class LandOwner(models.Model):
+    """
+    Physical land owner / contact information for a cave property.
+    Contact details can be public (commercial caves) or private (private land).
+    """
+
+    class ContactVisibility(models.TextChoices):
+        PUBLIC = 'public', 'Public'
+        PRIVATE = 'private', 'Private (on request)'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cave = models.OneToOneField(Cave, on_delete=models.CASCADE, related_name='land_owner')
+
+    # Owner identity
+    owner_name = models.CharField(max_length=300, blank=True, default='')
+    organization = models.CharField(
+        max_length=300, blank=True, default='',
+        help_text='Business name for commercial caves',
+    )
+
+    # Contact info (controlled by visibility)
+    phone = models.CharField(max_length=50, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    address = models.TextField(blank=True, default='')
+    website = models.URLField(blank=True, default='')
+
+    # Privacy
+    contact_visibility = models.CharField(
+        max_length=10, choices=ContactVisibility.choices,
+        default=ContactVisibility.PRIVATE,
+    )
+    notes = models.TextField(
+        blank=True, default='',
+        help_text='Internal notes about contacting the owner',
+    )
+
+    # GIS visibility toggle — cave entry creator can mute tier-2 fields
+    # (owner name, address, acreage, appraised value, class, type, sale date)
+    # TPAD link, GIS Map link, and polygon boundary always remain visible.
+    gis_fields_visible = models.BooleanField(
+        default=True,
+        help_text='Show GIS parcel details (owner, address, acreage, etc.). '
+                  'TPAD link and polygon boundary always visible.',
+    )
+
+    # GIS parcel data (auto-filled from TN GIS)
+    parcel_id = models.CharField(max_length=100, blank=True, default='')
+    parcel_address = models.CharField(max_length=500, blank=True, default='')
+    parcel_acreage = models.FloatField(null=True, blank=True)
+    parcel_land_use = models.CharField(max_length=200, blank=True, default='')
+    parcel_appraised_value = models.FloatField(null=True, blank=True)
+    gis_county = models.CharField(max_length=100, blank=True, default='')
+    gis_source = models.CharField(
+        max_length=50, blank=True, default='',
+        help_text='Which GIS service provided this data',
+    )
+    gis_lookup_at = models.DateTimeField(null=True, blank=True)
+    tpad_link = models.URLField(blank=True, default='', help_text='Link to TN Property Assessment Data')
+    parcel_geometry = models.JSONField(
+        null=True, blank=True, default=None,
+        help_text='Parcel boundary polygon rings as [[lat, lon], ...] arrays',
+    )
+
+    # TPAD-enriched fields
+    property_class = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text='Property classification (Farm, Residential, Commercial, etc.)',
+    )
+    property_type = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text='Interpreted property type description',
+    )
+    last_sale_date = models.CharField(
+        max_length=20, blank=True, default='',
+        help_text='Date of last sale (from TPAD)',
+    )
+    gis_map_link = models.URLField(
+        blank=True, default='',
+        help_text='Link to TN GIS assessment map',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Land Owner'
+        verbose_name_plural = 'Land Owners'
+
+    def __str__(self):
+        name = self.owner_name or self.organization or 'Unknown'
+        return f"Land owner for {self.cave.name}: {name}"
+
+
 class CavePhoto(models.Model):
     """Photos associated with a cave — mirrors cave-server exactly + device tracking."""
 

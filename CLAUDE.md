@@ -4,7 +4,7 @@
 
 **Cave Backend** is a cloud-hosted Django web service that provides synchronization, social media, and computational services for the Cave Mapper ecosystem. It acts as the central repository and processing hub for cave mapping data collected by portable Orange Pi-based cave-mapper devices.
 
-**Current Status**: Project initialization - continuity documents created, ready for development
+**Current Status**: Active development — full Django backend + React frontend operational with cave CRUD, social features, 2D/3D map viewing, GIS parcel integration, and user auth
 
 ---
 
@@ -588,17 +588,93 @@ This project includes:
 
 ## Current Session Context
 
-**Date**: 2026-02-16
-**Status**: Project initialization
-**Next Steps**:
-1. Create Django project structure
-2. Set up PostgreSQL database
-3. Implement Google OAuth
-4. Create initial models (User, Device, Cave)
-5. Build sync API endpoints
-6. Test with mock cave-server client
+**Date**: 2026-02-19
+**Status**: Active development — core features operational
+
+### What's Built
+
+**Backend (Django)**:
+- Full Cave CRUD with UUID primary keys, visibility levels, collaboration settings
+- LandOwner model with TN GIS parcel integration (ArcGIS + TPAD API)
+- Three-tier GIS data visibility: always-visible (TPAD link, polygon, GIS Map), mutable (owner name, address, acreage), hidden (contact info)
+- `gis_fields_visible` toggle on LandOwner — cave entry creator controls tier-2 field visibility
+- User auth with registration, login, JWT tokens
+- Social features: comments, ratings/reviews, wiki-style descriptions with revision history, user wall posts
+- Photo upload with caption/tags, camera capture
+- Cave routing system with A* pathfinding
+- Device management and sync infrastructure
+- CSV import tool for bulk cave data entry
+- Universal coordinate parser (decimal, DMS, UTM, MGRS, Google/Apple Maps URLs)
+- Google Maps short URL resolver (server-side redirect following)
+
+**Frontend (React/Vite)**:
+- Cyberpunk-themed UI with dark mode
+- Explore page with searchable cave list + surface map
+- Cave detail page with:
+  - 2D interactive cave map (multi-level, POIs, route overlay)
+  - 3D cave explorer (Three.js point cloud viewer)
+  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay)
+  - Photo gallery with carousel, upload dialog, camera capture
+  - Wiki description editor with rich text (TipTap)
+  - Star ratings and reviews
+  - Property owner section with GIS lookup, visibility toggle, contact info tiers
+  - Inline coordinate editor (accepts any format)
+- Create Cave page with smart coordinate input
+- User profile page with avatar presets, saved routes
+- Login/Register pages
+- Social feed with post composer
+
+**GIS Integration (Tennessee)**:
+- Statewide COMPTROLLER_OLG_LANDUSE ArcGIS service (86/95 counties)
+- County-specific ArcGIS services (Davidson/Nashville)
+- TPAD API for owner name, property class, sale date, GIS map link
+- Parcel boundary polygon rendering on Leaflet maps
+- Property type code interpretation (13 TN codes mapped)
+- Auto-fill on GIS Lookup, auto-clear on coordinate change
+
+**Data**:
+- 14 Tennessee caves seeded from historical survey data
+- Seed data command + CSV import tool
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
+| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink |
+| `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction |
+| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload |
+| `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1300 lines) |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers + parcel polygon |
+| `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
+| `social/views.py` | Wall posts, ratings, activity feed |
+| `users/views.py` | Auth, profile, avatar presets |
+
+### Migrations (caves app)
+- 0001: Initial Cave model
+- 0002: Extended initial fields
+- 0003: LandOwner model
+- 0004: parcel_geometry JSONField
+- 0005: TPAD enriched fields (property_class, property_type, last_sale_date, gis_map_link)
+- 0006: gis_fields_visible boolean
+
+### Future Features (To Be Developed)
+
+**Property Sale Monitoring System**:
+- Goal: Alert caving community when cave properties go on sale for conservation
+- Scale concern: TN has 10k+ known caves; nationwide/international requires careful architecture
+- Approaches: TPAD periodic re-poll, real estate listing APIs, community flagging, tax/foreclosure watch
+- Status: Tabled until cave database grows and Celery infrastructure is mature
+
+**Remaining MVP items**:
+- S3 file storage (currently local media/)
+- Device-to-cloud sync mechanism
+- Grotto memberships and group permissions
+- Shared cave entry ownership
+- "Contact info available on request" → modal message to cave entry owner
 
 **Questions to Resolve**:
 - Exact game engine choice for 3D exploration (deferred to Phase 4)
 - Map stitching algorithm details (deferred to Phase 5)
-- Hosting provider for production (AWS vs NameHero - deferred)
+- Hosting provider for production (AWS vs NameHero — deferred)
+- Property sale monitoring architecture at scale (deferred)

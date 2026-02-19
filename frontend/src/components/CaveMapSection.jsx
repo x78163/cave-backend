@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { apiFetch } from '../hooks/useApi'
 import CaveMapCanvas from './CaveMapCanvas'
 import RouteBuilder from './RouteBuilder'
 
@@ -64,16 +65,13 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
   const fetchMapData = useCallback(async (mode) => {
     try {
       const url = mode
-        ? `/api/caves/${caveId}/map-data/?mode=${mode}`
-        : `/api/caves/${caveId}/map-data/`
-      const res = await fetch(url)
-      if (res.ok) {
-        const data = await res.json()
-        setMapData(data)
-        setAvailableModes(data.available_modes || [])
-        setCurrentMode(data.mode || mode || 'quick')
-        return true
-      }
+        ? `/caves/${caveId}/map-data/?mode=${mode}`
+        : `/caves/${caveId}/map-data/`
+      const data = await apiFetch(url)
+      setMapData(data)
+      setAvailableModes(data.available_modes || [])
+      setCurrentMode(data.mode || mode || 'quick')
+      return true
     } catch { /* ignore */ }
     return false
   }, [caveId])
@@ -87,8 +85,7 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
 
   // Fetch POIs
   useEffect(() => {
-    fetch(`/api/mapping/caves/${caveId}/pois/`)
-      .then(res => res.json())
+    apiFetch(`/mapping/caves/${caveId}/pois/`)
       .then(data => setPois(data.pois || []))
       .catch(() => {})
   }, [caveId])
@@ -109,8 +106,7 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
   // Fetch saved routes for this cave
   useEffect(() => {
     setSavedRoutesLoading(true)
-    fetch(`/api/caves/${caveId}/routes/`)
-      .then(res => res.ok ? res.json() : { routes: [] })
+    apiFetch(`/caves/${caveId}/routes/`)
       .then(data => setSavedRoutes(data.routes || []))
       .catch(() => {})
       .finally(() => setSavedRoutesLoading(false))
@@ -214,10 +210,9 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
   // Submit new POI
   const submitPoi = useCallback(async (poiData) => {
     try {
-      const res = await fetch(`/api/mapping/caves/${caveId}/pois/`, {
+      const newPoi = await apiFetch(`/mapping/caves/${caveId}/pois/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           label: poiData.label,
           poi_type: poiData.poi_type,
           description: poiData.description,
@@ -225,76 +220,61 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
           slam_y: poiData.y,
           slam_z: poiData.z,
           source: 'profile',
-        })
+        }
       })
-      if (res.ok) {
-        const newPoi = await res.json()
-        setPois(prev => [newPoi, ...prev])
-        setAddPoiCoords(null)
-        setSelectedPoi(newPoi)
-      }
-    } catch { /* ignore */ }
+      setPois(prev => [newPoi, ...prev])
+      setAddPoiCoords(null)
+      setSelectedPoi(newPoi)
+    } catch (err) {
+      console.error('Failed to save POI:', err.response?.data || err.message)
+    }
   }, [caveId])
 
   // Update POI (label, description, poi_type)
   const updatePoi = useCallback(async (poiId, updates) => {
     try {
-      const res = await fetch(`/api/mapping/caves/${caveId}/pois/${poiId}/`, {
+      const updated = await apiFetch(`/mapping/caves/${caveId}/pois/${poiId}/`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
+        body: updates,
       })
-      if (res.ok) {
-        const updated = await res.json()
-        setPois(prev => prev.map(p => p.id === poiId ? updated : p))
-        if (selectedPoi?.id === poiId) setSelectedPoi(updated)
-      }
+      setPois(prev => prev.map(p => p.id === poiId ? updated : p))
+      if (selectedPoi?.id === poiId) setSelectedPoi(updated)
     } catch { /* ignore */ }
   }, [caveId, selectedPoi])
 
   // Delete POI
   const deletePoi = useCallback(async (poiId) => {
     try {
-      const res = await fetch(`/api/mapping/caves/${caveId}/pois/${poiId}/`, {
+      await apiFetch(`/mapping/caves/${caveId}/pois/${poiId}/`, {
         method: 'DELETE',
       })
-      if (res.ok) {
-        setPois(prev => prev.filter(p => p.id !== poiId))
-        if (selectedPoi?.id === poiId) setSelectedPoi(null)
-      }
+      setPois(prev => prev.filter(p => p.id !== poiId))
+      if (selectedPoi?.id === poiId) setSelectedPoi(null)
     } catch { /* ignore */ }
   }, [caveId, selectedPoi])
 
   // Attach a cave gallery photo to a POI
   const attachCavePhoto = useCallback(async (poiId, cavePhotoId) => {
     try {
-      const res = await fetch(`/api/mapping/caves/${caveId}/pois/${poiId}/`, {
+      const updated = await apiFetch(`/mapping/caves/${caveId}/pois/${poiId}/`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cave_photo: cavePhotoId, photo_source: 'gallery' }),
+        body: { cave_photo: cavePhotoId, photo_source: 'gallery' },
       })
-      if (res.ok) {
-        const updated = await res.json()
-        setPois(prev => prev.map(p => p.id === poiId ? updated : p))
-        if (selectedPoi?.id === poiId) setSelectedPoi(updated)
-        setPhotoPickerPoiId(null)
-      }
+      setPois(prev => prev.map(p => p.id === poiId ? updated : p))
+      if (selectedPoi?.id === poiId) setSelectedPoi(updated)
+      setPhotoPickerPoiId(null)
     } catch { /* ignore */ }
   }, [caveId, selectedPoi])
 
   // Detach photo from POI
   const detachPoiPhoto = useCallback(async (poiId) => {
     try {
-      const res = await fetch(`/api/mapping/caves/${caveId}/pois/${poiId}/`, {
+      const updated = await apiFetch(`/mapping/caves/${caveId}/pois/${poiId}/`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cave_photo: null, photo_source: '' }),
+        body: { cave_photo: null, photo_source: '' },
       })
-      if (res.ok) {
-        const updated = await res.json()
-        setPois(prev => prev.map(p => p.id === poiId ? updated : p))
-        if (selectedPoi?.id === poiId) setSelectedPoi(updated)
-      }
+      setPois(prev => prev.map(p => p.id === poiId ? updated : p))
+      if (selectedPoi?.id === poiId) setSelectedPoi(updated)
     } catch { /* ignore */ }
   }, [caveId, selectedPoi])
 
@@ -795,8 +775,7 @@ function PhotoPickerModal({ caveId, onSelect, onCancel }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch(`/api/caves/${caveId}/`)
-      .then(res => res.json())
+    apiFetch(`/caves/${caveId}/`)
       .then(data => {
         setPhotos(data.photos || [])
         setLoading(false)

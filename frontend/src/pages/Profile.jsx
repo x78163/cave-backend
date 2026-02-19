@@ -1,9 +1,13 @@
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApi, apiFetch } from '../hooks/useApi'
+import api from '../services/api'
 import StarRating from '../components/StarRating'
-
-const DEFAULT_USER_ID = 2 // elena_karst — first non-admin seed user
+import PostCard from '../components/PostCard'
+import PostComposer from '../components/PostComposer'
+import AvatarDisplay from '../components/AvatarDisplay'
+import useAuthStore from '../stores/authStore'
+import { SPECIALTIES, AVATAR_PRESETS } from '../constants/profileOptions'
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -36,11 +40,49 @@ async function downloadExport(caveId, routeId, format, routeName) {
   URL.revokeObjectURL(url)
 }
 
+// ── Wall Tab ────────────────────────────────────────────────
+
+function WallTab({ userId }) {
+  const { data, loading, refetch } = useApi(`/social/posts/?user=${userId}`)
+  const posts = data?.results ?? []
+
+  const handleDelete = useCallback(async (post) => {
+    if (!confirm('Delete this post?')) return
+    try {
+      await apiFetch(`/social/posts/${post.id}/`, { method: 'DELETE' })
+      refetch()
+    } catch { /* ignore */ }
+  }, [refetch])
+
+  return (
+    <>
+      <PostComposer onPostCreated={refetch} />
+      {loading ? (
+        <p className="text-center text-[var(--cyber-text-dim)] py-12">Loading posts...</p>
+      ) : posts.length === 0 ? (
+        <p className="text-center text-[var(--cyber-text-dim)] py-12">No posts yet</p>
+      ) : (
+        <div className="space-y-4">
+          {posts.map(post => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUserId={userId}
+              onReact={refetch}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 // ── Routes Tab ───────────────────────────────────────────────
 
-function RoutesTab() {
+function RoutesTab({ userId }) {
   const [search, setSearch] = useState('')
-  const { data, loading, refetch } = useApi(`/users/${DEFAULT_USER_ID}/routes/`)
+  const { data, loading, refetch } = useApi(`/users/${userId}/routes/`)
   const routes = data?.results ?? []
   const navigate = useNavigate()
 
@@ -152,10 +194,10 @@ function RoutesTab() {
 
 // ── Expeditions Tab ──────────────────────────────────────────
 
-function ExpeditionsTab() {
+function ExpeditionsTab({ userId }) {
   const { data, loading } = useApi('/social/expeditions/')
   const expeditions = (Array.isArray(data) ? data : data?.results ?? [])
-    .filter(e => e.organizer === DEFAULT_USER_ID)
+    .filter(e => e.organizer === userId)
 
   if (loading) {
     return <p className="text-center text-[var(--cyber-text-dim)] py-12">Loading expeditions...</p>
@@ -200,8 +242,8 @@ function ExpeditionsTab() {
 
 // ── Ratings Tab ──────────────────────────────────────────────
 
-function RatingsTab() {
-  const { data, loading } = useApi(`/social/users/${DEFAULT_USER_ID}/ratings/`)
+function RatingsTab({ userId }) {
+  const { data, loading } = useApi(`/social/users/${userId}/ratings/`)
   const ratings = data?.results ?? []
 
   if (loading) {
@@ -236,42 +278,271 @@ function RatingsTab() {
   )
 }
 
+// ── Profile Edit Panel ───────────────────────────────────────
+
+function ProfileEditPanel({ user, onSave, onCancel }) {
+  const [firstName, setFirstName] = useState(user?.first_name || '')
+  const [lastName, setLastName] = useState(user?.last_name || '')
+  const [bio, setBio] = useState(user?.bio || '')
+  const [location, setLocation] = useState(user?.location || '')
+  const [avatarPreset, setAvatarPreset] = useState(user?.avatar_preset || '')
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState(null)
+  const [selectedSpecialties, setSelectedSpecialties] = useState(user?.specialties || [])
+  const [saving, setSaving] = useState(false)
+
+  const handleAvatarUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setAvatarFile(file)
+      setAvatarPreset('')
+      setAvatarPreview(URL.createObjectURL(file))
+    }
+  }
+
+  const handlePresetSelect = (key) => {
+    setAvatarPreset(key)
+    setAvatarFile(null)
+    if (avatarPreview) {
+      URL.revokeObjectURL(avatarPreview)
+      setAvatarPreview(null)
+    }
+  }
+
+  const toggleSpecialty = (s) => {
+    setSelectedSpecialties(prev =>
+      prev.includes(s) ? prev.filter(x => x !== s) : prev.length < 10 ? [...prev, s] : prev
+    )
+  }
+
+  const selectedPreset = AVATAR_PRESETS.find(p => p.key === avatarPreset)
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const formData = new FormData()
+      formData.append('first_name', firstName)
+      formData.append('last_name', lastName)
+      formData.append('bio', bio)
+      formData.append('location', location)
+      formData.append('avatar_preset', avatarPreset)
+      formData.append('specialties', JSON.stringify(selectedSpecialties))
+      if (avatarFile) formData.append('avatar', avatarFile)
+
+      await api.patch('/users/me/', formData)
+      await useAuthStore.getState().fetchMe()
+      onSave()
+    } catch (err) {
+      console.error('Profile save failed:', err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="cyber-card p-6 mb-6">
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-lg font-bold" style={{ color: 'var(--cyber-cyan)' }}>Edit Profile</h2>
+        <button onClick={onCancel} className="text-xs text-[var(--cyber-text-dim)] hover:text-[var(--cyber-text)]">
+          Cancel
+        </button>
+      </div>
+
+      {/* Avatar section */}
+      <div className="mb-5">
+        <label className="block text-xs font-medium mb-2" style={{ color: 'var(--cyber-text-dim)' }}>Avatar</label>
+        <div className="flex items-center gap-4 mb-3">
+          <div
+            className="w-16 h-16 rounded-full flex items-center justify-center text-2xl shrink-0"
+            style={{ background: 'var(--cyber-surface)', border: '2px solid var(--cyber-cyan)' }}
+          >
+            {avatarPreview ? (
+              <img src={avatarPreview} alt="preview" className="w-full h-full rounded-full object-cover" />
+            ) : selectedPreset ? (
+              selectedPreset.emoji
+            ) : user?.avatar ? (
+              <img src={user.avatar} alt="avatar" className="w-full h-full rounded-full object-cover" />
+            ) : (
+              <span className="font-bold" style={{ color: 'var(--cyber-cyan)' }}>
+                {(user?.username || '??').split('_').map(w => w[0]?.toUpperCase()).join('').slice(0, 2)}
+              </span>
+            )}
+          </div>
+          <label className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs cursor-pointer">
+            <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+            Upload Photo
+          </label>
+        </div>
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+          {AVATAR_PRESETS.map(p => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => handlePresetSelect(p.key)}
+              className="flex flex-col items-center gap-0.5 p-1.5 rounded-lg transition-colors"
+              style={{
+                background: avatarPreset === p.key ? 'var(--cyber-surface-2)' : 'transparent',
+                border: avatarPreset === p.key ? '1px solid var(--cyber-cyan)' : '1px solid transparent',
+              }}
+            >
+              <span className="text-xl">{p.emoji}</span>
+              <span className="text-[9px]" style={{ color: 'var(--cyber-text-dim)' }}>{p.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Name fields */}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>First Name</label>
+          <input type="text" value={firstName} onChange={e => setFirstName(e.target.value)}
+            className="cyber-input w-full px-3 py-2 text-sm" placeholder="First name" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>Last Name</label>
+          <input type="text" value={lastName} onChange={e => setLastName(e.target.value)}
+            className="cyber-input w-full px-3 py-2 text-sm" placeholder="Last name" />
+        </div>
+      </div>
+
+      {/* Bio */}
+      <div className="mb-3">
+        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>Bio</label>
+        <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3}
+          className="cyber-textarea w-full px-3 py-2 text-sm resize-none" placeholder="Tell us about yourself..." />
+      </div>
+
+      {/* Location */}
+      <div className="mb-4">
+        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>Location</label>
+        <input type="text" value={location} onChange={e => setLocation(e.target.value)}
+          className="cyber-input w-full px-3 py-2 text-sm" placeholder="City, Country (e.g. Ljubljana, Slovenia)" />
+      </div>
+
+      {/* Specialties */}
+      <div className="mb-5">
+        <label className="block text-xs font-medium mb-2" style={{ color: 'var(--cyber-text-dim)' }}>
+          Specialties {selectedSpecialties.length > 0 && `(${selectedSpecialties.length})`}
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {SPECIALTIES.map(s => {
+            const active = selectedSpecialties.includes(s)
+            return (
+              <button key={s} type="button" onClick={() => toggleSpecialty(s)}
+                className="cyber-badge px-3 py-1.5 text-xs cursor-pointer transition-colors"
+                style={{
+                  borderColor: active ? 'var(--cyber-cyan)' : 'var(--cyber-border)',
+                  color: active ? 'var(--cyber-cyan)' : 'var(--cyber-text-dim)',
+                  background: active ? 'rgba(0, 255, 255, 0.08)' : 'transparent',
+                }}>
+                {s}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Save */}
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="cyber-btn cyber-btn-ghost px-4 py-2 text-sm">Cancel</button>
+        <button onClick={handleSave} disabled={saving}
+          className="cyber-btn cyber-btn-cyan px-4 py-2 text-sm disabled:opacity-50">
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Profile Page ─────────────────────────────────────────────
 
 const TABS = [
+  { key: 'wall', label: 'Wall' },
   { key: 'routes', label: 'Routes' },
   { key: 'expeditions', label: 'Expeditions' },
   { key: 'ratings', label: 'Ratings' },
 ]
 
 export default function Profile() {
-  const [activeTab, setActiveTab] = useState('routes')
-  const { data: routeData } = useApi(`/users/${DEFAULT_USER_ID}/routes/?limit=1`)
+  const { user } = useAuthStore()
+  const userId = user?.id
+  const [activeTab, setActiveTab] = useState('wall')
+  const [isEditing, setIsEditing] = useState(false)
+  const { data: routeData } = useApi(userId ? `/users/${userId}/routes/?limit=1` : null)
+  const { data: postsData } = useApi(userId ? `/social/posts/?user=${userId}&limit=1` : null)
+  const { data: followersData } = useApi(userId ? `/social/users/${userId}/followers/` : null)
+  const { data: followingData } = useApi(userId ? `/social/users/${userId}/following/` : null)
   const routeCount = routeData?.total ?? 0
+  const postCount = postsData?.total ?? 0
+  const followerCount = Array.isArray(followersData) ? followersData.length : 0
+  const followingCount = Array.isArray(followingData) ? followingData.length : 0
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      {/* Profile header */}
-      <div className="cyber-card p-6 mb-6">
-        <div className="flex items-center gap-4">
-          <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold"
-            style={{ background: 'var(--cyber-surface)', color: 'var(--cyber-cyan)', border: '2px solid var(--cyber-cyan)' }}
-          >
-            EK
+      {isEditing ? (
+        <ProfileEditPanel
+          user={user}
+          onSave={() => setIsEditing(false)}
+          onCancel={() => setIsEditing(false)}
+        />
+      ) : (
+        <>
+          {/* Profile header */}
+          <div className="cyber-card p-6 mb-6">
+            <div className="flex items-center gap-4">
+              <AvatarDisplay user={user} size="w-16 h-16" textSize="text-2xl" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <h1 className="text-xl font-bold">{user?.username}</h1>
+                  <button
+                    className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs"
+                    onClick={() => setIsEditing(true)}
+                  >
+                    Edit Profile
+                  </button>
+                </div>
+                <p className="text-sm text-[var(--cyber-text-dim)]">{user?.bio || 'No bio yet'}</p>
+                {user?.location && (
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--cyber-text-dim)' }}>{user.location}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Specialties */}
+            {user?.specialties?.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                {user.specialties.map(s => (
+                  <span key={s} className="cyber-badge text-[10px]"
+                    style={{ borderColor: 'var(--cyber-magenta)', color: 'var(--cyber-magenta)' }}>
+                    {s}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="flex flex-wrap gap-6 mt-4 text-sm">
+              <div>
+                <span className="font-semibold text-[var(--cyber-cyan)]">{postCount}</span>{' '}
+                <span className="text-[var(--cyber-text-dim)]">posts</span>
+              </div>
+              <div>
+                <span className="font-semibold text-[var(--cyber-cyan)]">{followerCount}</span>{' '}
+                <span className="text-[var(--cyber-text-dim)]">followers</span>
+              </div>
+              <div>
+                <span className="font-semibold text-[var(--cyber-cyan)]">{followingCount}</span>{' '}
+                <span className="text-[var(--cyber-text-dim)]">following</span>
+              </div>
+              <div>
+                <span className="font-semibold text-[var(--cyber-cyan)]">{routeCount}</span>{' '}
+                <span className="text-[var(--cyber-text-dim)]">routes</span>
+              </div>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold">elena_karst</h1>
-            <p className="text-sm text-[var(--cyber-text-dim)]">Cave researcher & expedition leader</p>
-          </div>
-        </div>
-        <div className="flex gap-6 mt-4 text-sm">
-          <div>
-            <span className="font-semibold text-[var(--cyber-cyan)]">{routeCount}</span>{' '}
-            <span className="text-[var(--cyber-text-dim)]">routes</span>
-          </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6">
@@ -291,9 +562,10 @@ export default function Profile() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'routes' && <RoutesTab />}
-      {activeTab === 'expeditions' && <ExpeditionsTab />}
-      {activeTab === 'ratings' && <RatingsTab />}
+      {activeTab === 'wall' && userId && <WallTab userId={userId} />}
+      {activeTab === 'routes' && userId && <RoutesTab userId={userId} />}
+      {activeTab === 'expeditions' && userId && <ExpeditionsTab userId={userId} />}
+      {activeTab === 'ratings' && userId && <RatingsTab userId={userId} />}
     </div>
   )
 }

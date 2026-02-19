@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { MarkdownHooks as Markdown } from 'react-markdown'
 import RichTextEditor from '../components/RichTextEditor'
 import SurfaceMap from '../components/SurfaceMap'
@@ -8,9 +8,12 @@ import CameraCapture from '../components/CameraCapture'
 import CaveExplorer from '../components/CaveExplorer'
 import StarRating from '../components/StarRating'
 import { apiFetch } from '../hooks/useApi'
+import useAuthStore from '../stores/authStore'
+import parseCoordinates from '../utils/parseCoordinates'
 
 export default function CaveDetail() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
   const { caveId } = useParams()
   const [searchParams] = useSearchParams()
   const preloadRouteId = searchParams.get('route')
@@ -315,11 +318,13 @@ export default function CaveDetail() {
               {cave.region}{cave.country ? `, ${cave.country}` : ''}
             </p>
           )}
-          {hasLocation && (
-            <p className="text-[#555570] text-xs mt-1">
-              {cave.latitude.toFixed(4)}, {cave.longitude.toFixed(4)}
-            </p>
-          )}
+          <InlineCoordinateEditor
+            cave={cave}
+            caveId={caveId}
+            isCaveOwner={!!user && !!cave.owner && user.id === cave.owner}
+            hasLocation={hasLocation}
+            onUpdate={fetchCave}
+          />
 
           {/* Rating summary */}
           {ratingsData && ratingsData.rating_count > 0 && (
@@ -333,17 +338,6 @@ export default function CaveDetail() {
 
           {/* Action buttons */}
           <div className="flex gap-3 mt-4">
-            {hasLocation && (
-              <button
-                disabled
-                className="flex-1 py-3 rounded-full font-semibold text-sm text-center transition-all
-                  bg-gradient-to-r from-purple-600 to-purple-700 text-white
-                  shadow-[0_0_15px_rgba(178,75,255,0.2)] active:scale-[0.97]"
-              >
-                Find this Cave
-              </button>
-            )}
-
             {cave.has_map ? (
               <button
                 onClick={() => setShowExplorer(!showExplorer)}
@@ -434,6 +428,9 @@ export default function CaveDetail() {
             </div>
           </div>
         )}
+
+        {/* Land Owner / Property Info */}
+        <LandOwnerSection cave={cave} caveId={caveId} user={user} onUpdate={fetchCave} />
 
         {/* Description - Wiki style with markdown */}
         <div className="px-4 py-3">
@@ -577,6 +574,7 @@ export default function CaveDetail() {
               caveHeading={cave.slam_heading || 0}
               caveOverlayVisible={showOverlay}
               caveOverlayLevel={overlayLevel}
+              parcelGeometry={cave.land_owner?.parcel_geometry}
             />
           </div>
         )}
@@ -921,6 +919,433 @@ export default function CaveDetail() {
                 ))}
               </div>
             </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpdate }) {
+  const [editing, setEditing] = useState(false)
+  const [raw, setRaw] = useState('')
+  const [parsed, setParsed] = useState(null)
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [resolving, setResolving] = useState(false)
+
+  const startEdit = () => {
+    setRaw(hasLocation ? `${cave.latitude}, ${cave.longitude}` : '')
+    setParsed(hasLocation ? { lat: cave.latitude, lon: cave.longitude } : null)
+    setError(null)
+    setEditing(true)
+  }
+
+  const resolveShortUrl = async (url) => {
+    setResolving(true)
+    setError(null)
+    setParsed(null)
+    try {
+      const data = await apiFetch('/caves/resolve-map-url/', {
+        method: 'POST',
+        body: { url },
+      })
+      setParsed({ lat: data.lat, lon: data.lon })
+      setError(null)
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not resolve map URL')
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const tryParse = (value) => {
+    setRaw(value)
+    if (!value.trim()) {
+      setParsed(null)
+      setError(null)
+      setResolving(false)
+      return
+    }
+    try {
+      const result = parseCoordinates(value)
+      setParsed(result)
+      setError(null)
+      setResolving(false)
+    } catch (e) {
+      if (e.needsBackendResolve) {
+        resolveShortUrl(e.url)
+      } else {
+        setParsed(null)
+        setError(e.message)
+      }
+    }
+  }
+
+  const save = async () => {
+    if (!parsed) return
+    setSaving(true)
+    try {
+      await apiFetch(`/caves/${caveId}/`, {
+        method: 'PATCH',
+        body: { latitude: parsed.lat, longitude: parsed.lon },
+      })
+      setEditing(false)
+      onUpdate()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="mt-1">
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={raw}
+            onChange={e => tryParse(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && parsed && save()}
+            placeholder="35.658, -85.588 · DMS · UTM · MGRS · URL"
+            className="cyber-input flex-1 px-3 py-1.5 text-xs"
+            autoFocus
+          />
+          <button onClick={save} disabled={!parsed || saving}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all
+              ${parsed
+                ? 'bg-gradient-to-r from-cyan-600 to-cyan-700 text-white'
+                : 'bg-[var(--cyber-surface-2)] text-[#555570]'}`}>
+            {saving ? '...' : 'Save'}
+          </button>
+          <button onClick={() => setEditing(false)}
+            className="text-[var(--cyber-text-dim)] text-xs hover:text-white">
+            Cancel
+          </button>
+        </div>
+        <div className="mt-1 min-h-[1rem]">
+          {resolving && (
+            <span className="text-[var(--cyber-cyan)] text-xs animate-pulse">
+              Resolving map link...
+            </span>
+          )}
+          {!resolving && parsed && (
+            <span className="text-emerald-400 text-xs">
+              {parsed.lat.toFixed(6)}°, {parsed.lon.toFixed(6)}°
+            </span>
+          )}
+          {!resolving && error && <span className="text-red-400 text-xs">{error}</span>}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      {hasLocation ? (
+        <p className="text-[#555570] text-xs">
+          {cave.latitude.toFixed(4)}, {cave.longitude.toFixed(4)}
+        </p>
+      ) : isCaveOwner ? (
+        <p className="text-[#555570] text-xs italic">No coordinates set</p>
+      ) : null}
+      {isCaveOwner && (
+        <button onClick={startEdit}
+          className="text-[var(--cyber-cyan)] text-xs hover:underline">
+          {hasLocation ? 'edit' : '+ Add coordinates'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function LandOwnerSection({ cave, caveId, user, onUpdate }) {
+  const landOwner = cave.land_owner
+  const isCaveOwner = user && cave.owner && user.id === cave.owner
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [lookingUp, setLookingUp] = useState(false)
+  const [form, setForm] = useState({})
+
+  const startEdit = () => {
+    setForm({
+      owner_name: landOwner?.owner_name || '',
+      organization: landOwner?.organization || '',
+      phone: landOwner?.phone || '',
+      email: landOwner?.email || '',
+      address: landOwner?.address || '',
+      website: landOwner?.website || '',
+      contact_visibility: landOwner?.contact_visibility || 'private',
+      notes: landOwner?.notes || '',
+    })
+    setEditing(true)
+  }
+
+  const saveOwner = async () => {
+    setSaving(true)
+    try {
+      await apiFetch(`/caves/${caveId}/land-owner/`, {
+        method: 'PATCH',
+        body: form,
+      })
+      onUpdate()
+      setEditing(false)
+    } catch (err) {
+      console.error('Failed to save land owner:', err.response?.data || err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const runGisLookup = async () => {
+    setLookingUp(true)
+    try {
+      await apiFetch(`/caves/${caveId}/land-owner/gis-lookup/`, {
+        method: 'POST',
+        body: { save: true },
+      })
+      onUpdate()
+    } catch (err) {
+      console.error('GIS lookup failed:', err.response?.data || err.message)
+    } finally {
+      setLookingUp(false)
+    }
+  }
+
+  const gisVisible = landOwner?.gis_fields_visible !== false  // default true
+  const hasContact = landOwner && (landOwner.owner_name || landOwner.organization)
+  const hasParcel = landOwner && (landOwner.parcel_id || landOwner.parcel_address)
+  const hasAlwaysVisibleLinks = landOwner && (landOwner.tpad_link || landOwner.gis_map_link || landOwner.parcel_geometry)
+  const isPublic = landOwner?.contact_visibility === 'public'
+  const canSeeContact = isPublic || isCaveOwner
+
+  // Show section if there's data, user is cave owner, or user can run GIS lookup
+  const canLookup = !!user && cave.has_location
+  if (!hasContact && !hasParcel && !hasAlwaysVisibleLinks && !isCaveOwner && !canLookup) return null
+
+  const toggleGisVisibility = async () => {
+    try {
+      await apiFetch(`/caves/${caveId}/land-owner/`, {
+        method: 'PATCH',
+        body: { gis_fields_visible: !gisVisible },
+      })
+      onUpdate()
+    } catch (err) {
+      console.error('Failed to toggle GIS visibility:', err)
+    }
+  }
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-white font-semibold">Property Owner</h3>
+        <div className="flex gap-2">
+          {canLookup && !lookingUp && (
+            <button onClick={runGisLookup}
+              className="text-[var(--cyber-cyan)] text-xs hover:underline">
+              GIS Lookup
+            </button>
+          )}
+          {lookingUp && (
+            <span className="text-[var(--cyber-text-dim)] text-xs">Looking up...</span>
+          )}
+          {isCaveOwner && !editing && (
+            <button onClick={startEdit}
+              className="text-[var(--cyber-cyan)] text-sm hover:underline">
+              Edit
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* GIS visibility toggle — cave entry owner only */}
+      {isCaveOwner && landOwner && (
+        <button
+          onClick={toggleGisVisibility}
+          className="flex items-center gap-2 mb-2 group"
+        >
+          <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors
+            ${gisVisible ? 'bg-cyan-600' : 'bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]'}`}>
+            <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform
+              ${gisVisible ? 'translate-x-[1.125rem]' : 'translate-x-0.5'}`} />
+          </span>
+          <span className="text-[var(--cyber-text-dim)] text-xs group-hover:text-[var(--cyber-text)]">
+            {gisVisible ? 'GIS details visible to all' : 'GIS details hidden from others'}
+          </span>
+        </button>
+      )}
+
+      {editing ? (
+        <div className="space-y-3 rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[var(--cyber-text-dim)] text-xs block mb-1">Owner Name</label>
+              <input value={form.owner_name} onChange={e => setForm(f => ({ ...f, owner_name: e.target.value }))}
+                className="cyber-input w-full px-3 py-1.5 text-sm" placeholder="John Smith" />
+            </div>
+            <div>
+              <label className="text-[var(--cyber-text-dim)] text-xs block mb-1">Organization</label>
+              <input value={form.organization} onChange={e => setForm(f => ({ ...f, organization: e.target.value }))}
+                className="cyber-input w-full px-3 py-1.5 text-sm" placeholder="Ruby Falls LLC" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[var(--cyber-text-dim)] text-xs block mb-1">Phone</label>
+              <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                className="cyber-input w-full px-3 py-1.5 text-sm" placeholder="(615) 555-0123" />
+            </div>
+            <div>
+              <label className="text-[var(--cyber-text-dim)] text-xs block mb-1">Email</label>
+              <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                className="cyber-input w-full px-3 py-1.5 text-sm" placeholder="owner@example.com" />
+            </div>
+          </div>
+          <div>
+            <label className="text-[var(--cyber-text-dim)] text-xs block mb-1">Address</label>
+            <input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
+              className="cyber-input w-full px-3 py-1.5 text-sm" placeholder="123 Cave Rd, Cookeville, TN" />
+          </div>
+          <div>
+            <label className="text-[var(--cyber-text-dim)] text-xs block mb-1">Website</label>
+            <input value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
+              className="cyber-input w-full px-3 py-1.5 text-sm" placeholder="https://..." />
+          </div>
+          <div>
+            <label className="text-[var(--cyber-text-dim)] text-xs block mb-1">Notes (private, only you see this)</label>
+            <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              className="cyber-input w-full px-3 py-1.5 text-sm" rows={2} />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-[var(--cyber-text-dim)] text-xs">Contact Visibility:</label>
+            <select value={form.contact_visibility}
+              onChange={e => setForm(f => ({ ...f, contact_visibility: e.target.value }))}
+              className="cyber-input px-3 py-1.5 text-sm">
+              <option value="private">Private (on request)</option>
+              <option value="public">Public</option>
+            </select>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={saveOwner} disabled={saving}
+              className="px-4 py-1.5 rounded-full text-sm font-semibold bg-gradient-to-r from-cyan-600 to-cyan-700 text-white">
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+            <button onClick={() => setEditing(false)}
+              className="px-4 py-1.5 rounded-full text-sm text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-4 space-y-2">
+          {/* Tier-2 fields: visible when gisVisible=true OR viewer is cave owner */}
+          {(gisVisible || isCaveOwner) && (
+            <>
+              {/* Owner identity */}
+              {(landOwner?.owner_name || landOwner?.organization) && (
+                <div>
+                  {landOwner.owner_name && (
+                    <p className="text-white font-medium">{landOwner.owner_name}</p>
+                  )}
+                  {landOwner.organization && (
+                    <p className="text-[var(--cyber-cyan)] text-sm">{landOwner.organization}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Contact info — visible if public or if cave owner */}
+              {canSeeContact && landOwner && (landOwner.phone || landOwner.email || landOwner.address || landOwner.website) && (
+                <div className="text-sm space-y-1">
+                  {landOwner.phone && (
+                    <p className="text-[var(--cyber-text-dim)]">Phone: <span className="text-[var(--cyber-text)]">{landOwner.phone}</span></p>
+                  )}
+                  {landOwner.email && (
+                    <p className="text-[var(--cyber-text-dim)]">Email: <a href={`mailto:${landOwner.email}`} className="text-[var(--cyber-cyan)] hover:underline">{landOwner.email}</a></p>
+                  )}
+                  {landOwner.address && (
+                    <p className="text-[var(--cyber-text-dim)]">Address: <span className="text-[var(--cyber-text)]">{landOwner.address}</span></p>
+                  )}
+                  {landOwner.website && (
+                    <p className="text-[var(--cyber-text-dim)]">Web: <a href={landOwner.website} target="_blank" rel="noopener noreferrer" className="text-[var(--cyber-cyan)] hover:underline">{landOwner.website}</a></p>
+                  )}
+                </div>
+              )}
+
+              {/* Private notice for non-owners */}
+              {!isPublic && !isCaveOwner && hasContact && (
+                <span className="inline-block px-2.5 py-1 rounded-full text-xs border bg-amber-900/30 text-amber-400 border-amber-800/30">
+                  Contact info available on request
+                </span>
+              )}
+
+              {/* Private notes (cave owner only) */}
+              {isCaveOwner && landOwner?.notes && (
+                <div className="mt-2 p-2 rounded-lg bg-[var(--cyber-bg)] border border-[var(--cyber-border)]">
+                  <p className="text-[#555570] text-xs mb-1">Private notes</p>
+                  <p className="text-[var(--cyber-text-dim)] text-sm">{landOwner.notes}</p>
+                </div>
+              )}
+
+              {/* GIS Parcel details (tier-2) */}
+              {hasParcel && (
+                <div className="mt-2 pt-2 border-t border-[var(--cyber-border)]">
+                  <p className="text-[#555570] text-xs mb-1">Property Record</p>
+                  <div className="text-sm space-y-1">
+                    {landOwner.parcel_address && (
+                      <p className="text-[var(--cyber-text)]">{landOwner.parcel_address}</p>
+                    )}
+                    <div className="flex flex-wrap gap-x-4 text-[var(--cyber-text-dim)]">
+                      {landOwner.parcel_acreage != null && <span>{Number(landOwner.parcel_acreage).toFixed(1)} acres</span>}
+                      {landOwner.property_class && <span>{landOwner.property_class}</span>}
+                      {landOwner.property_type && landOwner.property_type !== landOwner.property_class && (
+                        <span>{landOwner.property_type}</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 text-[var(--cyber-text-dim)]">
+                      {landOwner.parcel_appraised_value != null && (
+                        <span>Appraised: ${Number(landOwner.parcel_appraised_value).toLocaleString()}</span>
+                      )}
+                      {landOwner.last_sale_date && (
+                        <span>Last sold: {landOwner.last_sale_date}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Always-visible links (tier-1): TPAD link and GIS Map */}
+          {landOwner && (landOwner.tpad_link || landOwner.gis_map_link) && (
+            <div className={`flex flex-wrap gap-3 ${(gisVisible || isCaveOwner) && hasParcel ? 'mt-1 ml-0' : 'mt-0'}`}>
+              {landOwner.tpad_link && (
+                <a href={landOwner.tpad_link} target="_blank" rel="noopener noreferrer"
+                  className="text-[var(--cyber-cyan)] text-xs hover:underline">
+                  TN Property Assessment
+                </a>
+              )}
+              {landOwner.gis_map_link && (
+                <a href={landOwner.gis_map_link} target="_blank" rel="noopener noreferrer"
+                  className="text-[var(--cyber-cyan)] text-xs hover:underline">
+                  GIS Map
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Muted notice for non-owners */}
+          {!gisVisible && !isCaveOwner && (
+            <p className="text-[var(--cyber-text-dim)] text-xs italic">
+              Property details hidden by cave entry owner
+            </p>
+          )}
+
+          {/* Empty state for cave owner */}
+          {isCaveOwner && !hasContact && !hasParcel && (
+            <p className="text-[var(--cyber-text-dim)] text-sm">
+              No property owner information yet. Click Edit to add, or use GIS Lookup to auto-fill from coordinates.
+            </p>
           )}
         </div>
       )}

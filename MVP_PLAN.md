@@ -27,16 +27,16 @@
 - [x] Set up git repository
 - [x] Push to GitHub
 
-### Milestone 2: User Authentication
+### Milestone 2: User Authentication ✅
 **Duration**: 2-3 days
 
 **Tasks**:
-- [ ] Install and configure django-allauth
-- [ ] Set up Google OAuth credentials
-- [ ] Create User and UserProfile models
-- [ ] Implement login/logout views
-- [ ] Create user profile API endpoints
-- [ ] Basic React login page
+- [x] Install and configure django-allauth
+- [ ] Set up Google OAuth credentials (deferred — using email/password for now)
+- [x] Create User and UserProfile models
+- [x] Implement login/logout views
+- [x] Create user profile API endpoints
+- [x] Basic React login page
 
 **Deliverables**:
 - Users can sign in with Google
@@ -50,15 +50,15 @@
 
 ---
 
-### Milestone 3: Device Management
+### Milestone 3: Device Management ✅
 **Duration**: 3-4 days
 
 **Tasks**:
-- [ ] Create Device model (serial number, MAC, owner)
+- [x] Create Device model (serial number, MAC, owner)
 - [ ] Implement QR code generation for device registration
-- [ ] Create device registration API
-- [ ] Device authentication token generation
-- [ ] React page for device registration
+- [x] Create device registration API
+- [x] Device authentication token generation
+- [x] React page for device registration
 - [ ] QR code scanner integration (future: on Orange Pi)
 
 **Deliverables**:
@@ -74,16 +74,18 @@
 
 ---
 
-### Milestone 4: Cave Data Models
+### Milestone 4: Cave Data Models ✅
 **Duration**: 2-3 days
 
 **Tasks**:
-- [ ] Create Cave model (extend from cave-server schema)
-- [ ] Create POI model
-- [ ] Create CavePhoto model
-- [ ] Create DescriptionRevision model (wiki-style versioning)
-- [ ] Create CavePermission model (owner/editor/viewer)
-- [ ] Database migrations
+- [x] Create Cave model (extend from cave-server schema)
+- [x] Create POI model
+- [x] Create CavePhoto model
+- [x] Create DescriptionRevision model (wiki-style versioning)
+- [x] Create CavePermission model (owner/editor/viewer)
+- [x] Database migrations
+- [x] Create LandOwner model with GIS parcel data fields
+- [x] Create CaveShareLink model
 
 **Deliverables**:
 - Database schema matches cave-server
@@ -96,18 +98,18 @@
 
 ---
 
-### Milestone 5: Cave API Endpoints
+### Milestone 5: Cave API Endpoints ✅
 **Duration**: 3-4 days
 
 **Tasks**:
-- [ ] Create Cave serializers (list, detail)
-- [ ] Implement cave list endpoint (filter by permissions)
-- [ ] Implement cave detail endpoint
-- [ ] Implement cave create/update/delete
-- [ ] Permission enforcement (owner only for delete)
-- [ ] Public/Private/Limited Public filtering
-- [ ] React cave list page
-- [ ] React cave detail page
+- [x] Create Cave serializers (list, detail, land owner with tier-based redaction)
+- [x] Implement cave list endpoint (filter by permissions)
+- [x] Implement cave detail endpoint
+- [x] Implement cave create/update/delete
+- [x] Permission enforcement (owner only for delete)
+- [ ] Public/Private/Limited Public filtering (model exists, enforcement partial)
+- [x] React cave list page (Explore page with search + map)
+- [x] React cave detail page (full-featured with map, photos, comments, ratings, GIS)
 
 **Deliverables**:
 - Users can browse caves they have permission to see
@@ -169,15 +171,15 @@
 
 ---
 
-### Milestone 8: Social Features - Comments
+### Milestone 8: Social Features - Comments ✅
 **Duration**: 2-3 days
 
 **Tasks**:
-- [ ] Create Comment model (cave, POI, user)
-- [ ] Implement comment create API
-- [ ] Implement comment list API
-- [ ] React comment list component
-- [ ] React comment form
+- [x] Create Comment model (cave, POI, user)
+- [x] Implement comment create API
+- [x] Implement comment list API
+- [x] React comment list component
+- [x] React comment form
 
 **Deliverables**:
 - Users can add comments to caves and POIs
@@ -191,17 +193,19 @@
 
 ---
 
-### Milestone 9: Social Features - Photos & Descriptions
+### Milestone 9: Social Features - Photos & Descriptions ✅
 **Duration**: 3-4 days
 
 **Tasks**:
-- [ ] Photo upload API for caves
-- [ ] Photo tagging (users, POIs)
-- [ ] Wiki-style description editing
-- [ ] Description revision history
-- [ ] React photo gallery component
-- [ ] React description editor (Markdown)
-- [ ] React revision history viewer
+- [x] Photo upload API for caves
+- [x] Photo tagging (caption + comma-separated tags)
+- [x] Wiki-style description editing
+- [x] Description revision history
+- [x] React photo gallery component (carousel with swipe, edit/delete)
+- [x] React description editor (TipTap rich text with image support)
+- [x] React revision history viewer
+- [x] Star ratings and reviews system
+- [x] User wall posts and social feed
 
 **Deliverables**:
 - Users can upload photos to caves

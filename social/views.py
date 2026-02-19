@@ -1,17 +1,22 @@
-"""Social views — ratings, follows, activity feed, expeditions."""
+"""Social views — ratings, follows, activity feed, expeditions, posts."""
 
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
 from caves.models import Cave
-from .models import CaveRating, UserFollow, Activity, Expedition, ExpeditionMember
+from .models import (
+    CaveRating, UserFollow, Activity, Expedition, ExpeditionMember,
+    Post, PostReaction, PostComment,
+)
 from .serializers import (
     CaveRatingSerializer, UserFollowSerializer, ActivitySerializer,
     ExpeditionSerializer, ExpeditionMemberSerializer,
+    PostSerializer, PostCommentSerializer, PostReactionSerializer,
 )
 
 
@@ -42,7 +47,6 @@ def user_ratings(request, user_id):
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
 def cave_ratings(request, cave_id):
     """List ratings (with avg + count) or create a rating for a cave."""
     cave = get_object_or_404(Cave, pk=cave_id)
@@ -59,9 +63,10 @@ def cave_ratings(request, cave_id):
             'ratings': serializer.data,
         })
 
-    # POST
+    # POST — requires auth (default IsAuthenticatedOrReadOnly)
     data = request.data.copy()
     data['cave'] = cave.id
+    data['user'] = request.user.id
     serializer = CaveRatingSerializer(data=data)
     serializer.is_valid(raise_exception=True)
     serializer.save()
@@ -69,7 +74,6 @@ def cave_ratings(request, cave_id):
 
 
 @api_view(['PATCH', 'DELETE'])
-@permission_classes([AllowAny])
 def cave_rating_detail(request, cave_id, rating_id):
     """Update or delete a specific rating."""
     rating = get_object_or_404(CaveRating, pk=rating_id, cave_id=cave_id)
@@ -89,22 +93,22 @@ def cave_rating_detail(request, cave_id, rating_id):
 
 
 @api_view(['POST', 'DELETE'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def user_follow(request, user_id):
-    """Follow (POST) or unfollow (DELETE) a user."""
+    """Follow (POST) or unfollow (DELETE) a user. Uses request.user as follower."""
     from django.contrib.auth import get_user_model
     User = get_user_model()
     target = get_object_or_404(User, pk=user_id)
 
+    if request.user.id == target.id:
+        return Response(
+            {'detail': 'Users cannot follow themselves.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     if request.method == 'POST':
-        follower_id = request.data.get('follower')
-        if str(follower_id) == str(user_id):
-            return Response(
-                {'detail': 'Users cannot follow themselves.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         follow, created = UserFollow.objects.get_or_create(
-            follower_id=follower_id, following=target
+            follower=request.user, following=target
         )
         if not created:
             return Response(
@@ -115,9 +119,8 @@ def user_follow(request, user_id):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     # DELETE
-    follower_id = request.data.get('follower')
     deleted, _ = UserFollow.objects.filter(
-        follower_id=follower_id, following=target
+        follower=request.user, following=target
     ).delete()
     if not deleted:
         return Response(
@@ -181,7 +184,6 @@ def activity_feed(request):
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
 def expedition_list(request):
     """List expeditions (filter by ?cave=, ?status=) or create one."""
     if request.method == 'GET':
@@ -198,15 +200,14 @@ def expedition_list(request):
         serializer = ExpeditionSerializer(expeditions, many=True)
         return Response(serializer.data)
 
-    # POST
+    # POST — requires auth
     serializer = ExpeditionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    serializer.save()
+    serializer.save(organizer=request.user)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET', 'PATCH', 'DELETE'])
-@permission_classes([AllowAny])
 def expedition_detail(request, expedition_id):
     """Retrieve, update, or delete an expedition."""
     expedition = get_object_or_404(Expedition, pk=expedition_id)
@@ -229,7 +230,6 @@ def expedition_detail(request, expedition_id):
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
 def expedition_members(request, expedition_id):
     """List or invite members for an expedition."""
     expedition = get_object_or_404(Expedition, pk=expedition_id)
@@ -249,7 +249,6 @@ def expedition_members(request, expedition_id):
 
 
 @api_view(['PATCH'])
-@permission_classes([AllowAny])
 def expedition_member_respond(request, expedition_id, member_id):
     """Confirm or decline expedition membership."""
     member = get_object_or_404(
@@ -265,3 +264,152 @@ def expedition_member_respond(request, expedition_id, member_id):
     member.save(update_fields=['status'])
     serializer = ExpeditionMemberSerializer(member)
     return Response(serializer.data)
+
+
+# ── Posts ────────────────────────────────────────────────────
+
+
+@api_view(['GET', 'POST'])
+@parser_classes([JSONParser, MultiPartParser, FormParser])
+def post_list(request):
+    """
+    GET  — Social feed.
+      Authenticated: own + followed users' posts (feed)
+      ?user=<id>    → single user's wall
+      ?grotto=<id>  → group wall
+      Unauthenticated: all public posts
+    POST — Create a post (supports FormData for image upload). Requires auth.
+    """
+    if request.method == 'GET':
+        user_id = request.query_params.get('user')
+        grotto_id = request.query_params.get('grotto')
+
+        posts = Post.objects.select_related('author', 'cave', 'grotto')
+
+        # Determine current user for feed + reaction context
+        current_user_id = None
+        if request.user and request.user.is_authenticated:
+            current_user_id = request.user.id
+
+        if grotto_id:
+            posts = posts.filter(grotto_id=grotto_id)
+        elif user_id:
+            posts = posts.filter(author_id=user_id)
+        elif current_user_id:
+            following_ids = list(
+                UserFollow.objects.filter(follower_id=current_user_id)
+                .values_list('following_id', flat=True)
+            )
+            posts = posts.filter(
+                Q(author_id=current_user_id) | Q(author_id__in=following_ids)
+            ).filter(
+                Q(visibility='public') | Q(visibility='followers') | Q(author_id=current_user_id)
+            )
+        else:
+            posts = posts.filter(visibility='public')
+
+        total = posts.count()
+        limit = int(request.query_params.get('limit', 20))
+        offset = int(request.query_params.get('offset', 0))
+        page = posts[offset:offset + limit]
+
+        serializer = PostSerializer(
+            page, many=True,
+            context={'current_user': current_user_id},
+        )
+        return Response({
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'results': serializer.data,
+        })
+
+    # POST — requires auth
+    data = request.data.copy()
+    data['author'] = request.user.id
+    serializer = PostSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'DELETE'])
+def post_detail(request, post_id):
+    """Get or delete a single post."""
+    post = get_object_or_404(Post, pk=post_id)
+
+    if request.method == 'DELETE':
+        post.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    current_user_id = None
+    if request.user and request.user.is_authenticated:
+        current_user_id = request.user.id
+    serializer = PostSerializer(post, context={'current_user': current_user_id})
+    return Response(serializer.data)
+
+
+@api_view(['POST', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def post_react(request, post_id):
+    """
+    POST — Add or switch reaction. Body: {reaction_type}.
+    DELETE — Remove reaction.
+    Uses request.user.
+    """
+    post = get_object_or_404(Post, pk=post_id)
+
+    if request.method == 'DELETE':
+        deleted, _ = PostReaction.objects.filter(
+            post=post, user=request.user
+        ).delete()
+        if not deleted:
+            return Response(
+                {'detail': 'No reaction found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # POST — upsert
+    reaction_type = request.data.get('reaction_type')
+    if reaction_type not in ('like', 'dislike'):
+        return Response(
+            {'detail': 'reaction_type must be "like" or "dislike".'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    reaction, created = PostReaction.objects.update_or_create(
+        post=post, user=request.user,
+        defaults={'reaction_type': reaction_type},
+    )
+    serializer = PostReactionSerializer(reaction)
+    resp_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return Response(serializer.data, status=resp_status)
+
+
+@api_view(['GET', 'POST'])
+def post_comments(request, post_id):
+    """List or add comments on a post."""
+    post = get_object_or_404(Post, pk=post_id)
+
+    if request.method == 'GET':
+        comments = PostComment.objects.filter(post=post).select_related('author')
+        serializer = PostCommentSerializer(comments, many=True)
+        return Response(serializer.data)
+
+    # POST — requires auth
+    data = request.data.copy()
+    data['post'] = post.id
+    data['author'] = request.user.id
+    serializer = PostCommentSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def post_comment_delete(request, post_id, comment_id):
+    """Delete a comment."""
+    comment = get_object_or_404(PostComment, pk=comment_id, post_id=post_id)
+    comment.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)

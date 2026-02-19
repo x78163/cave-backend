@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import CaveRating, UserFollow, Activity, Expedition, ExpeditionMember
+from .models import (
+    CaveRating, UserFollow, Activity, Expedition, ExpeditionMember,
+    Post, PostReaction, PostComment,
+)
 
 
 @admin.register(CaveRating)
@@ -38,3 +41,25 @@ class ExpeditionMemberAdmin(admin.ModelAdmin):
     list_display = ['user', 'expedition', 'status', 'joined_at']
     list_filter = ['status']
     readonly_fields = ['id', 'joined_at']
+
+
+@admin.register(Post)
+class PostAdmin(admin.ModelAdmin):
+    list_display = ['author', 'text', 'visibility', 'cave', 'grotto', 'created_at']
+    list_filter = ['visibility', 'created_at']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+    search_fields = ['text', 'author__username']
+
+
+@admin.register(PostReaction)
+class PostReactionAdmin(admin.ModelAdmin):
+    list_display = ['user', 'post', 'reaction_type', 'created_at']
+    list_filter = ['reaction_type']
+    readonly_fields = ['id', 'created_at']
+
+
+@admin.register(PostComment)
+class PostCommentAdmin(admin.ModelAdmin):
+    list_display = ['author', 'post', 'text', 'created_at']
+    readonly_fields = ['id', 'created_at']
+    search_fields = ['text', 'author__username']

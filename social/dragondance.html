@@ -1,63 +1,53 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+<meta charset="UTF-8">
+<title>Dragon Gradient Background</title>
+
 <style>
+html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Animated background */
 body {
-  background: #000;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
+    background: linear-gradient(
+        -45deg,
+        #ff0033,
+        #a100ff,
+        #0066ff,
+        #ff0033
+    );
+    background-size: 400% 400%;
+    animation: gradientShift 10s ease infinite;
 }
 
-/* Container */
-.dragon-wrapper {
-  width: 600px;
-  aspect-ratio: 1/1;
-  position: relative;
+/* Gradient animation */
+@keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
 }
 
-/* Animated gradient layer */
-.dragon-wrapper::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    #a855f7,
-    #3b82f6,
-    #22c55e,
-    #a855f7
-  );
-  background-size: 300% 100%;
-  animation: sweep 6s linear infinite;
-}
-
-/* Mask using your image */
-.dragon {
-  position: absolute;
-  inset: 0;
-  background: black;
-  -webkit-mask: url("your-dragon.png") center/contain no-repeat;
-  mask: url("your-dragon.png") center/contain no-repeat;
-}
-
-/* Animation */
-@keyframes sweep {
-  0% {
-    background-position: 0% 0;
-  }
-  100% {
-    background-position: 300% 0;
-  }
+/* Image styling */
+img {
+    width: 600px;
+    max-width: 90vw;
+    height: auto;
+    position: relative;
+    z-index: 1;
 }
 </style>
 </head>
+
 <body>
 
-<div class="dragon-wrapper">
-  <div class="dragon"></div>
-</div>
+<img src="Cave Dragon Cyberpunk theme.png" alt="Dragon">
 
 </body>
 </html>

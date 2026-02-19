@@ -12,20 +12,34 @@ Cave Backend is the **cloud component** of the Cave Mapper ecosystem:
 
 ## Key Features
 
-### MVP (Current Phase)
-- ✅ Google OAuth authentication
-- ✅ Device registration via QR code
-- ✅ Automatic WiFi sync with cave-server instances
-- ✅ Cave repository (public/private caves)
-- ✅ Permission system (owner/editor/viewer roles)
-- ✅ Social features (comments, photos, wiki-style descriptions)
-- ✅ Grotto memberships (organizations)
+### Implemented
+- ✅ User authentication (registration, login, JWT)
+- ✅ Cave repository with full CRUD, visibility levels, collaboration settings
+- ✅ 2D interactive cave maps (multi-level, POIs, route overlay)
+- ✅ 3D cave explorer (Three.js point cloud viewer)
+- ✅ Surface maps with Leaflet (cave markers, parcel polygon overlay)
+- ✅ TN GIS parcel integration (ArcGIS + TPAD API — owner, address, boundary polygon)
+- ✅ Three-tier GIS data privacy (always-visible / mutable / hidden)
+- ✅ Social features (comments, ratings/reviews, wiki descriptions, wall posts)
+- ✅ Photo gallery with upload, camera capture, carousel
+- ✅ Universal coordinate input (decimal, DMS, UTM, MGRS, Google/Apple Maps URLs)
+- ✅ Cave routing system with A* pathfinding
+- ✅ Device management and registration
+- ✅ CSV import tool for bulk cave data
+- ✅ 14 Tennessee caves seeded from historical survey data
+
+### In Progress
+- 🔄 S3 file storage (currently local media/)
+- 🔄 Device-to-cloud sync mechanism
+- 🔄 Grotto memberships and group permissions
+- 🔄 Google OAuth integration
 
 ### Future Phases
 - 🔄 3D mesh generation from point clouds (GPU-accelerated)
 - 🔄 Browser-based virtual cave exploration (game engine)
 - 🔄 Map stitching (merge multi-expedition maps)
-- 🔄 Advanced social features (messaging, feeds, ratings)
+- 🔄 Property sale monitoring for cave conservation
+- 🔄 Advanced social features (messaging, activity feeds)
 
 ## Technology Stack
 
@@ -68,22 +82,26 @@ python manage.py runserver
 cave-backend/
 ├── CLAUDE.md              # AI continuity document (comprehensive context)
 ├── README.md              # This file
-├── ARCHITECTURE.md        # System design deep-dive
 ├── MVP_PLAN.md            # Phase 1 development plan
-├── DATABASE_SCHEMA.md     # Database design
-├── API_SPEC.md            # REST API specification
 ├── requirements.txt       # Python dependencies
 ├── manage.py              # Django management script
 ├── cave_backend/          # Django project settings
-│   ├── settings.py
-│   ├── urls.py
-│   └── wsgi.py
-├── users/                 # User management app
-├── devices/               # Device registration app
-├── caves/                 # Cave data app
-├── sync/                  # Sync mechanism app
-├── social/                # Social features app
-└── processing/            # 3D processing app (future)
+├── users/                 # User auth, profiles, avatars
+├── devices/               # Device registration
+├── caves/                 # Cave CRUD, GIS lookup, land owner, map data
+├── mapping/               # POIs, 2D map generation
+├── routing/               # Cave route pathfinding (A*)
+├── social/                # Wall posts, ratings, activity feed
+├── sensors/               # Environmental sensor data
+├── reconstruction/        # 3D processing (future)
+├── sync/                  # Device sync mechanism
+└── frontend/              # React/Vite frontend
+    └── src/
+        ├── components/    # SurfaceMap, CaveMapSection, TopBar, etc.
+        ├── pages/         # CaveDetail, Explore, CreateCave, Profile, etc.
+        ├── stores/        # Zustand auth store
+        ├── utils/         # parseCoordinates
+        └── services/      # API helpers
 ```
 
 ## Documentation

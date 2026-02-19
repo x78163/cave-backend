@@ -2,7 +2,7 @@ from django.db.models import Avg, Count
 from rest_framework import serializers
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
-    CavePermission, CaveShareLink,
+    CavePermission, CaveShareLink, LandOwner,
 )
 
 
@@ -28,6 +28,58 @@ class DescriptionRevisionSerializer(serializers.ModelSerializer):
             'revision_number', 'created_at', 'editor', 'origin_device',
         ]
         read_only_fields = ['id', 'revision_number', 'created_at']
+
+
+class LandOwnerSerializer(serializers.ModelSerializer):
+    """Full land owner serializer — all fields including private contact info."""
+
+    class Meta:
+        model = LandOwner
+        fields = [
+            'id', 'owner_name', 'organization',
+            'phone', 'email', 'address', 'website',
+            'contact_visibility', 'notes',
+            'gis_fields_visible',
+            'parcel_id', 'parcel_address', 'parcel_acreage',
+            'parcel_land_use', 'parcel_appraised_value',
+            'gis_county', 'gis_source', 'gis_lookup_at', 'tpad_link',
+            'parcel_geometry',
+            'property_class', 'property_type', 'last_sale_date', 'gis_map_link',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class LandOwnerPublicSerializer(serializers.ModelSerializer):
+    """Public serializer — hides private contact details but shows GIS data."""
+
+    class Meta:
+        model = LandOwner
+        fields = [
+            'id', 'owner_name', 'organization', 'website',
+            'contact_visibility', 'gis_fields_visible',
+            'parcel_id', 'parcel_address', 'parcel_acreage',
+            'parcel_land_use', 'gis_county', 'tpad_link',
+            'parcel_geometry',
+            'property_class', 'property_type', 'last_sale_date', 'gis_map_link',
+        ]
+        read_only_fields = ['id']
+
+
+class LandOwnerMutedSerializer(serializers.ModelSerializer):
+    """Muted serializer — GIS details hidden by cave entry creator.
+
+    Only always-visible fields: TPAD link, GIS Map link, polygon boundary.
+    """
+
+    class Meta:
+        model = LandOwner
+        fields = [
+            'id', 'gis_fields_visible',
+            'tpad_link', 'gis_map_link', 'parcel_geometry',
+            'contact_visibility',
+        ]
+        read_only_fields = ['id']
 
 
 class CaveListSerializer(serializers.ModelSerializer):
@@ -69,6 +121,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     latest_revision = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
+    land_owner = serializers.SerializerMethodField()
 
     class Meta:
         model = Cave
@@ -86,6 +139,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'comments', 'comment_count',
             'average_rating', 'rating_count',
             'revision_count', 'latest_revision',
+            'land_owner',
             'visibility', 'collaboration_setting',
             'owner', 'origin_device',
             'created_at', 'updated_at',
@@ -104,6 +158,27 @@ class CaveDetailSerializer(serializers.ModelSerializer):
         if rev:
             return DescriptionRevisionSerializer(rev).data
         return None
+
+    def get_land_owner(self, obj):
+        try:
+            lo = obj.land_owner
+        except LandOwner.DoesNotExist:
+            return None
+        request = self.context.get('request')
+        is_cave_owner = (
+            request and request.user.is_authenticated
+            and obj.owner_id and obj.owner_id == request.user.id
+        )
+        # Cave entry owner always sees everything
+        if is_cave_owner:
+            return LandOwnerSerializer(lo).data
+        # GIS details muted by entry creator — only show always-visible fields
+        if not lo.gis_fields_visible:
+            return LandOwnerMutedSerializer(lo).data
+        # Public contact info
+        if lo.contact_visibility == 'public':
+            return LandOwnerSerializer(lo).data
+        return LandOwnerPublicSerializer(lo).data
 
 
 class CavePermissionSerializer(serializers.ModelSerializer):

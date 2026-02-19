@@ -71,6 +71,9 @@ class Activity(models.Model):
         EXPEDITION_JOINED = 'expedition_joined', 'Joined an expedition'
         USER_FOLLOWED = 'user_followed', 'Followed a user'
         RECONSTRUCTION_COMPLETED = 'reconstruction_completed', 'Reconstruction completed'
+        POST_CREATED = 'post_created', 'Created a post'
+        POST_REACTED = 'post_reacted', 'Reacted to a post'
+        POST_COMMENTED = 'post_commented', 'Commented on a post'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     actor = models.ForeignKey(
@@ -160,3 +163,91 @@ class ExpeditionMember(models.Model):
 
     def __str__(self):
         return f'{self.user} in {self.expedition.name} ({self.status})'
+
+
+class Post(models.Model):
+    """User post for the social feed."""
+
+    class Visibility(models.TextChoices):
+        PUBLIC = 'public', 'Public'
+        FOLLOWERS = 'followers', 'Followers only'
+        GROUP = 'group', 'Group only'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='posts'
+    )
+    text = models.TextField()
+    image = models.ImageField(upload_to='posts/images/', null=True, blank=True)
+    cave = models.ForeignKey(
+        'caves.Cave', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='posts'
+    )
+    grotto = models.ForeignKey(
+        'users.Grotto', on_delete=models.CASCADE,
+        null=True, blank=True, related_name='posts'
+    )
+    visibility = models.CharField(
+        max_length=20, choices=Visibility.choices, default=Visibility.PUBLIC
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['author', '-created_at']),
+            models.Index(fields=['grotto', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.author.username}: {self.text[:50]}'
+
+
+class PostReaction(models.Model):
+    """Like/dislike reaction on a post."""
+
+    class ReactionType(models.TextChoices):
+        LIKE = 'like', 'Like'
+        DISLIKE = 'dislike', 'Dislike'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.ForeignKey(
+        Post, on_delete=models.CASCADE, related_name='reactions'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='post_reactions'
+    )
+    reaction_type = models.CharField(
+        max_length=10, choices=ReactionType.choices
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['post', 'user']
+
+    def __str__(self):
+        return f'{self.user.username} {self.reaction_type}d {self.post_id}'
+
+
+class PostComment(models.Model):
+    """Comment on a post."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.ForeignKey(
+        Post, on_delete=models.CASCADE, related_name='comments'
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='post_comments'
+    )
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.author.username} on {self.post_id}: {self.text[:50]}'

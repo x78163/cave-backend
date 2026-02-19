@@ -1,5 +1,9 @@
+from django.db.models import Count, Q
 from rest_framework import serializers
-from .models import CaveRating, UserFollow, Activity, Expedition, ExpeditionMember
+from .models import (
+    CaveRating, UserFollow, Activity, Expedition, ExpeditionMember,
+    Post, PostReaction, PostComment,
+)
 
 
 class CaveRatingSerializer(serializers.ModelSerializer):
@@ -62,3 +66,69 @@ class ExpeditionMemberSerializer(serializers.ModelSerializer):
         model = ExpeditionMember
         fields = ['id', 'expedition', 'user', 'status', 'joined_at']
         read_only_fields = ['id', 'joined_at']
+
+
+class PostCommentSerializer(serializers.ModelSerializer):
+    author_username = serializers.CharField(source='author.username', read_only=True)
+
+    class Meta:
+        model = PostComment
+        fields = ['id', 'post', 'author', 'author_username', 'text', 'created_at']
+        read_only_fields = ['id', 'author_username', 'created_at']
+
+
+class PostReactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PostReaction
+        fields = ['id', 'post', 'user', 'reaction_type', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class PostSerializer(serializers.ModelSerializer):
+    author_username = serializers.CharField(source='author.username', read_only=True)
+    cave_name = serializers.CharField(source='cave.name', read_only=True, default=None)
+    grotto_name = serializers.CharField(source='grotto.name', read_only=True, default=None)
+    like_count = serializers.SerializerMethodField()
+    dislike_count = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
+    user_reaction = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Post
+        fields = [
+            'id', 'author', 'author_username', 'text', 'image',
+            'cave', 'cave_name', 'grotto', 'grotto_name', 'visibility',
+            'like_count', 'dislike_count', 'comment_count', 'user_reaction',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'author_username', 'cave_name', 'grotto_name',
+            'like_count', 'dislike_count', 'comment_count', 'user_reaction',
+            'created_at', 'updated_at',
+        ]
+
+    def _get_counts(self, obj):
+        """Cache reaction counts per-instance to avoid duplicate queries."""
+        if not hasattr(obj, '_reaction_counts'):
+            counts = obj.reactions.aggregate(
+                likes=Count('id', filter=Q(reaction_type='like')),
+                dislikes=Count('id', filter=Q(reaction_type='dislike')),
+            )
+            obj._reaction_counts = counts
+        return obj._reaction_counts
+
+    def get_like_count(self, obj):
+        return self._get_counts(obj)['likes']
+
+    def get_dislike_count(self, obj):
+        return self._get_counts(obj)['dislikes']
+
+    def get_comment_count(self, obj):
+        return obj.comments.count()
+
+    def get_user_reaction(self, obj):
+        current_user = self.context.get('current_user')
+        if not current_user:
+            return None
+        reaction = obj.reactions.filter(user_id=current_user).first()
+        return reaction.reaction_type if reaction else None

@@ -339,6 +339,10 @@ body {
 .cave-marker {
   background: none !important;
   border: none !important;
+  transition: filter 0.2s;
+}
+.cave-marker-highlight {
+  filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.8)) drop-shadow(0 0 16px rgba(0, 229, 255, 0.4));
 }
 
 /* Cave popup styling */

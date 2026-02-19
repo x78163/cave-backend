@@ -46,4 +46,13 @@ urlpatterns = [
         'expeditions/<uuid:expedition_id>/members/<uuid:member_id>/',
         views.expedition_member_respond, name='expedition_member_respond',
     ),
+    # Posts
+    path('posts/', views.post_list, name='post_list'),
+    path('posts/<uuid:post_id>/', views.post_detail, name='post_detail'),
+    path('posts/<uuid:post_id>/react/', views.post_react, name='post_react'),
+    path('posts/<uuid:post_id>/comments/', views.post_comments, name='post_comments'),
+    path(
+        'posts/<uuid:post_id>/comments/<uuid:comment_id>/',
+        views.post_comment_delete, name='post_comment_delete',
+    ),
 ]
