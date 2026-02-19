@@ -6,6 +6,7 @@ import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useRef, useEffect, useCallback } from 'react'
 import TurndownService from 'turndown'
+import api from '../services/api'
 
 const turndown = new TurndownService({
   headingStyle: 'atx',
@@ -94,14 +95,8 @@ function RichTextEditor({ content, onChange, placeholder, caveId }) {
     formData.append('tags', 'description')
 
     try {
-      const res = await fetch(`/api/caves/${caveId}/photos/`, {
-        method: 'POST',
-        body: formData,
-      })
-      if (res.ok) {
-        const data = await res.json()
-        editor.chain().focus().setImage({ src: data.image, alt: file.name }).run()
-      }
+      const res = await api.post(`/caves/${caveId}/photos/`, formData)
+      editor.chain().focus().setImage({ src: res.data.image, alt: file.name }).run()
     } catch (err) {
       // Fallback: embed as base64
       const reader = new FileReader()

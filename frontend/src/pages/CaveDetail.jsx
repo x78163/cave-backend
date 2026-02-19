@@ -11,6 +11,12 @@ import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
 import parseCoordinates from '../utils/parseCoordinates'
 
+const MODE_LABELS = {
+  quick: 'Quick', standard: 'Standard', detailed: 'Detailed',
+  heatmap: 'Heatmap', edges: 'Edges', raw_slice: 'Slice', points: 'Points',
+}
+const MODE_ORDER = ['quick', 'standard', 'detailed', 'heatmap', 'edges', 'raw_slice', 'points']
+
 export default function CaveDetail() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
@@ -39,6 +45,10 @@ export default function CaveDetail() {
   const [overlayPois, setOverlayPois] = useState([])
   const [showOverlay, setShowOverlay] = useState(false)
   const [overlayLevel, setOverlayLevel] = useState(0)
+  const [overlayMode, setOverlayMode] = useState(null)
+  const [availableModes, setAvailableModes] = useState([])
+  const [overlayOpacity, setOverlayOpacity] = useState(0.6)
+  const [overlayPanelOpen, setOverlayPanelOpen] = useState(true)
 
   // Photo carousel state
   const [carouselOpen, setCarouselOpen] = useState(false)
@@ -64,24 +74,32 @@ export default function CaveDetail() {
   const [reviewText, setReviewText] = useState('')
   const [submittingRating, setSubmittingRating] = useState(false)
 
+  // Pending requests (cave owner view)
+  const [pendingRequests, setPendingRequests] = useState([])
+
   const fetchCave = () => {
-    fetch(`/api/caves/${caveId}/`)
-      .then(res => {
-        if (!res.ok) throw new Error('Not found')
-        return res.json()
-      })
+    apiFetch(`/caves/${caveId}/`)
       .then(data => { setCave(data); setLoading(false) })
       .catch(() => { setLoading(false) })
   }
 
   const fetchRatings = () => {
-    fetch(`/api/social/caves/${caveId}/ratings/`)
-      .then(res => res.ok ? res.json() : null)
+    apiFetch(`/social/caves/${caveId}/ratings/`)
       .then(data => { if (data) setRatingsData(data) })
       .catch(() => {})
   }
 
+  const fetchRequests = useCallback(() => {
+    if (!user || !cave || cave.owner !== user.id) return
+    apiFetch(`/caves/${caveId}/requests/?status=pending`)
+      .then(data => setPendingRequests(data?.requests || []))
+      .catch(() => {})
+  }, [user, cave?.owner, caveId])
+
   useEffect(() => { fetchCave(); fetchRatings() }, [caveId])
+
+  // Fetch pending requests when cave owner is viewing
+  useEffect(() => { fetchRequests() }, [fetchRequests])
 
   // Fetch preloaded route from ?route= query param
   useEffect(() => {
@@ -91,16 +109,28 @@ export default function CaveDetail() {
       .catch(() => setPreloadedRoute(null))
   }, [preloadRouteId, caveId])
 
-  // Fetch cave map data + POIs when overlay is toggled on
+  // Fetch cave map data for a specific mode (or default)
+  const fetchOverlayData = useCallback((mode) => {
+    const url = mode
+      ? `/caves/${caveId}/map-data/?mode=${mode}`
+      : `/caves/${caveId}/map-data/`
+    apiFetch(url)
+      .then(data => {
+        if (data) {
+          setOverlayMapData(data)
+          setAvailableModes(data.available_modes || [])
+          setOverlayMode(data.mode || mode || 'standard')
+        }
+      })
+      .catch(() => {})
+  }, [caveId])
+
+  // Initial fetch when overlay is toggled on
   useEffect(() => {
     if (!showOverlay || overlayMapData) return
-    fetch(`/api/caves/${caveId}/map-data/`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setOverlayMapData(data) })
-      .catch(() => {})
-    fetch(`/api/mapping/caves/${caveId}/pois/`)
-      .then(r => r.ok ? r.json() : { pois: [] })
-      .then(data => setOverlayPois(data.pois || []))
+    fetchOverlayData(null)
+    apiFetch(`/mapping/caves/${caveId}/pois/`)
+      .then(data => setOverlayPois(data?.pois || []))
       .catch(() => {})
   }, [showOverlay, caveId])
 
@@ -123,15 +153,15 @@ export default function CaveDetail() {
     formData.append('caption', uploadCaption)
     formData.append('tags', uploadTags)
     try {
-      const res = await fetch(`/api/caves/${caveId}/photos/`, {
+      await apiFetch(`/caves/${caveId}/photos/`, {
         method: 'POST',
         body: formData,
       })
-      if (res.ok) {
-        URL.revokeObjectURL(uploadDialog.preview)
-        setUploadDialog(null)
-        fetchCave()
-      }
+      URL.revokeObjectURL(uploadDialog.preview)
+      setUploadDialog(null)
+      fetchCave()
+    } catch (err) {
+      console.error('Photo upload failed:', err)
     } finally {
       setUploadingPhoto(false)
     }
@@ -152,28 +182,29 @@ export default function CaveDetail() {
   const savePhotoEdit = async (photoId) => {
     setSavingPhotoEdit(true)
     try {
-      const res = await fetch(`/api/caves/${caveId}/photos/${photoId}/`, {
+      await apiFetch(`/caves/${caveId}/photos/${photoId}/`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caption: editCaption, tags: editTags }),
+        body: { caption: editCaption, tags: editTags },
       })
-      if (res.ok) {
-        setEditingPhoto(null)
-        fetchCave()
-      }
+      setEditingPhoto(null)
+      fetchCave()
+    } catch (err) {
+      console.error('Photo edit failed:', err)
     } finally {
       setSavingPhotoEdit(false)
     }
   }
 
   const deletePhoto = async (photoId) => {
-    const res = await fetch(`/api/caves/${caveId}/photos/${photoId}/`, {
-      method: 'DELETE',
-    })
-    if (res.ok) {
+    try {
+      await apiFetch(`/caves/${caveId}/photos/${photoId}/`, {
+        method: 'DELETE',
+      })
       setCarouselOpen(false)
       setEditingPhoto(null)
       fetchCave()
+    } catch (err) {
+      console.error('Photo delete failed:', err)
     }
   }
 
@@ -182,12 +213,14 @@ export default function CaveDetail() {
     if (!newComment.trim()) return
     setSubmittingComment(true)
     try {
-      const res = await fetch(`/api/caves/${caveId}/comments/`, {
+      await apiFetch(`/caves/${caveId}/comments/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: newComment }),
+        body: { text: newComment },
       })
-      if (res.ok) { setNewComment(''); fetchCave() }
+      setNewComment('')
+      fetchCave()
+    } catch (err) {
+      console.error('Comment failed:', err)
     } finally {
       setSubmittingComment(false)
     }
@@ -203,29 +236,29 @@ export default function CaveDetail() {
   const saveDescription = async () => {
     setSavingDesc(true)
     try {
-      const res = await fetch(`/api/caves/${caveId}/description/`, {
+      await apiFetch(`/caves/${caveId}/description/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           content: descDraft,
           edit_summary: editSummary || 'Updated description',
-        }),
+        },
       })
-      if (res.ok) {
-        setEditingDesc(false)
-        fetchCave()
-      }
+      setEditingDesc(false)
+      fetchCave()
+    } catch (err) {
+      console.error('Save description failed:', err)
     } finally {
       setSavingDesc(false)
     }
   }
 
   const fetchHistory = async () => {
-    const res = await fetch(`/api/caves/${caveId}/description/`)
-    if (res.ok) {
-      const data = await res.json()
+    try {
+      const data = await apiFetch(`/caves/${caveId}/description/`)
       setRevisions(data.revisions || [])
       setShowHistory(true)
+    } catch (err) {
+      console.error('Fetch history failed:', err)
     }
   }
 
@@ -432,6 +465,28 @@ export default function CaveDetail() {
         {/* Land Owner / Property Info */}
         <LandOwnerSection cave={cave} caveId={caveId} user={user} onUpdate={fetchCave} />
 
+        {/* Pending Requests (cave owner only) */}
+        {!!user && cave.owner === user.id && pendingRequests.length > 0 && (
+          <div className="px-4 py-3">
+            <h3 className="text-white font-semibold mb-2">
+              Pending Requests
+              <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-amber-900/30 text-amber-400 border border-amber-800/30">
+                {pendingRequests.length}
+              </span>
+            </h3>
+            <div className="space-y-2">
+              {pendingRequests.map(req => (
+                <RequestCard
+                  key={req.id}
+                  request={req}
+                  caveId={caveId}
+                  onResolved={() => { fetchRequests(); fetchCave() }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Description - Wiki style with markdown */}
         <div className="px-4 py-3">
           <div className="flex items-center justify-between mb-2">
@@ -535,47 +590,106 @@ export default function CaveDetail() {
         {/* Surface map */}
         {hasLocation && (
           <div className="px-4 py-3">
-            {cave.has_map && (
-              <div className="flex items-center gap-2 mb-2">
-                <button
-                  onClick={() => setShowOverlay(v => !v)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all
-                    ${showOverlay
-                      ? 'bg-cyan-900/40 text-[var(--cyber-cyan)] border border-cyan-700/50'
-                      : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]'}`}
-                >
-                  {showOverlay ? 'Hide Underground' : 'Show Underground'}
-                </button>
-                {showOverlay && overlayMapData && (overlayMapData.levels || []).length > 1 && (
-                  <div className="flex gap-1">
-                    {overlayMapData.levels.map(l => (
-                      <button key={l.index}
-                        onClick={() => setOverlayLevel(l.index)}
-                        className={`px-2 py-1 rounded-full text-xs transition-all
-                          ${overlayLevel === l.index
-                            ? 'bg-cyan-900/40 text-[var(--cyber-cyan)] border border-cyan-700/50'
-                            : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]'}`}
+            <div className="relative">
+              <SurfaceMap
+                center={[cave.latitude, cave.longitude]}
+                markers={[{ lat: cave.latitude, lon: cave.longitude, label: cave.name }]}
+                zoom={14}
+                height={showOverlay ? '20rem' : '12rem'}
+                className="border border-[var(--cyber-border)]"
+                caveMapData={overlayMapData}
+                caveMapMode={overlayMode || 'standard'}
+                cavePois={overlayPois}
+                caveHeading={cave.slam_heading || 0}
+                caveOverlayVisible={showOverlay}
+                caveOverlayOpacity={overlayOpacity}
+                caveOverlayLevel={overlayLevel}
+                parcelGeometry={cave.land_owner?.parcel_geometry}
+              />
+
+              {/* Floating layer panel — Google Earth style */}
+              {cave.has_map && (
+                <div className="absolute top-2 right-2 z-[1000] flex flex-col items-end gap-1">
+                  {/* Toggle overlay button */}
+                  <button
+                    onClick={() => setShowOverlay(v => !v)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all shadow-lg
+                      ${showOverlay
+                        ? 'bg-cyan-900/80 text-[var(--cyber-cyan)] border border-cyan-700/50 backdrop-blur-sm'
+                        : 'bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50'}`}
+                  >
+                    {showOverlay ? 'Hide Underground' : 'Show Underground'}
+                  </button>
+
+                  {/* Collapsible controls panel */}
+                  {showOverlay && overlayMapData && (
+                    <div className="rounded-xl bg-[#0a0a12]/90 backdrop-blur-sm border border-[var(--cyber-border)] shadow-lg overflow-hidden"
+                      style={{ minWidth: '10rem' }}>
+                      {/* Panel header — click to collapse/expand */}
+                      <button
+                        onClick={() => setOverlayPanelOpen(v => !v)}
+                        className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-[var(--cyber-text-dim)] hover:text-white transition-colors"
                       >
-                        {l.name}
+                        <span className="font-medium">Map Layers</span>
+                        <span className="text-[10px]">{overlayPanelOpen ? '\u25BE' : '\u25B8'}</span>
                       </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            <SurfaceMap
-              center={[cave.latitude, cave.longitude]}
-              markers={[{ lat: cave.latitude, lon: cave.longitude, label: cave.name }]}
-              zoom={14}
-              height={showOverlay ? '16rem' : '12rem'}
-              className="border border-[var(--cyber-border)]"
-              caveMapData={overlayMapData}
-              cavePois={overlayPois}
-              caveHeading={cave.slam_heading || 0}
-              caveOverlayVisible={showOverlay}
-              caveOverlayLevel={overlayLevel}
-              parcelGeometry={cave.land_owner?.parcel_geometry}
-            />
+
+                      {overlayPanelOpen && (
+                        <div className="px-3 pb-2.5 space-y-2">
+                          {/* Mode pills */}
+                          {availableModes.length > 1 && (
+                            <div className="flex flex-wrap gap-1">
+                              {MODE_ORDER.filter(m => availableModes.includes(m)).map(mode => (
+                                <button
+                                  key={mode}
+                                  onClick={() => fetchOverlayData(mode)}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap transition-all
+                                    ${mode === overlayMode
+                                      ? 'bg-[var(--cyber-cyan)] text-[var(--cyber-bg)]'
+                                      : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:border-[var(--cyber-cyan)] hover:text-[var(--cyber-cyan)]'
+                                    }`}
+                                >
+                                  {MODE_LABELS[mode] || mode}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Level pills */}
+                          {(overlayMapData.levels || []).length > 1 && (
+                            <div className="flex flex-wrap gap-1">
+                              {overlayMapData.levels.map(l => (
+                                <button key={l.index}
+                                  onClick={() => setOverlayLevel(l.index)}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all
+                                    ${overlayLevel === l.index
+                                      ? 'bg-[var(--cyber-cyan)] text-[var(--cyber-bg)]'
+                                      : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]'
+                                    }`}
+                                >
+                                  {l.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Opacity slider */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-[var(--cyber-text-dim)] whitespace-nowrap">Opacity</span>
+                            <input
+                              type="range" min="0.1" max="1" step="0.1"
+                              value={overlayOpacity}
+                              onChange={e => setOverlayOpacity(parseFloat(e.target.value))}
+                              className="flex-1 h-1 accent-[var(--cyber-cyan)]"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1068,6 +1182,15 @@ function LandOwnerSection({ cave, caveId, user, onUpdate }) {
   const [lookingUp, setLookingUp] = useState(false)
   const [form, setForm] = useState({})
 
+  // Contact request / submit state (server-backed via cave.user_pending_request)
+  const [submittingRequest, setSubmittingRequest] = useState(false)
+  const [showSubmitForm, setShowSubmitForm] = useState(false)
+  const [submitForm, setSubmitForm] = useState({ phone: '', email: '', address: '', notes: '' })
+  const [submittingContact, setSubmittingContact] = useState(false)
+
+  const hasPendingAccessRequest = (cave.user_pending_request || []).includes('contact_access')
+  const hasPendingSubmission = (cave.user_pending_request || []).includes('contact_submission')
+
   const startEdit = () => {
     setForm({
       owner_name: landOwner?.owner_name || '',
@@ -1118,7 +1241,7 @@ function LandOwnerSection({ cave, caveId, user, onUpdate }) {
   const hasParcel = landOwner && (landOwner.parcel_id || landOwner.parcel_address)
   const hasAlwaysVisibleLinks = landOwner && (landOwner.tpad_link || landOwner.gis_map_link || landOwner.parcel_geometry)
   const isPublic = landOwner?.contact_visibility === 'public'
-  const canSeeContact = isPublic || isCaveOwner
+  const canSeeContact = isPublic || isCaveOwner || cave.user_has_contact_access
 
   // Show section if there's data, user is cave owner, or user can run GIS lookup
   const canLookup = !!user && cave.has_location
@@ -1272,11 +1395,107 @@ function LandOwnerSection({ cave, caveId, user, onUpdate }) {
                 </div>
               )}
 
-              {/* Private notice for non-owners */}
-              {!isPublic && !isCaveOwner && hasContact && (
-                <span className="inline-block px-2.5 py-1 rounded-full text-xs border bg-amber-900/30 text-amber-400 border-amber-800/30">
-                  Contact info available on request
-                </span>
+              {/* Private contact notice / request button for non-owners */}
+              {!canSeeContact && !isCaveOwner && landOwner?.has_private_contact && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {hasPendingAccessRequest ? (
+                    <span className="inline-block px-2.5 py-1 rounded-full text-xs border bg-emerald-900/30 text-emerald-400 border-emerald-800/30">
+                      Access request pending
+                    </span>
+                  ) : (
+                    <button
+                      disabled={submittingRequest}
+                      onClick={async () => {
+                        setSubmittingRequest(true)
+                        try {
+                          await apiFetch(`/caves/${caveId}/requests/`, {
+                            method: 'POST',
+                            body: { request_type: 'contact_access' },
+                          })
+                          onUpdate()
+                        } catch (err) {
+                          console.error('Request failed:', err)
+                        } finally {
+                          setSubmittingRequest(false)
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium
+                        bg-amber-900/30 text-amber-400 border border-amber-800/30
+                        hover:bg-amber-900/50 hover:border-amber-600/50 transition-colors cursor-pointer"
+                    >
+                      {submittingRequest ? 'Sending...' : 'Request Contact Access'}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* No contact info + submit button for non-owners */}
+              {!isCaveOwner && !landOwner?.has_private_contact && !isPublic && !(landOwner?.phone || landOwner?.email || landOwner?.address) && (
+                <div className="space-y-2">
+                  <span className="inline-block px-2.5 py-1 rounded-full text-xs border bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border-[var(--cyber-border)]">
+                    No contact information
+                  </span>
+                  {user && !showSubmitForm && !hasPendingSubmission && (
+                    <button
+                      onClick={() => setShowSubmitForm(true)}
+                      className="block text-[var(--cyber-cyan)] text-xs hover:underline"
+                    >
+                      Submit contact info to entry owner
+                    </button>
+                  )}
+                  {hasPendingSubmission && (
+                    <span className="block text-emerald-400 text-xs">Contact info submitted - pending review</span>
+                  )}
+                  {showSubmitForm && (
+                    <div className="space-y-2 p-3 rounded-xl bg-[var(--cyber-bg)] border border-[var(--cyber-border)]">
+                      <p className="text-[var(--cyber-text-dim)] text-xs">This will be sent to the cave entry owner for review.</p>
+                      <input value={submitForm.phone} onChange={e => setSubmitForm(f => ({ ...f, phone: e.target.value }))}
+                        placeholder="Phone" className="cyber-input w-full px-3 py-1.5 text-xs" />
+                      <input value={submitForm.email} onChange={e => setSubmitForm(f => ({ ...f, email: e.target.value }))}
+                        placeholder="Email" className="cyber-input w-full px-3 py-1.5 text-xs" />
+                      <input value={submitForm.address} onChange={e => setSubmitForm(f => ({ ...f, address: e.target.value }))}
+                        placeholder="Address" className="cyber-input w-full px-3 py-1.5 text-xs" />
+                      <textarea value={submitForm.notes} onChange={e => setSubmitForm(f => ({ ...f, notes: e.target.value }))}
+                        placeholder="Additional notes..." className="cyber-textarea w-full px-3 py-1.5 text-xs" rows={2} />
+                      <div className="flex gap-2">
+                        <button
+                          disabled={submittingContact || (!submitForm.phone && !submitForm.email && !submitForm.address)}
+                          onClick={async () => {
+                            setSubmittingContact(true)
+                            try {
+                              await apiFetch(`/caves/${caveId}/requests/`, {
+                                method: 'POST',
+                                body: {
+                                  request_type: 'contact_submission',
+                                  payload: {
+                                    phone: submitForm.phone,
+                                    email: submitForm.email,
+                                    address: submitForm.address,
+                                    notes: submitForm.notes,
+                                  },
+                                },
+                              })
+                              setShowSubmitForm(false)
+                              setSubmitForm({ phone: '', email: '', address: '', notes: '' })
+                              onUpdate()
+                            } catch (err) {
+                              console.error('Submit contact failed:', err)
+                            } finally {
+                              setSubmittingContact(false)
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-cyan-600 to-cyan-700 text-white"
+                        >
+                          {submittingContact ? 'Sending...' : 'Send to Owner'}
+                        </button>
+                        <button onClick={() => setShowSubmitForm(false)}
+                          className="px-3 py-1.5 rounded-full text-xs text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Private notes (cave owner only) */}
@@ -1374,5 +1593,83 @@ function Badge({ color, text }) {
     <span className={`inline-block px-2.5 py-1 rounded-full text-xs border ${colors[color]}`}>
       {text}
     </span>
+  )
+}
+
+function RequestCard({ request, caveId, onResolved }) {
+  const [resolving, setResolving] = useState(false)
+
+  const resolve = async (newStatus) => {
+    setResolving(true)
+    try {
+      await apiFetch(`/caves/${caveId}/requests/${request.id}/resolve/`, {
+        method: 'PATCH',
+        body: { status: newStatus },
+      })
+      onResolved()
+    } catch (err) {
+      console.error('Resolve failed:', err)
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const isAccess = request.request_type === 'contact_access'
+
+  return (
+    <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-3">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[var(--cyber-text)] text-sm font-medium">
+            {request.requester_username}
+          </span>
+          <span className={`inline-block px-2 py-0.5 rounded-full text-xs border
+            ${isAccess
+              ? 'bg-amber-900/30 text-amber-400 border-amber-800/30'
+              : 'bg-cyan-900/30 text-[var(--cyber-cyan)] border-cyan-800/30'
+            }`}>
+            {isAccess ? 'Access Request' : 'Contact Submission'}
+          </span>
+        </div>
+        <span className="text-[#555570] text-xs">
+          {new Date(request.created_at).toLocaleDateString()}
+        </span>
+      </div>
+
+      {request.message && (
+        <p className="text-[var(--cyber-text-dim)] text-sm mb-2">{request.message}</p>
+      )}
+
+      {!isAccess && request.payload && (
+        <div className="text-xs space-y-0.5 mb-2 p-2 rounded-lg bg-[var(--cyber-bg)] border border-[var(--cyber-border)]">
+          {request.payload.phone && (
+            <p className="text-[var(--cyber-text-dim)]">Phone: <span className="text-[var(--cyber-text)]">{request.payload.phone}</span></p>
+          )}
+          {request.payload.email && (
+            <p className="text-[var(--cyber-text-dim)]">Email: <span className="text-[var(--cyber-text)]">{request.payload.email}</span></p>
+          )}
+          {request.payload.address && (
+            <p className="text-[var(--cyber-text-dim)]">Address: <span className="text-[var(--cyber-text)]">{request.payload.address}</span></p>
+          )}
+          {request.payload.notes && (
+            <p className="text-[var(--cyber-text-dim)]">Notes: <span className="text-[var(--cyber-text)]">{request.payload.notes}</span></p>
+          )}
+          <p className="text-[#555570] text-xs italic mt-1">Accepting will auto-fill these into the property owner record</p>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button onClick={() => resolve('accepted')} disabled={resolving}
+          className="px-3 py-1.5 rounded-full text-xs font-semibold
+            bg-gradient-to-r from-emerald-600 to-emerald-700 text-white">
+          {resolving ? '...' : isAccess ? 'Grant Access' : 'Accept & Apply'}
+        </button>
+        <button onClick={() => resolve('denied')} disabled={resolving}
+          className="px-3 py-1.5 rounded-full text-xs text-red-400 border border-red-800/30
+            hover:bg-red-900/20 transition-colors">
+          Deny
+        </button>
+      </div>
+    </div>
   )
 }

@@ -291,7 +291,11 @@ def post_list(request):
         if request.user and request.user.is_authenticated:
             current_user_id = request.user.id
 
-        if grotto_id:
+        cave_id = request.query_params.get('cave')
+
+        if cave_id:
+            posts = posts.filter(cave_id=cave_id)
+        elif grotto_id:
             posts = posts.filter(grotto_id=grotto_id)
         elif user_id:
             posts = posts.filter(author_id=user_id)

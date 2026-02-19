@@ -14,4 +14,7 @@ urlpatterns = [
     path('<uuid:cave_id>/map-data/', views.cave_map_data, name='cave_map_data'),
     path('<uuid:cave_id>/land-owner/', views.cave_land_owner, name='cave_land_owner'),
     path('<uuid:cave_id>/land-owner/gis-lookup/', views.cave_land_owner_gis_lookup, name='cave_land_owner_gis_lookup'),
+    path('<uuid:cave_id>/requests/', views.cave_requests, name='cave_requests'),
+    path('<uuid:cave_id>/requests/<uuid:request_id>/resolve/', views.cave_request_resolve, name='cave_request_resolve'),
+    path('<uuid:cave_id>/requests/<uuid:request_id>/', views.cave_request_delete, name='cave_request_delete'),
 ]

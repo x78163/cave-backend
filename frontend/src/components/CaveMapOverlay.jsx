@@ -27,23 +27,41 @@ const POI_COLORS = {
   survey_station: '#94a3b8', transition: '#a78bfa', marker: '#e2e8f0',
 }
 
+// Heatmap colormap: inferno-like (dark → purple → red → orange → yellow)
+const HEATMAP_STOPS = [
+  [0.0,   0,   0,  20],
+  [0.15, 20,   0, 100],
+  [0.3,  80,   0, 160],
+  [0.45, 160, 20, 120],
+  [0.6,  200, 50,  40],
+  [0.75, 240, 130, 10],
+  [0.9,  255, 210, 30],
+  [1.0,  255, 255, 180],
+]
+
+function heatmapRGB(t) {
+  for (let i = 0; i < HEATMAP_STOPS.length - 1; i++) {
+    if (t <= HEATMAP_STOPS[i + 1][0]) {
+      const s = (t - HEATMAP_STOPS[i][0]) / (HEATMAP_STOPS[i + 1][0] - HEATMAP_STOPS[i][0])
+      return [
+        Math.floor(HEATMAP_STOPS[i][1] + s * (HEATMAP_STOPS[i + 1][1] - HEATMAP_STOPS[i][1])),
+        Math.floor(HEATMAP_STOPS[i][2] + s * (HEATMAP_STOPS[i + 1][2] - HEATMAP_STOPS[i][2])),
+        Math.floor(HEATMAP_STOPS[i][3] + s * (HEATMAP_STOPS[i + 1][3] - HEATMAP_STOPS[i][3])),
+      ]
+    }
+  }
+  return [255, 255, 180]
+}
+
 /**
  * Renders cave map data as Leaflet layers on an existing map.
- *
- * Props:
- *   map          - Leaflet map instance (required)
- *   mapData      - Cave map JSON (levels, walls, trajectory)
- *   pois         - Array of POI objects [{slam_x, slam_y, poi_type, label}]
- *   anchorLat    - Cave entrance latitude
- *   anchorLon    - Cave entrance longitude
- *   heading      - SLAM heading in degrees (default 0)
- *   selectedLevel - Which level to show (index, or -1 for all)
- *   opacity      - Layer opacity 0-1 (default 0.6)
- *   visible      - Show/hide toggle
+ * Supports all map modes: walls-based (quick, standard, detailed, edges, raw_slice),
+ * heatmap (grid image overlay), and points (density-weighted circle markers).
  */
 export default function CaveMapOverlay({
   map,
   mapData,
+  mode = 'standard',
   pois = [],
   anchorLat,
   anchorLon,
@@ -82,20 +100,76 @@ export default function CaveMapOverlay({
       : levels.filter(l => l.index === selectedLevel)
 
     for (const level of levelsToRender) {
-      // Render wall polylines
-      if (level.walls) {
+      // ── Heatmap mode: render as image overlay ──
+      if (mode === 'heatmap' && level.heatmap) {
+        const hm = level.heatmap
+        const canvas = document.createElement('canvas')
+        canvas.width = hm.width
+        canvas.height = hm.height
+        const ctx = canvas.getContext('2d')
+        const imgData = ctx.createImageData(hm.width, hm.height)
+        const px = imgData.data
+
+        for (let row = 0; row < hm.height; row++) {
+          for (let col = 0; col < hm.width; col++) {
+            const val = hm.data[row][col]
+            const idx = (row * hm.width + col) * 4
+            if (val <= 0.01) {
+              px[idx + 3] = 0
+              continue
+            }
+            const [r, g, b] = heatmapRGB(val)
+            px[idx] = r
+            px[idx + 1] = g
+            px[idx + 2] = b
+            px[idx + 3] = Math.floor((55 + val * 200) * opacity)
+          }
+        }
+        ctx.putImageData(imgData, 0, 0)
+
+        // Convert grid corners from SLAM coords to lat/lon
+        const ox = hm.origin[0]
+        const oy = hm.origin[1]
+        const sw = convert(ox, oy)
+        const ne = convert(ox + hm.width * hm.resolution, oy + hm.height * hm.resolution)
+        const bounds = L.latLngBounds(sw, ne)
+
+        L.imageOverlay(canvas.toDataURL(), bounds, {
+          opacity: 1, // alpha already baked into pixels
+          interactive: false,
+        }).addTo(group)
+
+      // ── Points mode: render density-weighted circle markers ──
+      } else if (mode === 'points' && level.density && level.density.points) {
+        const pts = level.density.points
+        for (const [x, y, d] of pts) {
+          const latlng = convert(x, y)
+          const radius = 2 + d * 4
+          const alpha = (0.25 + d * 0.75) * opacity
+          L.circleMarker(latlng, {
+            radius: radius,
+            color: 'transparent',
+            fillColor: `rgb(200, 215, 230)`,
+            fillOpacity: alpha,
+            weight: 0,
+          }).addTo(group)
+        }
+
+      // ── Walls-based modes (quick, standard, detailed, edges, raw_slice) ──
+      } else if (level.walls) {
+        const wallColor = mode === 'edges' ? '#ff9800' : '#00e5ff'
         for (const wall of level.walls) {
           if (wall.length < 2) continue
           const latlngs = wall.map(([x, y]) => convert(x, y))
           L.polyline(latlngs, {
-            color: '#00e5ff',
+            color: wallColor,
             weight: 1.5,
             opacity: opacity,
           }).addTo(group)
         }
       }
 
-      // Render trajectory as dashed line
+      // Render trajectory as dashed line (all modes)
       if (level.trajectory && level.trajectory.length >= 2) {
         const latlngs = level.trajectory.map(([x, y]) => convert(x, y))
         L.polyline(latlngs, {
@@ -136,7 +210,7 @@ export default function CaveMapOverlay({
         layerGroupRef.current = null
       }
     }
-  }, [map, mapData, pois, anchorLat, anchorLon, heading, selectedLevel, opacity, visible])
+  }, [map, mapData, mode, pois, anchorLat, anchorLon, heading, selectedLevel, opacity, visible])
 
   return null
 }

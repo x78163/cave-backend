@@ -2,7 +2,7 @@ from django.db.models import Avg, Count
 from rest_framework import serializers
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
-    CavePermission, CaveShareLink, LandOwner,
+    CavePermission, CaveShareLink, LandOwner, CaveRequest,
 )
 
 
@@ -52,6 +52,7 @@ class LandOwnerSerializer(serializers.ModelSerializer):
 
 class LandOwnerPublicSerializer(serializers.ModelSerializer):
     """Public serializer — hides private contact details but shows GIS data."""
+    has_private_contact = serializers.SerializerMethodField()
 
     class Meta:
         model = LandOwner
@@ -62,8 +63,12 @@ class LandOwnerPublicSerializer(serializers.ModelSerializer):
             'parcel_land_use', 'gis_county', 'tpad_link',
             'parcel_geometry',
             'property_class', 'property_type', 'last_sale_date', 'gis_map_link',
+            'has_private_contact',
         ]
         read_only_fields = ['id']
+
+    def get_has_private_contact(self, obj):
+        return bool(obj.phone or obj.email or obj.address)
 
 
 class LandOwnerMutedSerializer(serializers.ModelSerializer):
@@ -71,15 +76,19 @@ class LandOwnerMutedSerializer(serializers.ModelSerializer):
 
     Only always-visible fields: TPAD link, GIS Map link, polygon boundary.
     """
+    has_private_contact = serializers.SerializerMethodField()
 
     class Meta:
         model = LandOwner
         fields = [
             'id', 'gis_fields_visible',
             'tpad_link', 'gis_map_link', 'parcel_geometry',
-            'contact_visibility',
+            'contact_visibility', 'has_private_contact',
         ]
         read_only_fields = ['id']
+
+    def get_has_private_contact(self, obj):
+        return bool(obj.phone or obj.email or obj.address)
 
 
 class CaveListSerializer(serializers.ModelSerializer):
@@ -122,6 +131,9 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
     land_owner = serializers.SerializerMethodField()
+    pending_request_count = serializers.SerializerMethodField()
+    user_pending_request = serializers.SerializerMethodField()
+    user_has_contact_access = serializers.SerializerMethodField()
 
     class Meta:
         model = Cave
@@ -140,6 +152,8 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'average_rating', 'rating_count',
             'revision_count', 'latest_revision',
             'land_owner',
+            'pending_request_count', 'user_pending_request',
+            'user_has_contact_access',
             'visibility', 'collaboration_setting',
             'owner', 'origin_device',
             'created_at', 'updated_at',
@@ -158,6 +172,38 @@ class CaveDetailSerializer(serializers.ModelSerializer):
         if rev:
             return DescriptionRevisionSerializer(rev).data
         return None
+
+    def get_pending_request_count(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return 0
+        if obj.owner_id != request.user.id:
+            return 0
+        return obj.requests.filter(status='pending').count()
+
+    def get_user_pending_request(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return []
+        pending = list(
+            obj.requests.filter(requester=request.user, status='pending')
+            .values_list('request_type', flat=True)
+        )
+        return pending
+
+    def get_user_has_contact_access(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if obj.owner_id == request.user.id:
+            return True
+        try:
+            lo = obj.land_owner
+            if lo.contact_visibility == 'public':
+                return True
+            return lo.contact_access_users.filter(id=request.user.id).exists()
+        except LandOwner.DoesNotExist:
+            return False
 
     def get_land_owner(self, obj):
         try:
@@ -178,6 +224,10 @@ class CaveDetailSerializer(serializers.ModelSerializer):
         # Public contact info
         if lo.contact_visibility == 'public':
             return LandOwnerSerializer(lo).data
+        # User granted contact access via M2M
+        if (request and request.user.is_authenticated
+                and lo.contact_access_users.filter(id=request.user.id).exists()):
+            return LandOwnerSerializer(lo).data
         return LandOwnerPublicSerializer(lo).data
 
 
@@ -196,3 +246,27 @@ class CaveShareLinkSerializer(serializers.ModelSerializer):
             'max_uses', 'use_count', 'is_active', 'is_expired', 'created_at',
         ]
         read_only_fields = ['id', 'token', 'use_count', 'created_at', 'is_expired']
+
+
+class CaveRequestSerializer(serializers.ModelSerializer):
+    requester_username = serializers.CharField(source='requester.username', read_only=True)
+    cave_name = serializers.CharField(source='cave.name', read_only=True)
+    resolved_by_username = serializers.CharField(
+        source='resolved_by.username', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = CaveRequest
+        fields = [
+            'id', 'cave', 'cave_name',
+            'requester', 'requester_username',
+            'request_type', 'status',
+            'message', 'payload',
+            'resolved_by', 'resolved_by_username', 'resolved_at',
+            'created_at',
+        ]
+        read_only_fields = [
+            'id', 'cave_name', 'requester_username',
+            'resolved_by', 'resolved_by_username', 'resolved_at',
+            'created_at',
+        ]

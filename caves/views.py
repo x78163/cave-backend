@@ -15,14 +15,14 @@ from rest_framework.response import Response
 
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
-    CavePermission, CaveShareLink, LandOwner,
+    CavePermission, CaveShareLink, LandOwner, CaveRequest,
 )
 from .serializers import (
     CaveListSerializer, CaveDetailSerializer,
     CavePhotoSerializer, CaveCommentSerializer,
     DescriptionRevisionSerializer,
     CavePermissionSerializer, CaveShareLinkSerializer,
-    LandOwnerSerializer,
+    LandOwnerSerializer, CaveRequestSerializer,
 )
 
 
@@ -114,7 +114,7 @@ def cave_list(request):
                     revision_number=1,
                 )
             return Response(
-                CaveDetailSerializer(cave).data,
+                CaveDetailSerializer(cave, context={'request': request}).data,
                 status=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -129,13 +129,15 @@ def cave_detail(request, cave_id):
     except Cave.DoesNotExist:
         return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    ctx = {'request': request}
+
     if request.method == 'GET':
-        serializer = CaveDetailSerializer(cave)
+        serializer = CaveDetailSerializer(cave, context=ctx)
         return Response(serializer.data)
 
     elif request.method in ('PUT', 'PATCH'):
         old_lat, old_lon = cave.latitude, cave.longitude
-        serializer = CaveDetailSerializer(cave, data=request.data, partial=True)
+        serializer = CaveDetailSerializer(cave, data=request.data, partial=True, context=ctx)
         if serializer.is_valid():
             cave = serializer.save()
             # If coordinates changed, clear stale GIS parcel data
@@ -433,3 +435,177 @@ def cave_land_owner_gis_lookup(request, cave_id):
         result['land_owner'] = LandOwnerSerializer(lo).data
 
     return Response(result)
+
+
+# ── Cave Requests ─────────────────────────────────────────────
+
+
+@api_view(['GET', 'POST'])
+def cave_requests(request, cave_id):
+    """
+    GET: List requests for a cave. Owner sees all; others see only their own.
+    POST: Create a contact_access or contact_submission request.
+    """
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        is_owner = (
+            request.user.is_authenticated
+            and cave.owner_id
+            and cave.owner_id == request.user.id
+        )
+        if is_owner:
+            qs = cave.requests.select_related('requester', 'resolved_by')
+            req_status = request.query_params.get('status')
+            if req_status:
+                qs = qs.filter(status=req_status)
+        elif request.user.is_authenticated:
+            qs = cave.requests.filter(requester=request.user)
+        else:
+            qs = CaveRequest.objects.none()
+
+        serializer = CaveRequestSerializer(qs, many=True)
+        return Response({'requests': serializer.data, 'count': qs.count()})
+
+    # POST
+    if not request.user.is_authenticated:
+        return Response(
+            {'error': 'Authentication required'},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    request_type = request.data.get('request_type')
+    if request_type not in ('contact_access', 'contact_submission'):
+        return Response(
+            {'error': 'request_type must be "contact_access" or "contact_submission"'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if cave.owner_id == request.user.id:
+        return Response(
+            {'error': 'Cave owner does not need to request access'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    existing = CaveRequest.objects.filter(
+        cave=cave, requester=request.user,
+        request_type=request_type, status='pending',
+    ).exists()
+    if existing:
+        return Response(
+            {'error': 'You already have a pending request of this type'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    payload = None
+    if request_type == 'contact_submission':
+        payload = request.data.get('payload')
+        if not payload or not isinstance(payload, dict):
+            return Response(
+                {'error': 'Contact submission requires a payload with contact fields'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not any(payload.get(k) for k in ('phone', 'email', 'address')):
+            return Response(
+                {'error': 'Payload must include at least phone, email, or address'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    cave_request = CaveRequest.objects.create(
+        cave=cave,
+        requester=request.user,
+        request_type=request_type,
+        message=request.data.get('message', ''),
+        payload=payload,
+    )
+    serializer = CaveRequestSerializer(cave_request)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH'])
+def cave_request_resolve(request, cave_id, request_id):
+    """Accept or deny a cave request. Only the cave owner can resolve."""
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated or cave.owner_id != request.user.id:
+        return Response(
+            {'error': 'Only the cave owner can resolve requests'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        cave_request = CaveRequest.objects.get(id=request_id, cave=cave)
+    except CaveRequest.DoesNotExist:
+        return Response({'error': 'Request not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if cave_request.status != 'pending':
+        return Response(
+            {'error': f'Request is already {cave_request.status}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    new_status = request.data.get('status')
+    if new_status not in ('accepted', 'denied'):
+        return Response(
+            {'error': 'status must be "accepted" or "denied"'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from django.utils import timezone
+
+    cave_request.status = new_status
+    cave_request.resolved_by = request.user
+    cave_request.resolved_at = timezone.now()
+    cave_request.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+
+    if new_status == 'accepted':
+        if cave_request.request_type == 'contact_access':
+            lo, _ = LandOwner.objects.get_or_create(cave=cave)
+            lo.contact_access_users.add(cave_request.requester)
+
+        elif cave_request.request_type == 'contact_submission':
+            lo, _ = LandOwner.objects.get_or_create(cave=cave)
+            payload = cave_request.payload or {}
+            if payload.get('phone'):
+                lo.phone = payload['phone']
+            if payload.get('email'):
+                lo.email = payload['email']
+            if payload.get('address'):
+                lo.address = payload['address']
+            if payload.get('notes'):
+                if lo.notes:
+                    lo.notes += f'\n\n--- Submitted by {cave_request.requester.username} ---\n{payload["notes"]}'
+                else:
+                    lo.notes = payload['notes']
+            if payload.get('owner_name'):
+                lo.owner_name = payload['owner_name']
+            lo.save()
+
+    serializer = CaveRequestSerializer(cave_request)
+    return Response(serializer.data)
+
+
+@api_view(['DELETE'])
+def cave_request_delete(request, cave_id, request_id):
+    """Delete/cancel a request. Requester or cave owner can delete."""
+    try:
+        cave_request = CaveRequest.objects.get(id=request_id, cave_id=cave_id)
+    except CaveRequest.DoesNotExist:
+        return Response({'error': 'Request not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    is_requester = request.user.is_authenticated and cave_request.requester_id == request.user.id
+    is_owner = request.user.is_authenticated and cave_request.cave.owner_id == request.user.id
+    if not is_requester and not is_owner:
+        return Response(
+            {'error': 'Not authorized to delete this request'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    cave_request.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)

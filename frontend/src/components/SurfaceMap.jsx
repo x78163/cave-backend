@@ -55,6 +55,7 @@ export default function SurfaceMap({
   interactive = true,
   className = '',
   caveMapData = null,
+  caveMapMode = 'standard',
   cavePois = [],
   caveHeading = 0,
   caveOverlayVisible = false,
@@ -189,6 +190,7 @@ export default function SurfaceMap({
       <CaveMapOverlay
         map={mapRef.current}
         mapData={caveMapData}
+        mode={caveMapMode}
         pois={cavePois}
         anchorLat={anchor?.lat}
         anchorLon={anchor?.lon}

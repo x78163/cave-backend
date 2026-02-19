@@ -200,6 +200,12 @@ class LandOwner(models.Model):
         help_text='Link to TN GIS assessment map',
     )
 
+    # Users granted access to see private contact info
+    contact_access_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True,
+        related_name='contact_access_caves',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -352,3 +358,54 @@ class CaveShareLink(models.Model):
         if self.max_uses and self.use_count >= self.max_uses:
             return True
         return not self.is_active
+
+
+class CaveRequest(models.Model):
+    """
+    Actionable request tied to a cave — contact access requests and
+    contact info submissions. Accept/deny lifecycle with side effects.
+    """
+
+    class RequestType(models.TextChoices):
+        CONTACT_ACCESS = 'contact_access', 'Contact Access Request'
+        CONTACT_SUBMISSION = 'contact_submission', 'Contact Info Submission'
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        ACCEPTED = 'accepted', 'Accepted'
+        DENIED = 'denied', 'Denied'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cave = models.ForeignKey(Cave, on_delete=models.CASCADE, related_name='requests')
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='cave_requests',
+    )
+    request_type = models.CharField(max_length=20, choices=RequestType.choices)
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.PENDING,
+    )
+    message = models.TextField(blank=True, default='')
+    payload = models.JSONField(
+        null=True, blank=True, default=None,
+        help_text='Submitted contact data for contact_submission type',
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='resolved_cave_requests',
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cave', 'requester', 'request_type'],
+                condition=models.Q(status='pending'),
+                name='unique_pending_request_per_type',
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.requester} -> {self.cave.name} ({self.get_request_type_display()}: {self.status})'
