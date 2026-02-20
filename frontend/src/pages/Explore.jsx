@@ -1,26 +1,51 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
+import useAuthStore from '../stores/authStore'
 import SurfaceMap from '../components/SurfaceMap'
+import CsvImportModal from '../components/CsvImportModal'
 
 export default function Explore() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
   const [search, setSearch] = useState('')
-  const { data, loading } = useApi('/caves/')
+  const [showImport, setShowImport] = useState(false)
+  const [hoveredCaveId, setHoveredCaveId] = useState(null)
+  const [sortBy, setSortBy] = useState('name')
+  const { data, loading, refetch } = useApi('/caves/')
   const caves = data?.caves ?? data?.results ?? data ?? []
 
-  // Bidirectional hover state
-  const [hoveredCaveId, setHoveredCaveId] = useState(null)
-  const hoverTimerRef = useRef(null)
-  const cardRefsMap = useRef({})
+  const filtered = useMemo(() => {
+    let list = search
+      ? caves.filter(c =>
+          c.name.toLowerCase().includes(search.toLowerCase()) ||
+          (c.region || '').toLowerCase().includes(search.toLowerCase()) ||
+          (c.country || '').toLowerCase().includes(search.toLowerCase())
+        )
+      : [...caves]
 
-  const filtered = search
-    ? caves.filter(c =>
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        (c.region || '').toLowerCase().includes(search.toLowerCase()) ||
-        (c.country || '').toLowerCase().includes(search.toLowerCase())
-      )
-    : caves
+    switch (sortBy) {
+      case 'stars':
+        list.sort((a, b) => (Number(b.average_rating) || 0) - (Number(a.average_rating) || 0)
+          || (b.rating_count || 0) - (a.rating_count || 0))
+        break
+      case 'mapped':
+        list = list.filter(c => c.has_map)
+        break
+      case 'unmapped':
+        list = list.filter(c => !c.has_map)
+        break
+      case 'no_details':
+        list = list.filter(c => !c.description && !c.total_length && !c.has_map && !(c.rating_count > 0))
+        break
+      case 'activity':
+        list.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+        break
+      default: // 'name'
+        list.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return list
+  }, [caves, search, sortBy])
 
   // Caves with GPS coordinates for the overview map
   const markers = useMemo(
@@ -30,37 +55,26 @@ export default function Explore() {
     [filtered]
   )
 
+  // Default center: continental US; shift to markers if available
   const mapCenter = useMemo(() => {
-    if (markers.length === 0) return null
-    const avgLat = markers.reduce((s, m) => s + m.lat, 0) / markers.length
-    const avgLon = markers.reduce((s, m) => s + m.lon, 0) / markers.length
-    return [avgLat, avgLon]
+    const US_CENTER = [39.8, -98.6]
+    if (markers.length === 0) return US_CENTER
+    if (markers.length === 1) return [markers[0].lat, markers[0].lon]
+    return US_CENTER
   }, [markers])
 
-  // Map marker hovered → scroll card into view + highlight
-  const handleMarkerHover = useCallback((marker) => {
-    if (!marker) {
-      setHoveredCaveId(null)
-      return
-    }
-    setHoveredCaveId(marker.id)
-    const el = cardRefsMap.current[marker.id]
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    }
+  // Persist map view in sessionStorage so back-navigation restores it
+  const STORAGE_KEY = 'explore_map_view'
+  const savedView = useMemo(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch { return null }
   }, [])
 
-  // Card hovered → after 1s delay, highlight map marker + pan
-  const handleCardEnter = useCallback((caveId) => {
-    clearTimeout(hoverTimerRef.current)
-    hoverTimerRef.current = setTimeout(() => {
-      setHoveredCaveId(caveId)
-    }, 1000)
-  }, [])
-
-  const handleCardLeave = useCallback(() => {
-    clearTimeout(hoverTimerRef.current)
-    setHoveredCaveId(null)
+  const handleViewChange = useCallback((view) => {
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(view)) }
+    catch { /* ignore */ }
   }, [])
 
   return (
@@ -71,6 +85,16 @@ export default function Explore() {
           <span className="text-sm text-[var(--cyber-text-dim)]">
             {filtered.length} cave{filtered.length !== 1 ? 's' : ''}
           </span>
+          {user?.is_staff && (
+            <button
+              onClick={() => setShowImport(true)}
+              className="px-4 py-1.5 rounded-full text-sm font-semibold
+                border border-[var(--cyber-cyan)] text-[var(--cyber-cyan)]
+                hover:bg-[rgba(0,255,255,0.08)] transition-all"
+            >
+              Import CSV
+            </button>
+          )}
           <Link to="/caves/new"
             className="px-4 py-1.5 rounded-full text-sm font-semibold no-underline
               bg-gradient-to-r from-cyan-600 to-cyan-700 text-white
@@ -80,13 +104,27 @@ export default function Explore() {
         </div>
       </div>
 
-      <input
-        type="text"
-        placeholder="Search caves..."
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        className="cyber-input w-full px-4 py-2.5 mb-6"
-      />
+      <div className="flex gap-3 mb-6">
+        <input
+          type="text"
+          placeholder="Search caves..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="cyber-input flex-1 px-4 py-2.5"
+        />
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value)}
+          className="cyber-input px-3 py-2.5 text-sm min-w-[140px]"
+        >
+          <option value="name">Name A-Z</option>
+          <option value="stars">Top Rated</option>
+          <option value="activity">Recent Activity</option>
+          <option value="mapped">Mapped</option>
+          <option value="unmapped">Unmapped</option>
+          <option value="no_details">Needs Details</option>
+        </select>
+      </div>
 
       {/* Overview map */}
       {mapCenter && !loading && (
@@ -97,9 +135,9 @@ export default function Explore() {
             zoom={markers.length === 1 ? 13 : 10}
             height="16rem"
             onMarkerClick={(m) => navigate(`/caves/${m.id}`)}
-            onMarkerHover={handleMarkerHover}
-            highlightedMarkerId={hoveredCaveId}
             className="border border-[var(--cyber-border)]"
+            initialView={savedView}
+            onViewChange={handleViewChange}
           />
         </div>
       )}
@@ -116,10 +154,9 @@ export default function Explore() {
           {filtered.map(cave => (
             <Link
               key={cave.id}
-              ref={el => { cardRefsMap.current[cave.id] = el }}
               to={`/caves/${cave.id}`}
-              onMouseEnter={() => handleCardEnter(cave.id)}
-              onMouseLeave={handleCardLeave}
+              onMouseEnter={() => setHoveredCaveId(cave.id)}
+              onMouseLeave={() => setHoveredCaveId(null)}
               className={`cyber-card p-5 no-underline block transition-all duration-300 ${
                 hoveredCaveId === cave.id
                   ? 'ring-2 ring-[var(--cyber-cyan)] shadow-[0_0_16px_rgba(0,229,255,0.25)]'
@@ -171,6 +208,12 @@ export default function Explore() {
             </Link>
           ))}
         </div>
+      )}
+      {showImport && (
+        <CsvImportModal
+          onClose={() => setShowImport(false)}
+          onComplete={() => refetch()}
+        />
       )}
     </div>
   )

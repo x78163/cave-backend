@@ -18,6 +18,7 @@
     "@tiptap/starter-kit": "^3.19.0",
     "axios": "^1.13.5",
     "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
     "mgrs": "^2.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

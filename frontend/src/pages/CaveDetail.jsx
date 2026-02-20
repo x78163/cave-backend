@@ -597,6 +597,7 @@ export default function CaveDetail() {
                 zoom={14}
                 height={showOverlay ? '20rem' : '12rem'}
                 className="border border-[var(--cyber-border)]"
+                showCenterButton
                 caveMapData={overlayMapData}
                 caveMapMode={overlayMode || 'standard'}
                 cavePois={overlayPois}

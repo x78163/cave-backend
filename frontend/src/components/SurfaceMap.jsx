@@ -1,6 +1,8 @@
 import { useRef, useEffect } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet.markercluster'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
 import CaveMapOverlay from './CaveMapOverlay'
 
 // Cyan marker SVG for cave locations
@@ -9,25 +11,12 @@ const caveIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="
   <circle cx="14" cy="14" r="6" fill="#0a0a12"/>
 </svg>`
 
-const highlightIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="48" viewBox="0 0 34 48">
-  <path d="M17 0C7.6 0 0 7.6 0 17c0 12.75 17 31 17 31s17-18.25 17-31C34 7.6 26.4 0 17 0z" fill="#fff" stroke="#00e5ff" stroke-width="2.5"/>
-  <circle cx="17" cy="17" r="7" fill="#00e5ff"/>
-</svg>`
-
 const caveIcon = L.divIcon({
   html: caveIconSvg,
   className: 'cave-marker',
   iconSize: [28, 40],
   iconAnchor: [14, 40],
   popupAnchor: [0, -40],
-})
-
-const highlightIcon = L.divIcon({
-  html: highlightIconSvg,
-  className: 'cave-marker cave-marker-highlight',
-  iconSize: [34, 48],
-  iconAnchor: [17, 48],
-  popupAnchor: [0, -48],
 })
 
 /**
@@ -39,8 +28,6 @@ const highlightIcon = L.divIcon({
  *   zoom              number — initial zoom (default 13)
  *   height            string — CSS height (default "12rem")
  *   onMarkerClick     (marker) => void
- *   onMarkerHover     (marker | null) => void — called on marker mouseover/mouseout
- *   highlightedMarkerId  string|number — externally highlighted marker id
  *   interactive       bool — enable pan/zoom (default true)
  *   className         string — additional CSS classes
  */
@@ -50,8 +37,6 @@ export default function SurfaceMap({
   zoom = 13,
   height = '12rem',
   onMarkerClick,
-  onMarkerHover,
-  highlightedMarkerId,
   interactive = true,
   className = '',
   caveMapData = null,
@@ -62,20 +47,25 @@ export default function SurfaceMap({
   caveOverlayOpacity = 0.6,
   caveOverlayLevel = 0,
   parcelGeometry = null,
+  onViewChange = null,
+  showCenterButton = false,
+  initialView = null,
 }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
-  const markerMapRef = useRef({}) // id → Leaflet marker
   const parcelLayerRef = useRef(null)
 
   useEffect(() => {
     if (!containerRef.current || !center) return
 
-    // Initialize map
+    // Initialize map — use saved view if available
+    const initCenter = initialView ? initialView.center : center
+    const initZoom = initialView ? initialView.zoom : zoom
+
     const map = L.map(containerRef.current, {
-      center,
-      zoom,
-      maxZoom: 19,
+      center: initCenter,
+      zoom: initZoom,
+      maxZoom: 21,
       zoomControl: interactive,
       dragging: interactive,
       touchZoom: interactive,
@@ -86,26 +76,46 @@ export default function SurfaceMap({
       attributionControl: false,
     })
 
-    // Public OSM tile layer
+    // Public OSM tile layer (native tiles up to 19, Leaflet upscales to 21)
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+      maxZoom: 21,
+      maxNativeZoom: 19,
       minZoom: 3,
     }).addTo(map)
 
-    // Add markers
-    const markerLookup = {}
+    // Report view changes for persistence
+    if (onViewChange) {
+      map.on('moveend', () => {
+        const c = map.getCenter()
+        onViewChange({ center: [c.lat, c.lng], zoom: map.getZoom() })
+      })
+    }
+
+    // Add markers — use clustering when many markers, direct when few
+    const useClustering = markers.length > 20
+    const clusterGroup = useClustering
+      ? L.markerClusterGroup({
+          maxClusterRadius: 50,
+          spiderfyOnMaxZoom: true,
+          showCoverageOnHover: false,
+          iconCreateFunction: (cluster) => L.divIcon({
+            html: `<div class="cave-cluster">${cluster.getChildCount()}</div>`,
+            className: 'cave-cluster-icon',
+            iconSize: [36, 36],
+          }),
+        })
+      : null
+
     markers.forEach((m) => {
       if (m.lat == null || m.lon == null) return
-      const marker = L.marker([m.lat, m.lon], { icon: caveIcon }).addTo(map)
-      if (m.id != null) markerLookup[m.id] = marker
+      const marker = L.marker([m.lat, m.lon], { icon: caveIcon })
       if (m.label) {
         marker.bindPopup(
           `<div class="cave-popup">${m.label}</div>`,
           { className: 'cave-popup-container' }
         )
-        // Permanent label visible on the map
         marker.bindTooltip(m.label, {
-          permanent: true,
+          permanent: !useClustering,
           direction: 'right',
           offset: [12, -20],
           className: 'cave-label',
@@ -114,15 +124,19 @@ export default function SurfaceMap({
       if (onMarkerClick) {
         marker.on('click', () => onMarkerClick(m))
       }
-      if (onMarkerHover) {
-        marker.on('mouseover', () => onMarkerHover(m))
-        marker.on('mouseout', () => onMarkerHover(null))
+      if (clusterGroup) {
+        clusterGroup.addLayer(marker)
+      } else {
+        marker.addTo(map)
       }
     })
-    markerMapRef.current = markerLookup
 
-    // Fit bounds if multiple markers
-    if (markers.length > 1) {
+    if (clusterGroup) {
+      map.addLayer(clusterGroup)
+    }
+
+    // Fit bounds if multiple markers (skip if restoring a saved view)
+    if (!initialView && markers.length > 1) {
       const validMarkers = markers.filter(m => m.lat != null && m.lon != null)
       if (validMarkers.length > 1) {
         const bounds = L.latLngBounds(validMarkers.map(m => [m.lat, m.lon]))
@@ -135,26 +149,9 @@ export default function SurfaceMap({
     return () => {
       map.remove()
       mapRef.current = null
-      markerMapRef.current = {}
       parcelLayerRef.current = null
     }
   }, [center?.[0], center?.[1], markers.length])
-
-  // React to external highlight changes — swap icon and pan
-  useEffect(() => {
-    const lookup = markerMapRef.current
-    // Reset all markers to default icon
-    Object.values(lookup).forEach(m => m.setIcon(caveIcon))
-    // Highlight + pan to the active one
-    if (highlightedMarkerId != null && lookup[highlightedMarkerId]) {
-      const m = lookup[highlightedMarkerId]
-      m.setIcon(highlightIcon)
-      m.setZIndexOffset(1000)
-      if (mapRef.current) {
-        mapRef.current.panTo(m.getLatLng(), { animate: true, duration: 0.4 })
-      }
-    }
-  }, [highlightedMarkerId])
 
   // Render parcel boundary polygon
   useEffect(() => {
@@ -182,11 +179,28 @@ export default function SurfaceMap({
 
   return (
     <>
-      <div
-        ref={containerRef}
-        className={`surface-map rounded-xl overflow-hidden ${className}`}
-        style={{ height, width: '100%' }}
-      />
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className={`surface-map rounded-xl overflow-hidden ${className}`}
+          style={{ height, width: '100%' }}
+        />
+        {showCenterButton && (
+          <button
+            onClick={() => {
+              if (mapRef.current) {
+                mapRef.current.setView(center, zoom, { animate: true })
+              }
+            }}
+            className="absolute bottom-3 left-3 z-[1000] px-3 py-1.5 rounded-full text-xs font-medium
+              bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+              backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
+            title="Center on cave"
+          >
+            ⌖ Center
+          </button>
+        )}
+      </div>
       <CaveMapOverlay
         map={mapRef.current}
         mapData={caveMapData}

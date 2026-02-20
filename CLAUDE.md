@@ -588,7 +588,7 @@ This project includes:
 
 ## Current Session Context
 
-**Date**: 2026-02-19
+**Date**: 2026-02-20
 **Status**: Active development — core features operational
 
 ### What's Built
@@ -598,26 +598,37 @@ This project includes:
 - LandOwner model with TN GIS parcel integration (ArcGIS + TPAD API)
 - Three-tier GIS data visibility: always-visible (TPAD link, polygon, GIS Map), mutable (owner name, address, acreage), hidden (contact info)
 - `gis_fields_visible` toggle on LandOwner — cave entry creator controls tier-2 field visibility
+- CaveRequest model with accept/deny lifecycle for contact access requests and contact info submissions
+- `contact_access_users` M2M on LandOwner for granular per-user contact visibility grants
 - User auth with registration, login, JWT tokens
 - Social features: comments, ratings/reviews, wiki-style descriptions with revision history, user wall posts
 - Photo upload with caption/tags, camera capture
 - Cave routing system with A* pathfinding
 - Device management and sync infrastructure
-- CSV import tool for bulk cave data entry
+- CSV import: CLI management command + admin-only web UI with two-phase flow (preview + apply)
+- Coordinate-based duplicate detection (Haversine distance) with conflict resolution (keep/replace/rename)
 - Universal coordinate parser (decimal, DMS, UTM, MGRS, Google/Apple Maps URLs)
 - Google Maps short URL resolver (server-side redirect following)
+- `is_staff` exposed via UserProfileSerializer for frontend admin gating
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode
-- Explore page with searchable cave list + surface map
+- Explore page with searchable cave list + surface map + sort/filter (stars, mapped, unmapped, needs details, activity)
+  - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, conflict resolution UI)
+  - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons
+  - Map view persistence via sessionStorage (restored on back-navigation)
+  - Default US center with fitBounds auto-zoom to markers
 - Cave detail page with:
-  - 2D interactive cave map (multi-level, POIs, route overlay)
+  - 2D interactive cave map (multi-level, POIs, route overlay, 7 render modes)
   - 3D cave explorer (Three.js point cloud viewer)
-  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay)
+  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, center-on-cave button, zoom to level 21)
+  - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
+  - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
   - Photo gallery with carousel, upload dialog, camera capture
   - Wiki description editor with rich text (TipTap)
   - Star ratings and reviews
   - Property owner section with GIS lookup, visibility toggle, contact info tiers
+  - CaveRequest system: request contact access, submit contact info, pending requests with accept/deny for cave owners
   - Inline coordinate editor (accepts any format)
 - Create Cave page with smart coordinate input
 - User profile page with avatar presets, saved routes
@@ -634,18 +645,22 @@ This project includes:
 
 **Data**:
 - 14 Tennessee caves seeded from historical survey data
-- Seed data command + CSV import tool
+- Seed data command + CSV import tool (CLI + web UI)
+- taco_dragon user has is_staff=True for admin features
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
+| `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection |
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
-| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink |
-| `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction |
-| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload |
-| `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1300 lines) |
-| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers + parcel polygon |
+| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink, CaveRequest |
+| `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer |
+| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload, request lifecycle, CSV import endpoints |
+| `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1700 lines) |
+| `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes) |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers, clustering, parcel polygon, cave overlay, center button |
+| `frontend/src/components/CsvImportModal.jsx` | Three-step admin CSV import modal (upload → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
 | `social/views.py` | Wall posts, ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets |
@@ -657,6 +672,7 @@ This project includes:
 - 0004: parcel_geometry JSONField
 - 0005: TPAD enriched fields (property_class, property_type, last_sale_date, gis_map_link)
 - 0006: gis_fields_visible boolean
+- 0007: CaveRequest model + contact_access_users M2M on LandOwner
 
 ### Future Features (To Be Developed)
 
@@ -671,7 +687,6 @@ This project includes:
 - Device-to-cloud sync mechanism
 - Grotto memberships and group permissions
 - Shared cave entry ownership
-- "Contact info available on request" → modal message to cave entry owner
 
 **Questions to Resolve**:
 - Exact game engine choice for 3D exploration (deferred to Phase 4)

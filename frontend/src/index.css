@@ -341,8 +341,25 @@ body {
   border: none !important;
   transition: filter 0.2s;
 }
-.cave-marker-highlight {
-  filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.8)) drop-shadow(0 0 16px rgba(0, 229, 255, 0.4));
+
+/* Marker cluster icons */
+.cave-cluster-icon {
+  background: none !important;
+  border: none !important;
+}
+.cave-cluster {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(0, 229, 255, 0.2);
+  border: 2px solid var(--cyber-cyan);
+  color: var(--cyber-cyan);
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
 }
 
 /* Cave popup styling */

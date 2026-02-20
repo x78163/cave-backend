@@ -609,3 +609,148 @@ def cave_request_delete(request, cave_id, request_id):
 
     cave_request.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── CSV Bulk Import ──────────────────────────────────────────
+
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def cave_import_preview(request):
+    """
+    Phase 1 of CSV import: parse the file and detect coordinate-proximity duplicates.
+    Admin-only (is_staff or is_superuser).
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not (request.user.is_staff or request.user.is_superuser):
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+
+    csv_file = request.FILES.get('csv_file')
+    if not csv_file:
+        return Response({'error': 'No CSV file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if csv_file.size > 5 * 1024 * 1024:
+        return Response({'error': 'CSV file too large (max 5MB)'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .csv_import import normalize_csv_rows, parse_cave_row, find_proximity_duplicates
+
+    threshold = float(request.data.get('threshold_meters', 100))
+    defaults = {
+        'region': request.data.get('region', ''),
+        'country': request.data.get('country', ''),
+        'visibility': request.data.get('visibility', 'public'),
+    }
+
+    content = csv_file.read().decode('utf-8-sig')
+    rows = normalize_csv_rows(content)
+
+    parsed = []
+    summary = {'valid': 0, 'errors': 0, 'with_duplicates': 0, 'without_coordinates': 0}
+
+    for i, row in enumerate(rows):
+        result = parse_cave_row(row, defaults)
+        entry = {
+            'row_number': i + 2,  # 1-indexed, skip header
+            'name': result['name'],
+            'latitude': result['latitude'],
+            'longitude': result['longitude'],
+            'error': result['error'],
+            'duplicates': [],
+            'region': result['data'].get('region', ''),
+            'country': result['data'].get('country', ''),
+            'total_length': result['data'].get('total_length'),
+            'vertical_extent': result['data'].get('vertical_extent'),
+            'description_preview': (result['data'].get('description') or '')[:200],
+            'cave_data': result['data'],
+        }
+
+        if result['error']:
+            summary['errors'] += 1
+        else:
+            summary['valid'] += 1
+            if result['latitude'] is None:
+                summary['without_coordinates'] += 1
+            else:
+                dupes = find_proximity_duplicates(
+                    result['latitude'], result['longitude'], threshold
+                )
+                entry['duplicates'] = dupes
+                if dupes:
+                    summary['with_duplicates'] += 1
+
+        parsed.append(entry)
+
+    return Response({
+        'total_rows': len(rows),
+        'parsed_rows': parsed,
+        'summary': summary,
+    })
+
+
+@api_view(['POST'])
+@parser_classes([JSONParser])
+def cave_import_apply(request):
+    """
+    Phase 2 of CSV import: create/update caves based on user resolutions.
+    Admin-only (is_staff or is_superuser).
+    """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not (request.user.is_staff or request.user.is_superuser):
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+
+    rows = request.data.get('rows', [])
+    if not rows:
+        return Response({'error': 'No rows provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    created_count = 0
+    updated_count = 0
+    skipped_count = 0
+    errors = []
+
+    for row in rows:
+        name = row.get('new_name') or row.get('name')
+        cave_data = row.get('cave_data', {})
+        resolution = row.get('resolution', 'create')
+        existing_id = row.get('existing_cave_id')
+
+        if resolution == 'skip':
+            skipped_count += 1
+            continue
+
+        # Strip fields that shouldn't come from CSV
+        cave_data.pop('owner', None)
+
+        if resolution == 'update' and existing_id:
+            try:
+                existing = Cave.objects.get(id=existing_id)
+                for field, value in cave_data.items():
+                    if value is not None and value != '' and value != 0:
+                        setattr(existing, field, value)
+                existing.save()
+                updated_count += 1
+            except Cave.DoesNotExist:
+                errors.append({'row_name': name, 'error': f'Cave {existing_id} not found'})
+            except Exception as e:
+                errors.append({'row_name': name, 'error': str(e)})
+            continue
+
+        # resolution == 'create'
+        try:
+            Cave.objects.create(
+                name=name,
+                owner=request.user,
+                **cave_data,
+            )
+            created_count += 1
+        except Exception as e:
+            errors.append({'row_name': name, 'error': str(e)})
+
+    return Response({
+        'created': created_count,
+        'updated': updated_count,
+        'skipped': skipped_count,
+        'errors': errors,
+        'total_in_database': Cave.objects.count(),
+    })
