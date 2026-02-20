@@ -7,7 +7,10 @@ import json
 import secrets
 from pathlib import Path
 
+from math import cos, radians
+
 from django.conf import settings as django_settings
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -92,12 +95,129 @@ def resolve_map_url(request):
     )
 
 
+@api_view(['POST'])
+def reverse_geocode(request):
+    """
+    Reverse geocode lat/lon to city/state/country/zip using Nominatim.
+    POST body: { "lat": 35.65, "lon": -85.58 }
+    Returns: { "state": "Tennessee", "country": "United States", "city": "...", "zip_code": "..." }
+    """
+    import requests as http_requests
+
+    lat = request.data.get('lat')
+    lon = request.data.get('lon')
+    if lat is None or lon is None:
+        return Response(
+            {'error': 'lat and lon are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return Response(
+            {'error': 'lat and lon must be numbers'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        resp = http_requests.get(
+            'https://nominatim.openstreetmap.org/reverse',
+            params={
+                'lat': lat,
+                'lon': lon,
+                'format': 'json',
+                'zoom': 10,
+                'addressdetails': 1,
+            },
+            headers={'User-Agent': 'CaveBackend/1.0'},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return Response(
+            {'error': 'Reverse geocode service unavailable'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    address = data.get('address', {})
+    state = address.get('state', '')
+    country = address.get('country', '')
+    city = address.get('city') or address.get('town') or address.get('village', '')
+    zip_code = address.get('postcode', '')
+
+    return Response({
+        'state': state,
+        'country': country,
+        'city': city,
+        'zip_code': zip_code,
+    })
+
+
+@api_view(['POST'])
+def proximity_check(request):
+    """
+    Check if any cave exists within ~500m of given coordinates.
+    Returns count and IDs (no details) so the user can request access.
+    """
+    lat = request.data.get('lat')
+    lon = request.data.get('lon')
+    if lat is None or lon is None:
+        return Response(
+            {'error': 'lat and lon are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return Response(
+            {'error': 'lat and lon must be numbers'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # ~50m in degrees
+    lat_range = 0.00045
+    lon_range = 0.00045 / max(cos(radians(lat)), 0.01)
+
+    nearby = Cave.objects.filter(
+        latitude__range=(lat - lat_range, lat + lat_range),
+        longitude__range=(lon - lon_range, lon + lon_range),
+    )
+
+    if nearby.exists():
+        caves = list(nearby[:5])
+        is_own = request.user.is_authenticated
+        return Response({
+            'nearby': True,
+            'count': nearby.count(),
+            'caves': [
+                {
+                    'id': str(c.id),
+                    'name': c.name if (is_own and c.owner_id == request.user.id) else None,
+                    'owned': is_own and c.owner_id == request.user.id,
+                }
+                for c in caves
+            ],
+        })
+    return Response({'nearby': False, 'count': 0, 'caves': []})
+
+
 @api_view(['GET', 'POST'])
 @parser_classes([JSONParser, MultiPartParser, FormParser])
 def cave_list(request):
     """List all caves or create a new cave."""
     if request.method == 'GET':
-        caves = Cave.objects.all()
+        if request.user.is_authenticated:
+            caves = Cave.objects.filter(
+                Q(visibility__in=['public', 'limited_public']) |
+                Q(owner=request.user)
+            )
+        else:
+            caves = Cave.objects.filter(visibility__in=['public', 'limited_public'])
         serializer = CaveListSerializer(caves, many=True)
         return Response({'caves': serializer.data, 'count': caves.count()})
 
@@ -138,6 +258,10 @@ def cave_detail(request, cave_id):
         return Response(serializer.data)
 
     elif request.method in ('PUT', 'PATCH'):
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        if cave.owner_id != request.user.id and not request.user.is_staff:
+            return Response({'error': 'Only the cave owner or an admin can edit'}, status=status.HTTP_403_FORBIDDEN)
         old_lat, old_lon = cave.latitude, cave.longitude
         serializer = CaveDetailSerializer(cave, data=request.data, partial=True, context=ctx)
         if serializer.is_valid():
@@ -169,6 +293,10 @@ def cave_detail(request, cave_id):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        if cave.owner_id != request.user.id and not request.user.is_staff:
+            return Response({'error': 'Only the cave owner or an admin can delete'}, status=status.HTTP_403_FORBIDDEN)
         cave.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

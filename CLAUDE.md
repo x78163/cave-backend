@@ -200,8 +200,10 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/caves/` - Create cave
 - `GET /api/caves/{id}/` - Cave detail
 - `PATCH /api/caves/{id}/` - Update cave
-- `DELETE /api/caves/{id}/` - Delete cave (owner only)
+- `DELETE /api/caves/{id}/` - Delete cave (owner or admin only)
 - `POST /api/caves/{id}/share/` - Generate share link/QR
+- `POST /api/caves/reverse-geocode/` - Reverse geocode lat/lon to city/state/country/zip (Nominatim)
+- `POST /api/caves/proximity-check/` - Check for existing caves within ~50m of coordinates
 
 ### Sync Endpoints
 - `POST /api/sync/start/` - Initiate sync session
@@ -295,7 +297,12 @@ When device connects to WiFi:
    - Location description vague
    - Protects sensitive cave locations
 
-3. **Private**
+3. **Unlisted**
+   - Hidden from search/explore for all users except owner (and future group members)
+   - API: `cave_list` filters by visibility using `Q` objects (public/limited_public + owner's own)
+   - Coordinate proximity check at creation warns about nearby existing caves to prevent unknowing duplicates
+
+4. **Private**
    - Only visible to owner and shared users
    - Shareable via QR code or URL
    - Share links can be revoked
@@ -607,7 +614,8 @@ This project includes:
 ### What's Built
 
 **Backend (Django)**:
-- Full Cave CRUD with UUID primary keys, visibility levels, collaboration settings
+- Full Cave CRUD with UUID primary keys, visibility levels (public/limited_public/unlisted/private), collaboration settings
+- Permission enforcement on edit/delete: owner or `is_staff` only (401/403 responses)
 - LandOwner model with TN GIS parcel integration (ArcGIS + TPAD API)
 - Three-tier GIS data visibility: always-visible (TPAD link, polygon, GIS Map), mutable (owner name, address, acreage), hidden (contact info)
 - `gis_fields_visible` toggle on LandOwner — cave entry creator controls tier-2 field visibility
@@ -627,15 +635,22 @@ This project includes:
 - Coordinate-based duplicate detection (Haversine distance) with conflict resolution (keep/replace/rename)
 - Universal coordinate parser (decimal, DMS, UTM, MGRS, Google/Apple Maps URLs)
 - Google Maps short URL resolver (server-side redirect following)
+- Reverse geocode endpoint (Nominatim) — auto-fills city, state, country, zip from coordinates
+- Proximity check endpoint — warns about existing caves within ~50m at creation time
+- Visibility-filtered `cave_list` API — unlisted/private caves hidden from non-owners
+- Title case auto-normalization for cave names and aliases on save
 - `is_staff` exposed via UserProfileSerializer for frontend admin gating
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode
 - Explore page with searchable cave list + surface map + sort/filter (stars, mapped, unmapped, needs details, activity)
+  - Search by name, city, state, zip code, aliases
   - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, conflict resolution UI)
   - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons
+  - Map auto-pans/zooms to fit filtered search results
   - Map view persistence via sessionStorage (restored on back-navigation)
   - Default US center with fitBounds auto-zoom to markers
+  - Cave cards show aliases in parentheses after name
 - Cave detail page with:
   - 2D interactive cave map (multi-level, POIs, route overlay, 7 render modes)
   - 3D cave explorer (Three.js point cloud viewer)
@@ -652,7 +667,11 @@ This project includes:
   - Property owner section with GIS lookup, visibility toggle, contact info tiers
   - CaveRequest system: request contact access, submit contact info, pending requests with accept/deny for cave owners
   - Inline coordinate editor (accepts any format)
-- Create Cave page with smart coordinate input
+  - Inline alias editor for cave owners/admins
+  - Edit and Delete buttons in topbar (owner or admin only)
+  - Delete confirmation modal with permanent deletion warning
+  - Unlisted visibility badge (purple)
+- Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
 - User profile page with avatar presets, saved routes
 - Login/Register pages
 - Social feed with post composer
@@ -680,7 +699,7 @@ This project includes:
 | `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument, CaveVideoLink |
 | `caves/video_utils.py` | Video URL parser (platform detect, embed URL, thumbnail generation) |
 | `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer + CaveDocumentSerializer + CaveVideoLinkSerializer |
-| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD |
+| `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD |
 | `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes) |
 | `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers, clustering, parcel polygon, cave overlay, survey overlays, center button |
@@ -706,6 +725,9 @@ This project includes:
 - 0007: CaveRequest model + contact_access_users M2M on LandOwner
 - 0008: SurveyMap model (multi-survey overlays with calibration)
 - 0009: CaveDocument + CaveVideoLink models (documents and video links)
+- 0010: hazard_count nullable (IntegerField null=True, blank=True)
+- 0011: Cave aliases, city, zip_code fields
+- 0012: Unlisted visibility choice added
 
 ### Future Features (To Be Developed)
 

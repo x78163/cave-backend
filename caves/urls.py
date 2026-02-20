@@ -3,6 +3,8 @@ from . import views
 
 urlpatterns = [
     path('resolve-map-url/', views.resolve_map_url, name='resolve_map_url'),
+    path('reverse-geocode/', views.reverse_geocode, name='reverse_geocode'),
+    path('proximity-check/', views.proximity_check, name='proximity_check'),
     path('import/preview/', views.cave_import_preview, name='cave_import_preview'),
     path('import/apply/', views.cave_import_apply, name='cave_import_apply'),
     path('', views.cave_list, name='cave_list'),

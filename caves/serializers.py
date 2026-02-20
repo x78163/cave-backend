@@ -184,8 +184,8 @@ class CaveListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cave
         fields = [
-            'id', 'name', 'description', 'latitude', 'longitude',
-            'region', 'country', 'has_map', 'has_location',
+            'id', 'name', 'aliases', 'description', 'latitude', 'longitude',
+            'region', 'country', 'city', 'zip_code', 'has_map', 'has_location',
             'total_length', 'hazard_count', 'source',
             'slam_heading',
             'cover_photo', 'photo_count', 'comment_count',
@@ -226,8 +226,8 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cave
         fields = [
-            'id', 'name', 'description',
-            'latitude', 'longitude', 'region', 'country',
+            'id', 'name', 'aliases', 'description',
+            'latitude', 'longitude', 'region', 'country', 'city', 'zip_code',
             'total_length', 'largest_chamber', 'smallest_passage',
             'vertical_extent', 'number_of_levels',
             'hazard_count', 'toxic_gas_present', 'toxic_gas_types',

@@ -7,11 +7,14 @@ import parseCoordinates from '../utils/parseCoordinates'
 
 const emptyForm = {
   name: '',
+  aliases: '',
   description: '',
   latitude: '',
   longitude: '',
   region: '',
   country: '',
+  city: '',
+  zip_code: '',
   total_length: '',
   largest_chamber: '',
   smallest_passage: '',
@@ -36,6 +39,7 @@ export default function CreateCave() {
   const [loading, setLoading] = useState(isEdit)
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState(null)
+  const [proximityWarning, setProximityWarning] = useState(null)
 
   // Load existing cave data when editing
   useEffect(() => {
@@ -133,6 +137,8 @@ export default function CreateCave() {
         <Section title="Basic Information">
           <Input label="Cave Name *" value={form.name}
             onChange={v => update('name', v)} placeholder="e.g. Crystal Caverns" />
+          <Input label="Aliases / Alternate Names" value={form.aliases}
+            onChange={v => update('aliases', v)} placeholder="e.g. Old Name, Historical Name" />
           <div>
             <label className="block text-[var(--cyber-text-dim)] text-sm mb-1">Description</label>
             <RichTextEditor
@@ -147,6 +153,7 @@ export default function CreateCave() {
             <select value={form.visibility} onChange={e => update('visibility', e.target.value)}
               className="cyber-input w-full px-4 py-2.5 text-sm">
               <option value="private">Private</option>
+              <option value="unlisted">Unlisted (hidden from search)</option>
               <option value="limited_public">Limited Public (coordinates hidden)</option>
               <option value="public">Public</option>
             </select>
@@ -158,12 +165,73 @@ export default function CreateCave() {
           <CoordinateInput
             latitude={form.latitude}
             longitude={form.longitude}
-            onChange={(lat, lon) => { update('latitude', lat); update('longitude', lon) }}
+            onChange={(lat, lon) => {
+              update('latitude', lat)
+              update('longitude', lon)
+              // Auto-populate state/country from coordinates
+              if (lat && lon) {
+                apiFetch('/caves/reverse-geocode/', {
+                  method: 'POST',
+                  body: { lat: Number(lat), lon: Number(lon) },
+                })
+                  .then(data => {
+                    if (data.state) update('region', data.state)
+                    if (data.country) update('country', data.country)
+                    if (data.city) update('city', data.city)
+                    if (data.zip_code) update('zip_code', data.zip_code)
+                  })
+                  .catch(() => {})
+                // Check for nearby existing caves (skip when editing)
+                if (!isEdit) {
+                  apiFetch('/caves/proximity-check/', {
+                    method: 'POST',
+                    body: { lat: Number(lat), lon: Number(lon) },
+                  })
+                    .then(data => setProximityWarning(data.nearby ? data : null))
+                    .catch(() => {})
+                }
+              } else {
+                setProximityWarning(null)
+              }
+            }}
           />
+          {proximityWarning && (
+            <div className="p-3 rounded-xl bg-amber-900/20 border border-amber-700/30">
+              <p className="text-amber-300 text-sm mb-2">
+                {proximityWarning.caves.some(c => c.owned)
+                  ? `You already have a cave entry near these coordinates: ${proximityWarning.caves.filter(c => c.owned).map(c => c.name).join(', ')}`
+                  : `A cave entry may already exist near these coordinates (${proximityWarning.count} found within ~50m).`}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/caves/${proximityWarning.caves[0].id}`)}
+                  className="px-3 py-1 rounded-full text-xs font-semibold
+                    border border-amber-600 text-amber-300 hover:bg-amber-900/30 transition-all"
+                >
+                  View Existing Entry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProximityWarning(null)}
+                  className="px-3 py-1 rounded-full text-xs text-[var(--cyber-text-dim)]
+                    hover:text-white transition-all"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+          <Input label="City / Town" value={form.city}
+            onChange={v => update('city', v)} placeholder="e.g. Chattanooga" />
           <Input label="Region / State" value={form.region}
             onChange={v => update('region', v)} placeholder="e.g. Tennessee" />
-          <Input label="Country" value={form.country}
-            onChange={v => update('country', v)} placeholder="e.g. United States" />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Country" value={form.country}
+              onChange={v => update('country', v)} placeholder="e.g. United States" />
+            <Input label="Zip Code" value={form.zip_code}
+              onChange={v => update('zip_code', v)} placeholder="e.g. 37421" />
+          </div>
         </Section>
 
         {/* Dimensions */}

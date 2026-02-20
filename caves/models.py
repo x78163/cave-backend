@@ -1,6 +1,20 @@
+import re
 import uuid
 from django.conf import settings
 from django.db import models
+
+
+def title_case_name(name):
+    """Smart title case: handles apostrophes and Mc/Mac prefixes."""
+    if not name:
+        return name
+    result = re.sub(
+        r"[A-Za-z]+('[A-Za-z]+)?",
+        lambda m: m.group(0).capitalize(),
+        name.lower(),
+    )
+    result = re.sub(r'\bMc([a-z])', lambda m: 'Mc' + m.group(1).upper(), result)
+    return result
 
 
 class Cave(models.Model):
@@ -19,6 +33,7 @@ class Cave(models.Model):
     class Visibility(models.TextChoices):
         PUBLIC = 'public', 'Public'
         LIMITED_PUBLIC = 'limited_public', 'Limited Public'
+        UNLISTED = 'unlisted', 'Unlisted'
         PRIVATE = 'private', 'Private'
 
     class CollaborationSetting(models.TextChoices):
@@ -35,6 +50,11 @@ class Cave(models.Model):
     longitude = models.FloatField(null=True, blank=True)
     region = models.CharField(max_length=200, blank=True, default='')
     country = models.CharField(max_length=100, blank=True, default='')
+    city = models.CharField(max_length=200, blank=True, default='')
+    zip_code = models.CharField(max_length=20, blank=True, default='')
+
+    # Alternate names (comma-separated)
+    aliases = models.TextField(blank=True, default='', help_text='Comma-separated alternate names')
 
     # Cave statistics
     total_length = models.FloatField(
@@ -52,7 +72,7 @@ class Cave(models.Model):
     number_of_levels = models.IntegerField(null=True, blank=True)
 
     # Hazard information
-    hazard_count = models.IntegerField(default=0)
+    hazard_count = models.IntegerField(null=True, blank=True)
     toxic_gas_present = models.BooleanField(default=False)
     toxic_gas_types = models.CharField(
         max_length=200, blank=True, default='', help_text='e.g. CO2, H2S, CH4'
@@ -110,6 +130,15 @@ class Cave(models.Model):
 
     class Meta:
         ordering = ['-updated_at']
+
+    def save(self, *args, **kwargs):
+        if self.name:
+            self.name = title_case_name(self.name)
+        if self.aliases:
+            self.aliases = ', '.join(
+                title_case_name(a.strip()) for a in self.aliases.split(',') if a.strip()
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name

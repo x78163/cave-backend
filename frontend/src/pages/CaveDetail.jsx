@@ -109,8 +109,24 @@ export default function CaveDetail() {
       .catch(() => {})
   }
 
+  const canManage = !!user && (!!cave?.owner && user.id === cave.owner || user.is_staff)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const deleteCave = async () => {
+    setDeleting(true)
+    try {
+      await apiFetch(`/caves/${caveId}/`, { method: 'DELETE' })
+      navigate('/explore')
+    } catch (err) {
+      console.error('Delete failed:', err)
+      setDeleting(false)
+      setShowDeleteConfirm(false)
+    }
+  }
+
   const fetchRequests = useCallback(() => {
-    if (!user || !cave || cave.owner !== user.id) return
+    if (!canManage) return
     apiFetch(`/caves/${caveId}/requests/?status=pending`)
       .then(data => setPendingRequests(data?.requests || []))
       .catch(() => {})
@@ -369,13 +385,32 @@ export default function CaveDetail() {
           &larr; Back
         </button>
         <h2 className="text-white font-semibold truncate max-w-[50%]">{cave.name}</h2>
-        <div className="px-3 py-1" /> {/* spacer */}
+        {canManage ? (
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate(`/caves/${caveId}/edit`)}
+              className="text-[var(--cyber-cyan)] text-sm hover:underline px-3 py-1 transition-colors">
+              Edit
+            </button>
+            <button onClick={() => setShowDeleteConfirm(true)}
+              className="text-red-400 text-sm hover:underline px-3 py-1 transition-colors">
+              Delete
+            </button>
+          </div>
+        ) : (
+          <div className="px-3 py-1" />
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {/* Hero / Cover area */}
         <div className="relative bg-gradient-to-b from-cyan-900/20 to-[var(--cyber-bg)] px-4 pt-6 pb-4">
           <h1 className="text-2xl font-bold text-white mb-1">{cave.name}</h1>
+          <InlineAliasEditor
+            cave={cave}
+            caveId={caveId}
+            isCaveOwner={canManage}
+            onUpdate={fetchCave}
+          />
           {cave.region && (
             <p className="text-[var(--cyber-text-dim)] text-sm">
               {cave.region}{cave.country ? `, ${cave.country}` : ''}
@@ -384,7 +419,7 @@ export default function CaveDetail() {
           <InlineCoordinateEditor
             cave={cave}
             caveId={caveId}
-            isCaveOwner={!!user && !!cave.owner && user.id === cave.owner}
+            isCaveOwner={canManage}
             hasLocation={hasLocation}
             onUpdate={fetchCave}
           />
@@ -425,9 +460,14 @@ export default function CaveDetail() {
                   ? 'bg-cyan-900/30 text-[var(--cyber-cyan)] border border-cyan-800/30'
                   : cave.visibility === 'limited_public'
                     ? 'bg-amber-900/30 text-amber-400 border border-amber-800/30'
-                    : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]'}`}
+                    : cave.visibility === 'unlisted'
+                      ? 'bg-purple-900/30 text-purple-400 border border-purple-800/30'
+                      : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]'}`}
             >
-              {cave.visibility === 'public' ? 'Public' : cave.visibility === 'limited_public' ? 'Limited' : 'Private'}
+              {cave.visibility === 'public' ? 'Public'
+                : cave.visibility === 'limited_public' ? 'Limited'
+                : cave.visibility === 'unlisted' ? 'Unlisted'
+                : 'Private'}
             </span>
           </div>
         </div>
@@ -447,7 +487,7 @@ export default function CaveDetail() {
           <div className="grid grid-cols-3 gap-2 text-center">
             <Stat label="Length" value={cave.total_length ? `${cave.total_length}m` : '\u2014'} />
             <Stat label="Levels" value={cave.number_of_levels || '\u2014'} />
-            <Stat label="Hazards" value={cave.hazard_count || '0'} />
+            <Stat label="Hazards" value={cave.hazard_count != null ? cave.hazard_count : 'UNK'} />
           </div>
           <div className="grid grid-cols-3 gap-2 text-center mt-2">
             <Stat label="Largest Space" value={cave.largest_chamber ? `${cave.largest_chamber}m\u00B2` : '\u2014'} />
@@ -496,7 +536,7 @@ export default function CaveDetail() {
         <LandOwnerSection cave={cave} caveId={caveId} user={user} onUpdate={fetchCave} />
 
         {/* Pending Requests (cave owner only) */}
-        {!!user && cave.owner === user.id && pendingRequests.length > 0 && (
+        {canManage && pendingRequests.length > 0 && (
           <div className="px-4 py-3">
             <h3 className="text-white font-semibold mb-2">
               Pending Requests
@@ -1275,6 +1315,111 @@ export default function CaveDetail() {
           onClose={() => setExpandedVideo(null)}
         />
       )}
+
+      {/* ====== DELETE CONFIRMATION ====== */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-[var(--cyber-surface)] border border-red-800/40 rounded-2xl p-6 max-w-sm mx-4 shadow-[0_0_30px_rgba(255,0,0,0.15)]">
+            <h3 className="text-white font-semibold text-lg mb-2">Delete Cave</h3>
+            <p className="text-[var(--cyber-text-dim)] text-sm mb-1">
+              Are you sure you want to delete <strong className="text-white">{cave.name}</strong>?
+            </p>
+            <p className="text-red-400 text-xs mb-4">
+              This will permanently remove the cave and all associated photos, documents, comments, and map data. This action cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="px-4 py-2 rounded-full text-sm text-[var(--cyber-text-dim)]
+                  bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]
+                  hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteCave}
+                disabled={deleting}
+                className="px-4 py-2 rounded-full text-sm font-semibold
+                  bg-red-900/50 border border-red-700 text-red-300
+                  hover:bg-red-800/50 hover:text-white transition-all"
+              >
+                {deleting ? 'Deleting...' : 'Delete Forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InlineAliasEditor({ cave, caveId, isCaveOwner, onUpdate }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const startEdit = () => {
+    setValue(cave.aliases || '')
+    setEditing(true)
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await apiFetch(`/caves/${caveId}/`, {
+        method: 'PATCH',
+        body: { aliases: value.trim() },
+      })
+      setEditing(false)
+      onUpdate()
+    } catch {
+      // silently fail
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex gap-2 items-center mb-1">
+        <input
+          type="text"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && save()}
+          placeholder="e.g. Old Name, Historical Name"
+          className="cyber-input flex-1 px-3 py-1 text-xs"
+          autoFocus
+        />
+        <button onClick={save} disabled={saving}
+          className="px-3 py-1 rounded-full text-xs font-semibold transition-all
+            bg-gradient-to-r from-cyan-600 to-cyan-700 text-white">
+          {saving ? '...' : 'Save'}
+        </button>
+        <button onClick={() => setEditing(false)}
+          className="text-[var(--cyber-text-dim)] text-xs hover:text-white">
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 mb-1">
+      {cave.aliases ? (
+        <p className="text-[var(--cyber-text-dim)] text-xs italic">
+          Also known as: {cave.aliases}
+        </p>
+      ) : isCaveOwner ? (
+        <p className="text-[#555570] text-xs italic">No aliases</p>
+      ) : null}
+      {isCaveOwner && (
+        <button onClick={startEdit}
+          className="text-[var(--cyber-cyan)] text-xs hover:underline">
+          {cave.aliases ? 'edit' : '+ Add aliases'}
+        </button>
+      )}
     </div>
   )
 }
@@ -1415,7 +1560,7 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
 
 function LandOwnerSection({ cave, caveId, user, onUpdate }) {
   const landOwner = cave.land_owner
-  const isCaveOwner = user && cave.owner && user.id === cave.owner
+  const isCaveOwner = user && (cave.owner && user.id === cave.owner || user.is_staff)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [lookingUp, setLookingUp] = useState(false)

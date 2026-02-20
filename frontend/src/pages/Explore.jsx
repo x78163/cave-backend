@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import L from 'leaflet'
 import { Link, useNavigate } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
@@ -17,11 +18,15 @@ export default function Explore() {
 
   const filtered = useMemo(() => {
     let list = search
-      ? caves.filter(c =>
-          c.name.toLowerCase().includes(search.toLowerCase()) ||
-          (c.region || '').toLowerCase().includes(search.toLowerCase()) ||
-          (c.country || '').toLowerCase().includes(search.toLowerCase())
-        )
+      ? caves.filter(c => {
+          const q = search.toLowerCase()
+          return c.name.toLowerCase().includes(q) ||
+            (c.region || '').toLowerCase().includes(q) ||
+            (c.country || '').toLowerCase().includes(q) ||
+            (c.city || '').toLowerCase().includes(q) ||
+            (c.zip_code || '').toLowerCase().includes(q) ||
+            (c.aliases || '').toLowerCase().includes(q)
+        })
       : [...caves]
 
     switch (sortBy) {
@@ -77,6 +82,26 @@ export default function Explore() {
     catch { /* ignore */ }
   }, [])
 
+  const mapRef = useRef(null)
+
+  // Fit map bounds to filtered markers only when search/sort actively changes
+  const prevSearchRef = useRef(search)
+  const prevSortRef = useRef(sortBy)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || markers.length === 0) return
+    // Skip on initial mount — let savedView (sessionStorage) take priority
+    if (prevSearchRef.current === search && prevSortRef.current === sortBy) return
+    prevSearchRef.current = search
+    prevSortRef.current = sortBy
+    if (markers.length === 1) {
+      map.setView([markers[0].lat, markers[0].lon], 13, { animate: true })
+    } else {
+      const bounds = L.latLngBounds(markers.map(m => [m.lat, m.lon]))
+      map.fitBounds(bounds, { padding: [30, 30], animate: true })
+    }
+  }, [markers, search, sortBy])
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
@@ -107,7 +132,7 @@ export default function Explore() {
       <div className="flex gap-3 mb-6">
         <input
           type="text"
-          placeholder="Search caves..."
+          placeholder="Search by name, city, state, zip, alias..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="cyber-input flex-1 px-4 py-2.5"
@@ -138,6 +163,7 @@ export default function Explore() {
             className="border border-[var(--cyber-border)]"
             initialView={savedView}
             onViewChange={handleViewChange}
+            onMapReady={(map) => { mapRef.current = map }}
           />
         </div>
       )}
@@ -170,7 +196,12 @@ export default function Explore() {
                   className="w-full h-36 object-cover rounded-lg mb-3"
                 />
               )}
-              <h3 className="font-semibold text-[var(--cyber-text)]">{cave.name}</h3>
+              <h3 className="font-semibold text-[var(--cyber-text)]">
+                {cave.name}
+                {cave.aliases && (
+                  <span className="font-normal text-[var(--cyber-text-dim)] text-sm"> ({cave.aliases})</span>
+                )}
+              </h3>
               <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
                 {cave.region && `${cave.region}, `}{cave.country || 'Unknown location'}
               </p>
