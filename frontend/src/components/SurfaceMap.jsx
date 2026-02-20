@@ -345,6 +345,21 @@ export default function SurfaceMap({
             )}
           </div>
         )}
+        {/* North arrow — 12.5% of viewport height, visual reference for overlay alignment */}
+        <div
+          className="absolute top-3 right-3 z-[1000] flex flex-col items-center pointer-events-none"
+          style={{ height: '12.5%', minHeight: 40 }}
+          title="North"
+        >
+          <span className="text-[10px] font-bold text-[var(--cyber-cyan)] leading-none mb-0.5"
+            style={{ textShadow: '0 0 6px rgba(0,229,255,0.6)' }}>N</span>
+          <svg width="14" viewBox="0 0 14 40" fill="none" className="flex-1" preserveAspectRatio="xMidYMid meet">
+            {/* Arrowhead */}
+            <path d="M7 0L2 10h10L7 0z" fill="#00e5ff" fillOpacity="0.9" />
+            {/* Shaft */}
+            <rect x="5.5" y="9" width="3" height="31" rx="1.5" fill="#00e5ff" fillOpacity="0.5" />
+          </svg>
+        </div>
         {showCenterButton && (
           <button
             onClick={() => {
