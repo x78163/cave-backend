@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
+    SurveyMap,
 )
 from .serializers import (
     CaveListSerializer, CaveDetailSerializer,
@@ -23,6 +24,7 @@ from .serializers import (
     DescriptionRevisionSerializer,
     CavePermissionSerializer, CaveShareLinkSerializer,
     LandOwnerSerializer, CaveRequestSerializer,
+    SurveyMapSerializer,
 )
 
 
@@ -754,3 +756,107 @@ def cave_import_apply(request):
         'errors': errors,
         'total_in_database': Cave.objects.count(),
     })
+
+
+# ── Survey map overlays ─────────────────────────────────────────────────
+
+@api_view(['GET', 'POST'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def survey_map_list_create(request, cave_id):
+    """List or create survey maps for a cave.
+
+    GET:  Return all survey maps for this cave.
+    POST: Upload image, process (strip bg + recolor), create SurveyMap record.
+    """
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        surveys = cave.survey_maps.all()
+        serializer = SurveyMapSerializer(surveys, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    # POST — upload + process
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    image_file = request.FILES.get('image')
+    if not image_file:
+        return Response({'error': 'No image file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    name = request.data.get('name', '')
+    color_hex = request.data.get('color', '#ffa726')
+    try:
+        r, g, b = int(color_hex[1:3], 16), int(color_hex[3:5], 16), int(color_hex[5:7], 16)
+        color = (r, g, b)
+    except (ValueError, IndexError):
+        color = (0, 229, 255)
+
+    from io import BytesIO
+    from PIL import Image
+    from django.core.files.base import ContentFile
+    from .hand_drawn_map import process_hand_drawn_map
+
+    # Process the image
+    processed_bytes = process_hand_drawn_map(image_file, color=color)
+    processed_img = Image.open(BytesIO(processed_bytes))
+    img_width, img_height = processed_img.size
+
+    # Save original as PNG
+    image_file.seek(0)
+    orig_img = Image.open(image_file).convert('RGB')
+    orig_buf = BytesIO()
+    orig_img.save(orig_buf, format='PNG')
+
+    import uuid as uuid_mod
+    file_id = uuid_mod.uuid4().hex[:12]
+
+    survey = SurveyMap(
+        cave=cave,
+        name=name,
+        image_width=img_width,
+        image_height=img_height,
+        uploaded_by=request.user,
+    )
+    survey.overlay_image.save(f'{file_id}_overlay.png', ContentFile(processed_bytes), save=False)
+    survey.original_image.save(f'{file_id}_original.png', ContentFile(orig_buf.getvalue()), save=False)
+    survey.save()
+
+    serializer = SurveyMapSerializer(survey, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@parser_classes([JSONParser])
+def survey_map_detail(request, cave_id, survey_id):
+    """Get, update calibration, or delete a single survey map.
+
+    GET:    Return survey map detail.
+    PATCH:  Update calibration fields (anchor, scale, heading, opacity, name, is_locked).
+    DELETE: Remove survey map and its images.
+    """
+    try:
+        survey = SurveyMap.objects.select_related('cave').get(id=survey_id, cave_id=cave_id)
+    except SurveyMap.DoesNotExist:
+        return Response({'error': 'Survey map not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = SurveyMapSerializer(survey, context={'request': request})
+        return Response(serializer.data)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if request.method == 'PATCH':
+        serializer = SurveyMapSerializer(survey, data=request.data, partial=True, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    if request.method == 'DELETE':
+        survey.overlay_image.delete(save=False)
+        survey.original_image.delete(save=False)
+        survey.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

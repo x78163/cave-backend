@@ -216,6 +216,13 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/users/{id}/follow/` - Follow user
 - `GET /api/feed/` - Activity feed
 
+### Survey Map Overlays
+- `GET /api/caves/{id}/survey-maps/` - List survey maps for cave
+- `POST /api/caves/{id}/survey-maps/` - Upload + process survey image
+- `GET /api/caves/{id}/survey-maps/{survey_id}/` - Survey map detail
+- `PATCH /api/caves/{id}/survey-maps/{survey_id}/` - Update calibration
+- `DELETE /api/caves/{id}/survey-maps/{survey_id}/` - Delete survey map
+
 ### 3D Processing (Post-MVP)
 - `POST /api/caves/{id}/generate-mesh/` - Trigger 3D generation
 - `GET /api/caves/{id}/mesh/` - Download mesh
@@ -603,6 +610,8 @@ This project includes:
 - User auth with registration, login, JWT tokens
 - Social features: comments, ratings/reviews, wiki-style descriptions with revision history, user wall posts
 - Photo upload with caption/tags, camera capture
+- SurveyMap model with CRUD API — multi-survey overlays per cave with persistent calibration (anchor, scale, heading, opacity, lock state)
+- Survey map image processing pipeline (background removal + recolor via `caves/hand_drawn_map.py`)
 - Cave routing system with A* pathfinding
 - Device management and sync infrastructure
 - CSV import: CLI management command + admin-only web UI with two-phase flow (preview + apply)
@@ -621,7 +630,8 @@ This project includes:
 - Cave detail page with:
   - 2D interactive cave map (multi-level, POIs, route overlay, 7 render modes)
   - 3D cave explorer (Three.js point cloud viewer)
-  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, center-on-cave button, zoom to level 21)
+  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, center-on-cave button, zoom to level 21)
+  - Survey map overlay system: guided 4-step ingestion modal (upload → pin entrance → set scale → orient & confirm), show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
   - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
   - Photo gallery with carousel, upload dialog, camera capture
@@ -654,12 +664,15 @@ This project includes:
 |------|---------|
 | `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection |
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
-| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink, CaveRequest |
-| `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer |
-| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload, request lifecycle, CSV import endpoints |
-| `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1700 lines) |
+| `caves/hand_drawn_map.py` | Survey map image processing (bg removal + recolor) |
+| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap |
+| `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer |
+| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload, request lifecycle, CSV import, survey map CRUD |
+| `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes) |
-| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers, clustering, parcel polygon, cave overlay, center button |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers, clustering, parcel polygon, cave overlay, survey overlays, center button |
+| `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with lock/edit mode |
+| `frontend/src/components/SurveyMapModal.jsx` | 4-step guided survey map ingestion modal |
 | `frontend/src/components/CsvImportModal.jsx` | Three-step admin CSV import modal (upload → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
 | `social/views.py` | Wall posts, ratings, activity feed |
@@ -673,6 +686,7 @@ This project includes:
 - 0005: TPAD enriched fields (property_class, property_type, last_sale_date, gis_map_link)
 - 0006: gis_fields_visible boolean
 - 0007: CaveRequest model + contact_access_users M2M on LandOwner
+- 0008: SurveyMap model (multi-survey overlays with calibration)
 
 ### Future Features (To Be Developed)
 

@@ -1,9 +1,10 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import CaveMapOverlay from './CaveMapOverlay'
+import HandDrawnMapOverlay from './HandDrawnMapOverlay'
 
 // Cyan marker SVG for cave locations
 const caveIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40">
@@ -50,7 +51,22 @@ export default function SurfaceMap({
   onViewChange = null,
   showCenterButton = false,
   initialView = null,
+  onMapReady = null,
+  // Survey map overlay props
+  surveyMaps = [],
+  surveyMapVisible = false,
+  onToggleSurveyMap,
+  activeSurveyId = null,
+  onSurveySelect,
+  onAddSurveyMap,
+  editingSurveyId = null,
+  onSurveyUpdated,
+  onEditStart,
+  onEditEnd,
+  onDeleteSurvey,
+  caveId = null,
 }) {
+  const [surveyDropdownOpen, setSurveyDropdownOpen] = useState(false)
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const parcelLayerRef = useRef(null)
@@ -74,6 +90,7 @@ export default function SurfaceMap({
       boxZoom: false,
       keyboard: false,
       attributionControl: false,
+      renderer: L.svg({ padding: 2.0 }),
     })
 
     // Public OSM tile layer (native tiles up to 19, Leaflet upscales to 21)
@@ -145,13 +162,68 @@ export default function SurfaceMap({
     }
 
     mapRef.current = map
+    if (onMapReady) onMapReady(map)
 
     return () => {
       map.remove()
       mapRef.current = null
       parcelLayerRef.current = null
+      if (onMapReady) onMapReady(null)
     }
   }, [center?.[0], center?.[1], markers.length])
+
+  // Notify Leaflet when the container height changes + auto-fit survey overlays
+  useEffect(() => {
+    if (!mapRef.current) return
+    mapRef.current.invalidateSize({ animate: false })
+
+    // After size update, fit map to show survey overlays (rotation-aware)
+    if (surveyMapVisible && surveyMaps.length > 0 && anchor) {
+      const aLat = anchor.lat
+      const aLon = anchor.lon
+      const toShow = activeSurveyId
+        ? surveyMaps.filter(s => s.id === activeSurveyId)
+        : surveyMaps
+      let combined = null
+      toShow.forEach(s => {
+        const sc = s.scale || 0.1
+        const ax = s.anchor_x ?? 0.5
+        const ay = s.anchor_y ?? 0.5
+        const w = s.image_width || 600
+        const h = s.image_height || 500
+        const hdg = s.heading || 0
+        const latD = (h * sc) / 111320
+        const lonD = (w * sc) / (111320 * Math.cos(aLat * Math.PI / 180))
+        const south = aLat - (1 - ay) * latD
+        const north = aLat + ay * latD
+        const west = aLon - ax * lonD
+        const east = aLon + (1 - ax) * lonD
+
+        let b
+        if (hdg === 0) {
+          b = L.latLngBounds([south, west], [north, east])
+        } else {
+          // Rotated bounding box — rotate corners around anchor
+          const corners = [[south, west], [south, east], [north, west], [north, east]]
+          const rad = hdg * Math.PI / 180
+          const c = Math.cos(rad), sn = Math.sin(rad)
+          const rotated = corners.map(([lat, lon]) => {
+            const dLat = lat - aLat, dLon = lon - aLon
+            return [aLat + dLat * c + dLon * sn, aLon - dLat * sn + dLon * c]
+          })
+          const lats = rotated.map(r => r[0]), lons = rotated.map(r => r[1])
+          b = L.latLngBounds(
+            [Math.min(...lats), Math.min(...lons)],
+            [Math.max(...lats), Math.max(...lons)]
+          )
+        }
+        combined = combined ? combined.extend(b) : b
+      })
+      if (combined && !mapRef.current.getBounds().contains(combined)) {
+        mapRef.current.fitBounds(combined.pad(0.15), { animate: true, maxZoom: mapRef.current.getZoom() })
+      }
+    }
+  }, [height, surveyMapVisible, surveyMaps.length, activeSurveyId])
 
   // Render parcel boundary polygon
   useEffect(() => {
@@ -185,11 +257,99 @@ export default function SurfaceMap({
           className={`surface-map rounded-xl overflow-hidden ${className}`}
           style={{ height, width: '100%' }}
         />
+        {/* Survey map button — above center button */}
+        {(onToggleSurveyMap || onAddSurveyMap) && (
+          <div className="absolute bottom-12 left-3 z-[1000]">
+            <div className="flex items-center">
+            <button
+              onClick={() => {
+                if (surveyMaps.length > 0) {
+                  if (onToggleSurveyMap) onToggleSurveyMap()
+                } else {
+                  if (onAddSurveyMap) onAddSurveyMap()
+                }
+              }}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all shadow-lg
+                ${surveyMapVisible
+                  ? 'bg-amber-900/80 text-amber-400 border border-amber-700/50 backdrop-blur-sm'
+                  : 'bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] backdrop-blur-sm hover:text-amber-400 hover:border-amber-700/50'
+                }`}
+            >
+              {surveyMaps.length > 0
+                ? (surveyMapVisible ? 'Hide Survey' : 'Show Survey')
+                : 'Add Survey Map'}
+            </button>
+            {/* Add another survey button */}
+            {surveyMapVisible && surveyMaps.length > 0 && onAddSurveyMap && (
+              <button
+                onClick={onAddSurveyMap}
+                className="ml-1.5 px-2 py-1.5 rounded-full text-xs font-medium transition-all shadow-lg
+                  bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] backdrop-blur-sm
+                  hover:text-amber-400 hover:border-amber-700/50"
+                title="Add another survey map"
+              >
+                +
+              </button>
+            )}
+            </div>
+            {/* Multi-survey selector dropdown */}
+            {surveyMapVisible && surveyMaps.length > 1 && (
+              <div className="relative mt-1">
+                <button
+                  onClick={() => setSurveyDropdownOpen(v => !v)}
+                  className="px-2 py-1 rounded-full text-[10px] text-[var(--cyber-text-dim)]
+                    bg-[#0a0a12]/80 border border-[var(--cyber-border)] backdrop-blur-sm
+                    hover:text-white transition-all shadow-lg"
+                >
+                  {activeSurveyId
+                    ? (surveyMaps.find(s => s.id === activeSurveyId)?.name || 'Selected')
+                    : 'All Surveys'} &#9662;
+                </button>
+                {surveyDropdownOpen && (
+                  <div className="absolute left-0 mt-1 w-44 rounded-lg bg-[#0a0a12]/95 border border-[var(--cyber-border)]
+                    backdrop-blur-sm shadow-xl overflow-hidden">
+                    <button
+                      onClick={() => { if (onSurveySelect) onSurveySelect(null); setSurveyDropdownOpen(false) }}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--cyber-surface-2)] transition-colors
+                        ${!activeSurveyId ? 'text-[var(--cyber-cyan)]' : 'text-[var(--cyber-text-dim)]'}`}
+                    >
+                      All Surveys
+                    </button>
+                    {surveyMaps.map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => { if (onSurveySelect) onSurveySelect(s.id); setSurveyDropdownOpen(false) }}
+                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--cyber-surface-2)] transition-colors
+                          ${activeSurveyId === s.id ? 'text-[var(--cyber-cyan)]' : 'text-[var(--cyber-text-dim)]'}`}
+                      >
+                        {s.name || `Survey ${s.id.slice(0, 8)}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Edit button for active survey */}
+            {surveyMapVisible && surveyMaps.length > 0 && !editingSurveyId && onEditStart && (
+              <button
+                onClick={() => {
+                  const target = activeSurveyId || surveyMaps[0]?.id
+                  if (target && onEditStart) onEditStart(target)
+                }}
+                className="mt-1 px-2 py-1 rounded-full text-[10px] text-[var(--cyber-text-dim)]
+                  bg-[#0a0a12]/80 border border-[var(--cyber-border)] backdrop-blur-sm
+                  hover:text-amber-400 hover:border-amber-700/50 transition-all shadow-lg block"
+              >
+                Edit
+              </button>
+            )}
+          </div>
+        )}
         {showCenterButton && (
           <button
             onClick={() => {
               if (mapRef.current) {
-                mapRef.current.setView(center, zoom, { animate: true })
+                mapRef.current.setView(center, mapRef.current.getZoom(), { animate: true })
               }
             }}
             className="absolute bottom-3 left-3 z-[1000] px-3 py-1.5 rounded-full text-xs font-medium
@@ -212,6 +372,20 @@ export default function SurfaceMap({
         selectedLevel={caveOverlayLevel}
         opacity={caveOverlayOpacity}
         visible={caveOverlayVisible}
+      />
+      <HandDrawnMapOverlay
+        map={mapRef.current}
+        surveys={surveyMaps}
+        activeSurveyId={activeSurveyId}
+        visible={surveyMapVisible}
+        anchorLat={anchor?.lat}
+        anchorLon={anchor?.lon}
+        editingSurveyId={editingSurveyId}
+        onSurveyUpdated={onSurveyUpdated}
+        onEditStart={onEditStart}
+        onEditEnd={onEditEnd}
+        onDeleteSurvey={onDeleteSurvey}
+        caveId={caveId}
       />
     </>
   )

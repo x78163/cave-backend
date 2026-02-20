@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
+    SurveyMap,
 )
 
 
@@ -11,6 +12,46 @@ class CavePhotoSerializer(serializers.ModelSerializer):
         model = CavePhoto
         fields = ['id', 'image', 'caption', 'tags', 'uploaded_at', 'origin_device']
         read_only_fields = ['id', 'uploaded_at']
+
+
+class SurveyMapSerializer(serializers.ModelSerializer):
+    overlay_url = serializers.SerializerMethodField()
+    original_url = serializers.SerializerMethodField()
+    uploaded_by_username = serializers.CharField(
+        source='uploaded_by.username', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = SurveyMap
+        fields = [
+            'id', 'cave', 'name',
+            'overlay_url', 'original_url',
+            'image_width', 'image_height',
+            'anchor_x', 'anchor_y',
+            'scale', 'heading', 'opacity',
+            'is_locked',
+            'uploaded_by', 'uploaded_by_username',
+            'uploaded_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'cave', 'image_width', 'image_height',
+            'uploaded_by', 'uploaded_by_username',
+            'uploaded_at', 'updated_at',
+        ]
+
+    def get_overlay_url(self, obj):
+        if not obj.overlay_image:
+            return None
+        request = self.context.get('request')
+        url = obj.overlay_image.url
+        return request.build_absolute_uri(url) if request else url
+
+    def get_original_url(self, obj):
+        if not obj.original_image:
+            return None
+        request = self.context.get('request')
+        url = obj.original_image.url
+        return request.build_absolute_uri(url) if request else url
 
 
 class CaveCommentSerializer(serializers.ModelSerializer):
@@ -124,6 +165,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     """Full serializer for cave detail view."""
     photos = CavePhotoSerializer(many=True, read_only=True)
     comments = CaveCommentSerializer(many=True, read_only=True)
+    survey_maps = SurveyMapSerializer(many=True, read_only=True)
     photo_count = serializers.IntegerField(source='photos.count', read_only=True)
     comment_count = serializers.IntegerField(source='comments.count', read_only=True)
     revision_count = serializers.IntegerField(source='revisions.count', read_only=True)
@@ -149,6 +191,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'cover_photo',
             'photos', 'photo_count',
             'comments', 'comment_count',
+            'survey_maps',
             'average_rating', 'rating_count',
             'revision_count', 'latest_revision',
             'land_owner',

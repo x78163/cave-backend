@@ -7,6 +7,7 @@ import CaveMapSection from '../components/CaveMapSection'
 import CameraCapture from '../components/CameraCapture'
 import CaveExplorer from '../components/CaveExplorer'
 import StarRating from '../components/StarRating'
+import SurveyMapModal from '../components/SurveyMapModal'
 import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
 import parseCoordinates from '../utils/parseCoordinates'
@@ -49,6 +50,13 @@ export default function CaveDetail() {
   const [availableModes, setAvailableModes] = useState([])
   const [overlayOpacity, setOverlayOpacity] = useState(0.6)
   const [overlayPanelOpen, setOverlayPanelOpen] = useState(true)
+
+  // Survey map overlays
+  const [surveyMaps, setSurveyMaps] = useState([])
+  const [surveyMapVisible, setSurveyMapVisible] = useState(false)
+  const [activeSurveyId, setActiveSurveyId] = useState(null)
+  const [editingSurveyId, setEditingSurveyId] = useState(null)
+  const [showSurveyModal, setShowSurveyModal] = useState(false)
 
   // Photo carousel state
   const [carouselOpen, setCarouselOpen] = useState(false)
@@ -133,6 +141,16 @@ export default function CaveDetail() {
       .then(data => setOverlayPois(data?.pois || []))
       .catch(() => {})
   }, [showOverlay, caveId])
+
+  // Load survey maps from cave detail response
+  useEffect(() => {
+    if (cave?.survey_maps) {
+      setSurveyMaps(cave.survey_maps)
+      if (cave.survey_maps.length > 0 && !surveyMapVisible) {
+        setSurveyMapVisible(true)
+      }
+    }
+  }, [cave?.survey_maps])
 
   /* --- Photo upload with dialog --- */
   const handlePhotoSelect = (e) => {
@@ -595,7 +613,7 @@ export default function CaveDetail() {
                 center={[cave.latitude, cave.longitude]}
                 markers={[{ lat: cave.latitude, lon: cave.longitude, label: cave.name }]}
                 zoom={14}
-                height={showOverlay ? '20rem' : '12rem'}
+                height={surveyMapVisible ? '28rem' : showOverlay ? '20rem' : '12rem'}
                 className="border border-[var(--cyber-border)]"
                 showCenterButton
                 caveMapData={overlayMapData}
@@ -606,6 +624,30 @@ export default function CaveDetail() {
                 caveOverlayOpacity={overlayOpacity}
                 caveOverlayLevel={overlayLevel}
                 parcelGeometry={cave.land_owner?.parcel_geometry}
+                surveyMaps={surveyMaps}
+                surveyMapVisible={surveyMapVisible}
+                onToggleSurveyMap={() => setSurveyMapVisible(v => !v)}
+                activeSurveyId={activeSurveyId}
+                onSurveySelect={setActiveSurveyId}
+                onAddSurveyMap={() => setShowSurveyModal(true)}
+                editingSurveyId={editingSurveyId}
+                onSurveyUpdated={(updated) => {
+                  setSurveyMaps(prev => prev.map(s => s.id === updated.id ? updated : s))
+                  setEditingSurveyId(null)
+                }}
+                onEditStart={setEditingSurveyId}
+                onEditEnd={() => setEditingSurveyId(null)}
+                onDeleteSurvey={async (surveyId) => {
+                  try {
+                    await apiFetch(`/caves/${caveId}/survey-maps/${surveyId}/`, { method: 'DELETE' })
+                    setSurveyMaps(prev => prev.filter(s => s.id !== surveyId))
+                    setEditingSurveyId(null)
+                    if (activeSurveyId === surveyId) setActiveSurveyId(null)
+                  } catch (err) {
+                    console.error('Failed to delete survey:', err)
+                  }
+                }}
+                caveId={caveId}
               />
 
               {/* Floating layer panel — Google Earth style */}
@@ -691,6 +733,7 @@ export default function CaveDetail() {
                 </div>
               )}
             </div>
+
           </div>
         )}
 
@@ -1036,6 +1079,20 @@ export default function CaveDetail() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ====== SURVEY MAP MODAL ====== */}
+      {showSurveyModal && (
+        <SurveyMapModal
+          caveId={caveId}
+          onComplete={(newSurvey) => {
+            setSurveyMaps(prev => [newSurvey, ...prev])
+            setSurveyMapVisible(true)
+            setActiveSurveyId(newSurvey.id)
+            setShowSurveyModal(false)
+          }}
+          onClose={() => setShowSurveyModal(false)}
+        />
       )}
     </div>
   )

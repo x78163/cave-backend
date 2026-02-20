@@ -319,6 +319,11 @@ body {
 
 /* ── Surface Map — Leaflet theme overrides ── */
 
+/* Clip rotated/scaled overlays so they don't bleed past the map edge */
+.surface-map {
+  clip-path: inset(0 round 12px);
+}
+
 /* Dark-invert OSM tiles to match cyberpunk theme */
 .surface-map .leaflet-tile-pane {
   filter: brightness(0.6) invert(1) contrast(1.3) hue-rotate(200deg) saturate(0.3) brightness(0.8);

@@ -409,3 +409,49 @@ class CaveRequest(models.Model):
 
     def __str__(self):
         return f'{self.requester} -> {self.cave.name} ({self.get_request_type_display()}: {self.status})'
+
+
+class SurveyMap(models.Model):
+    """
+    A calibrated survey map image overlaid on a cave's surface map.
+    Each cave can have multiple survey maps with independent calibration.
+
+    Lifecycle:
+      1. User uploads image -> backend processes (strip bg, recolor) -> saves both
+      2. User pins entrance on image -> anchor_x, anchor_y
+      3. User measures scale bar -> scale (m/px)
+      4. User adjusts rotation -> heading
+      5. User clicks Confirm -> is_locked = True
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cave = models.ForeignKey(Cave, on_delete=models.CASCADE, related_name='survey_maps')
+
+    # Images
+    original_image = models.ImageField(upload_to='survey_maps/originals/')
+    overlay_image = models.ImageField(upload_to='survey_maps/overlays/')
+    image_width = models.IntegerField()
+    image_height = models.IntegerField()
+
+    # Calibration
+    anchor_x = models.FloatField(default=0.5, help_text='Fractional X (0=left, 1=right)')
+    anchor_y = models.FloatField(default=0.5, help_text='Fractional Y (0=top, 1=bottom)')
+    scale = models.FloatField(default=0.1, help_text='Meters per pixel')
+    heading = models.FloatField(default=0.0, help_text='Rotation degrees CW from north')
+    opacity = models.FloatField(default=0.75)
+
+    # Metadata
+    name = models.CharField(max_length=200, blank=True, default='')
+    is_locked = models.BooleanField(default=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='uploaded_survey_maps',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        label = self.name or f'Survey {str(self.id)[:8]}'
+        return f'{label} — {self.cave.name}'

@@ -19,4 +19,6 @@ urlpatterns = [
     path('<uuid:cave_id>/requests/', views.cave_requests, name='cave_requests'),
     path('<uuid:cave_id>/requests/<uuid:request_id>/resolve/', views.cave_request_resolve, name='cave_request_resolve'),
     path('<uuid:cave_id>/requests/<uuid:request_id>/', views.cave_request_delete, name='cave_request_delete'),
+    path('<uuid:cave_id>/survey-maps/', views.survey_map_list_create, name='survey_map_list_create'),
+    path('<uuid:cave_id>/survey-maps/<uuid:survey_id>/', views.survey_map_detail, name='survey_map_detail'),
 ]
