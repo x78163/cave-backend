@@ -451,6 +451,7 @@ Multiple expedition sessions mapping different sections of the same cave need to
 - Django dev server
 - React dev server (Vite)
 - PostgreSQL on WSL
+- Cloudflare Quick Tunnel (`cloudflared`) for remote/mobile testing — `~/.local/bin/cloudflared tunnel --url http://localhost:5174`
 
 ### Production (Future)
 - AWS EC2 or NameHero VPS
