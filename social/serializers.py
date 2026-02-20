@@ -92,17 +92,22 @@ class PostSerializer(serializers.ModelSerializer):
     dislike_count = serializers.SerializerMethodField()
     comment_count = serializers.SerializerMethodField()
     user_reaction = serializers.SerializerMethodField()
+    cave_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Post
         fields = [
             'id', 'author', 'author_username', 'text', 'image',
-            'cave', 'cave_name', 'grotto', 'grotto_name', 'visibility',
+            'cave', 'cave_name', 'cave_name_cache', 'cave_status',
+            'grotto', 'grotto_name', 'visibility',
+            'is_deleted', 'deleted_at',
             'like_count', 'dislike_count', 'comment_count', 'user_reaction',
             'created_at', 'updated_at',
         ]
         read_only_fields = [
-            'id', 'author_username', 'cave_name', 'grotto_name',
+            'id', 'author_username', 'cave_name', 'cave_name_cache', 'cave_status',
+            'grotto_name',
+            'is_deleted', 'deleted_at',
             'like_count', 'dislike_count', 'comment_count', 'user_reaction',
             'created_at', 'updated_at',
         ]
@@ -132,3 +137,26 @@ class PostSerializer(serializers.ModelSerializer):
             return None
         reaction = obj.reactions.filter(user_id=current_user).first()
         return reaction.reaction_type if reaction else None
+
+    def get_cave_status(self, obj):
+        return None  # Computed in to_representation
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Soft-deleted posts: hide content
+        if instance.is_deleted:
+            data['text'] = '[Deleted by author]'
+            data['image'] = None
+        # Cave status display
+        if instance.cave:
+            if instance.cave.visibility in ('public', 'limited_public'):
+                data['cave_status'] = 'active'
+            else:
+                data['cave_status'] = 'unlisted'
+                data['cave_name'] = None  # hide name for privacy
+        elif instance.cave_name_cache:
+            data['cave_status'] = 'deleted'
+            data['cave_name'] = instance.cave_name_cache
+        else:
+            data['cave_status'] = None
+        return data

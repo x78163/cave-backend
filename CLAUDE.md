@@ -217,6 +217,14 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/caves/{id}/photos/` - Upload photo
 - `POST /api/users/{id}/follow/` - Follow user
 - `GET /api/feed/` - Activity feed
+- `GET/POST /api/social/posts/` - List feed / create post (supports image upload)
+- `GET/DELETE /api/social/posts/{id}/` - Get or delete post (soft delete if comments exist)
+- `POST/DELETE /api/social/posts/{id}/react/` - Add/remove reaction (like/dislike)
+- `GET/POST /api/social/posts/{id}/comments/` - List or add comments (blocked on deleted posts)
+
+### User Media Endpoints
+- `GET /api/users/profile/{id}/media/` - All user media (photos, documents, video links + post images)
+- `PATCH /api/users/media/{type}/{uuid}/` - Update media visibility (public/unlisted/private)
 
 ### Survey Map Overlays
 - `GET /api/caves/{id}/survey-maps/` - List survey maps for cave
@@ -623,6 +631,15 @@ This project includes:
 - `contact_access_users` M2M on LandOwner for granular per-user contact visibility grants
 - User auth with registration, login, JWT tokens
 - Social features: comments, ratings/reviews, wiki-style descriptions with revision history, user wall posts
+- Media ownership system: photos, documents, video links belong to uploader (SET_NULL on cave FK)
+- `MediaVisibility` choices (public/unlisted/private) on all media models
+- `cave_name_cache` on media and posts — preserves cave name after cave deletion
+- `uploaded_by` FK on CavePhoto — tracks who uploaded each photo
+- User media gallery endpoint — aggregates cave photos + post images + documents + video links
+- Media visibility control endpoint — users can set their media to public/unlisted/private
+- Post soft delete: `is_deleted` + `deleted_at` — preserves conversation when comments exist, hard deletes otherwise
+- Post `cave_status` computed field: active/unlisted/deleted based on cave FK state
+- Comments blocked on soft-deleted posts (403)
 - Photo upload with caption/tags, camera capture
 - SurveyMap model with CRUD API — multi-survey overlays per cave with persistent calibration (anchor, scale, heading, opacity, lock state)
 - Survey map image processing pipeline (background removal + recolor via `caves/hand_drawn_map.py`)
@@ -672,9 +689,16 @@ This project includes:
   - Delete confirmation modal with permanent deletion warning
   - Unlisted visibility badge (purple)
 - Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
-- User profile page with avatar presets, saved routes
+- User profile page with avatar presets, saved routes, media gallery
+  - Media tab with sub-tabs: Photos (grid), Documents (list), Videos (grid)
+  - Aggregates cave photos + wall post images into unified photo gallery
+  - Cave status badges: cyan link (active), red badge (deleted cave), dim (no cave)
+  - Visibility badges on non-public items
 - Login/Register pages
 - Social feed with post composer
+  - Post soft delete: "[Deleted by author]" placeholder preserves comment threads
+  - Cave status badges on posts: active (link), unlisted (dim), deleted (red with cached name)
+  - Reaction bar hidden on deleted posts; comment toggle preserved if comments exist
 
 **GIS Integration (Tennessee)**:
 - Statewide COMPTROLLER_OLG_LANDUSE ArcGIS service (86/95 counties)
@@ -696,10 +720,10 @@ This project includes:
 | `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection |
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
 | `caves/hand_drawn_map.py` | Survey map image processing (bg removal + recolor) |
-| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument, CaveVideoLink |
+| `caves/models.py` | Cave, LandOwner, CavePhoto (SET_NULL + uploaded_by), DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument (SET_NULL), CaveVideoLink (SET_NULL), MediaVisibility |
 | `caves/video_utils.py` | Video URL parser (platform detect, embed URL, thumbnail generation) |
 | `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer + CaveDocumentSerializer + CaveVideoLinkSerializer |
-| `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD |
+| `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD, user_media + user_media_update |
 | `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes) |
 | `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers, clustering, parcel polygon, cave overlay, survey overlays, center button |
@@ -712,7 +736,8 @@ This project includes:
 | `frontend/src/utils/videoUtils.js` | Client-side video URL parser (mirrors backend) |
 | `frontend/src/components/CsvImportModal.jsx` | Three-step admin CSV import modal (upload → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
-| `social/views.py` | Wall posts, ratings, activity feed |
+| `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
+| `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets |
 
 ### Migrations (caves app)
@@ -728,6 +753,13 @@ This project includes:
 - 0010: hazard_count nullable (IntegerField null=True, blank=True)
 - 0011: Cave aliases, city, zip_code fields
 - 0012: Unlisted visibility choice added
+- 0013: Media ownership (SET_NULL on cave FK, uploaded_by, cave_name_cache, MediaVisibility on CavePhoto/CaveDocument/CaveVideoLink)
+- 0014: Data migration — backfill cave_name_cache on existing media
+
+### Migrations (social app)
+- 0001: Initial social models
+- 0002: Post soft delete fields (is_deleted, deleted_at, cave_name_cache)
+- 0003: Data migration — backfill cave_name_cache on existing posts
 
 ### Future Features (To Be Developed)
 

@@ -91,10 +91,14 @@ export default function PostCard({ post, currentUserId, onReact, onDelete }) {
       </div>
 
       {/* Body */}
-      <p className="mt-3 text-sm text-[var(--cyber-text)] whitespace-pre-line">{post.text}</p>
+      {post.is_deleted ? (
+        <p className="mt-3 text-sm italic text-[var(--cyber-text-dim)]">[Deleted by author]</p>
+      ) : (
+        <p className="mt-3 text-sm text-[var(--cyber-text)] whitespace-pre-line">{post.text}</p>
+      )}
 
       {/* Image */}
-      {post.image && (
+      {!post.is_deleted && post.image && (
         <img
           src={post.image}
           alt=""
@@ -102,8 +106,8 @@ export default function PostCard({ post, currentUserId, onReact, onDelete }) {
         />
       )}
 
-      {/* Cave link */}
-      {post.cave && (
+      {/* Cave link / status */}
+      {post.cave_status === 'active' && post.cave && (
         <Link
           to={`/caves/${post.cave}`}
           className="inline-block mt-3 cyber-badge text-xs no-underline"
@@ -112,44 +116,75 @@ export default function PostCard({ post, currentUserId, onReact, onDelete }) {
           {post.cave_name || 'View cave'}
         </Link>
       )}
-
-      {/* Reaction bar */}
-      <div className="flex items-center gap-4 mt-4 pt-3" style={{ borderTop: '1px solid var(--cyber-border)' }}>
-        <button
-          className="flex items-center gap-1.5 text-sm transition-colors"
-          style={{ color: post.user_reaction === 'like' ? 'var(--cyber-cyan)' : 'var(--cyber-text-dim)' }}
-          onClick={() => handleReact('like')}
+      {post.cave_status === 'unlisted' && (
+        <span
+          className="inline-block mt-3 cyber-badge text-xs"
+          style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
         >
-          <span className="text-base">{post.user_reaction === 'like' ? '\u25B2' : '\u25B3'}</span>
-          {post.like_count > 0 && <span>{post.like_count}</span>}
-        </button>
-
-        <button
-          className="flex items-center gap-1.5 text-sm transition-colors"
-          style={{ color: post.user_reaction === 'dislike' ? 'var(--cyber-magenta)' : 'var(--cyber-text-dim)' }}
-          onClick={() => handleReact('dislike')}
+          Cave unlisted
+        </span>
+      )}
+      {post.cave_status === 'deleted' && (
+        <span
+          className="inline-block mt-3 cyber-badge text-xs"
+          style={{ borderColor: '#ef4444', color: '#ef4444' }}
         >
-          <span className="text-base">{post.user_reaction === 'dislike' ? '\u25BC' : '\u25BD'}</span>
-          {post.dislike_count > 0 && <span>{post.dislike_count}</span>}
-        </button>
+          {post.cave_name || 'Cave'} (Deleted)
+        </span>
+      )}
 
-        <button
-          className="flex items-center gap-1.5 text-sm text-[var(--cyber-text-dim)] transition-colors hover:text-[var(--cyber-cyan)]"
-          onClick={toggleComments}
-        >
-          <span className="text-base">{'\u{1F4AC}'}</span>
-          {post.comment_count > 0 && <span>{post.comment_count}</span>}
-        </button>
-
-        {onDelete && post.author === currentUserId && (
+      {/* Reaction bar — hidden for soft-deleted posts */}
+      {!post.is_deleted && (
+        <div className="flex items-center gap-4 mt-4 pt-3" style={{ borderTop: '1px solid var(--cyber-border)' }}>
           <button
-            className="ml-auto text-xs text-[var(--cyber-text-dim)] hover:text-red-400 transition-colors"
-            onClick={() => onDelete(post)}
+            className="flex items-center gap-1.5 text-sm transition-colors"
+            style={{ color: post.user_reaction === 'like' ? 'var(--cyber-cyan)' : 'var(--cyber-text-dim)' }}
+            onClick={() => handleReact('like')}
           >
-            Delete
+            <span className="text-base">{post.user_reaction === 'like' ? '\u25B2' : '\u25B3'}</span>
+            {post.like_count > 0 && <span>{post.like_count}</span>}
           </button>
-        )}
-      </div>
+
+          <button
+            className="flex items-center gap-1.5 text-sm transition-colors"
+            style={{ color: post.user_reaction === 'dislike' ? 'var(--cyber-magenta)' : 'var(--cyber-text-dim)' }}
+            onClick={() => handleReact('dislike')}
+          >
+            <span className="text-base">{post.user_reaction === 'dislike' ? '\u25BC' : '\u25BD'}</span>
+            {post.dislike_count > 0 && <span>{post.dislike_count}</span>}
+          </button>
+
+          <button
+            className="flex items-center gap-1.5 text-sm text-[var(--cyber-text-dim)] transition-colors hover:text-[var(--cyber-cyan)]"
+            onClick={toggleComments}
+          >
+            <span className="text-base">{'\u{1F4AC}'}</span>
+            {post.comment_count > 0 && <span>{post.comment_count}</span>}
+          </button>
+
+          {onDelete && post.author === currentUserId && (
+            <button
+              className="ml-auto text-xs text-[var(--cyber-text-dim)] hover:text-red-400 transition-colors"
+              onClick={() => onDelete(post)}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Comment toggle for soft-deleted posts (reaction bar hidden) */}
+      {post.is_deleted && post.comment_count > 0 && (
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--cyber-border)' }}>
+          <button
+            className="flex items-center gap-1.5 text-sm text-[var(--cyber-text-dim)] transition-colors hover:text-[var(--cyber-cyan)]"
+            onClick={toggleComments}
+          >
+            <span className="text-base">{'\u{1F4AC}'}</span>
+            <span>{post.comment_count} comment{post.comment_count !== 1 ? 's' : ''}</span>
+          </button>
+        </div>
+      )}
 
       {/* Comments section */}
       {showComments && (
@@ -169,23 +204,25 @@ export default function PostCard({ post, currentUserId, onReact, onDelete }) {
             </div>
           )}
 
-          {/* Inline composer */}
-          <form onSubmit={handleComment} className="flex gap-2 mt-3">
-            <input
-              type="text"
-              placeholder="Write a comment..."
-              value={commentText}
-              onChange={e => setCommentText(e.target.value)}
-              className="cyber-input flex-1 px-3 py-1.5 text-xs"
-            />
-            <button
-              type="submit"
-              disabled={submitting || !commentText.trim()}
-              className="cyber-btn cyber-btn-cyan px-3 py-1.5 text-xs"
-            >
-              Post
-            </button>
-          </form>
+          {/* Inline composer — hidden for deleted posts */}
+          {!post.is_deleted && (
+            <form onSubmit={handleComment} className="flex gap-2 mt-3">
+              <input
+                type="text"
+                placeholder="Write a comment..."
+                value={commentText}
+                onChange={e => setCommentText(e.target.value)}
+                className="cyber-input flex-1 px-3 py-1.5 text-xs"
+              />
+              <button
+                type="submit"
+                disabled={submitting || !commentText.trim()}
+                className="cyber-btn cyber-btn-cyan px-3 py-1.5 text-xs"
+              >
+                Post
+              </button>
+            </form>
+          )}
         </div>
       )}
     </div>

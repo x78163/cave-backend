@@ -294,10 +294,11 @@ def post_list(request):
         cave_id = request.query_params.get('cave')
 
         if cave_id:
-            posts = posts.filter(cave_id=cave_id)
+            posts = posts.filter(cave_id=cave_id, is_deleted=False)
         elif grotto_id:
-            posts = posts.filter(grotto_id=grotto_id)
+            posts = posts.filter(grotto_id=grotto_id, is_deleted=False)
         elif user_id:
+            # User wall: show soft-deleted posts (as "[Deleted by author]")
             posts = posts.filter(author_id=user_id)
         elif current_user_id:
             following_ids = list(
@@ -308,9 +309,9 @@ def post_list(request):
                 Q(author_id=current_user_id) | Q(author_id__in=following_ids)
             ).filter(
                 Q(visibility='public') | Q(visibility='followers') | Q(author_id=current_user_id)
-            )
+            ).filter(is_deleted=False)
         else:
-            posts = posts.filter(visibility='public')
+            posts = posts.filter(visibility='public', is_deleted=False)
 
         total = posts.count()
         limit = int(request.query_params.get('limit', 20))
@@ -333,8 +334,15 @@ def post_list(request):
     data['author'] = request.user.id
     serializer = PostSerializer(data=data)
     serializer.is_valid(raise_exception=True)
-    serializer.save()
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
+    post = serializer.save()
+    # Cache cave name for persistence after cave deletion
+    if post.cave:
+        post.cave_name_cache = post.cave.name
+        post.save(update_fields=['cave_name_cache'])
+    return Response(
+        PostSerializer(post, context={'current_user': request.user.id}).data,
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(['GET', 'DELETE'])
@@ -343,8 +351,22 @@ def post_detail(request, post_id):
     post = get_object_or_404(Post, pk=post_id)
 
     if request.method == 'DELETE':
-        post.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        if request.user.id != post.author_id and not request.user.is_staff:
+            return Response({'error': 'Only the author can delete this post'}, status=status.HTTP_403_FORBIDDEN)
+
+        if post.comments.exists():
+            # Soft delete — preserve for comment context
+            from django.utils import timezone
+            post.is_deleted = True
+            post.deleted_at = timezone.now()
+            post.save(update_fields=['is_deleted', 'deleted_at'])
+            return Response({'detail': 'Post marked as deleted'}, status=status.HTTP_200_OK)
+        else:
+            # Hard delete — no comments to preserve
+            post.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
     current_user_id = None
     if request.user and request.user.is_authenticated:
@@ -401,6 +423,11 @@ def post_comments(request, post_id):
         return Response(serializer.data)
 
     # POST — requires auth
+    if post.is_deleted:
+        return Response(
+            {'error': 'Cannot comment on a deleted post'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     data = request.data.copy()
     data['post'] = post.id
     data['author'] = request.user.id

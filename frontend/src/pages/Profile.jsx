@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useApi, apiFetch } from '../hooks/useApi'
 import api from '../services/api'
 import StarRating from '../components/StarRating'
@@ -278,6 +278,192 @@ function RatingsTab({ userId }) {
   )
 }
 
+// ── Media Tab ───────────────────────────────────────────────
+
+function CaveStatusBadge({ item }) {
+  if (item.cave) {
+    return (
+      <Link
+        to={`/caves/${item.cave}`}
+        className="cyber-badge text-[10px] no-underline"
+        style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
+      >
+        {item.cave_name_cache || 'View cave'}
+      </Link>
+    )
+  }
+  if (item.cave_name_cache) {
+    return (
+      <span
+        className="cyber-badge text-[10px]"
+        style={{ borderColor: '#ef4444', color: '#ef4444' }}
+      >
+        {item.cave_name_cache} (Deleted)
+      </span>
+    )
+  }
+  return null
+}
+
+function MediaTab({ userId }) {
+  const [subTab, setSubTab] = useState('photos')
+  const { data, loading } = useApi(`/users/profile/${userId}/media/`)
+
+  const photos = data?.photos ?? []
+  const documents = data?.documents ?? []
+  const videoLinks = data?.video_links ?? []
+
+  const SUB_TABS = [
+    { key: 'photos', label: 'Photos', count: data?.photo_count ?? 0 },
+    { key: 'documents', label: 'Documents', count: data?.document_count ?? 0 },
+    { key: 'videos', label: 'Videos', count: data?.video_link_count ?? 0 },
+  ]
+
+  if (loading) {
+    return <p className="text-center text-[var(--cyber-text-dim)] py-12">Loading media...</p>
+  }
+
+  return (
+    <>
+      {/* Sub-tab bar */}
+      <div className="flex gap-2 mb-4">
+        {SUB_TABS.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setSubTab(tab.key)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              subTab === tab.key
+                ? 'text-[var(--cyber-bg)] bg-[var(--cyber-cyan)]'
+                : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)]'
+            }`}
+          >
+            {tab.label}{tab.count > 0 ? ` (${tab.count})` : ''}
+          </button>
+        ))}
+      </div>
+
+      {/* Photos grid */}
+      {subTab === 'photos' && (
+        photos.length === 0 ? (
+          <p className="text-center text-[var(--cyber-text-dim)] py-12">No photos yet</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {photos.map(photo => (
+              <div key={photo.id} className="cyber-card overflow-hidden">
+                <img
+                  src={photo.image}
+                  alt={photo.caption || ''}
+                  className="w-full aspect-square object-cover"
+                />
+                <div className="p-3">
+                  {photo.caption && (
+                    <p className="text-xs text-[var(--cyber-text)] truncate">{photo.caption}</p>
+                  )}
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <CaveStatusBadge item={photo} />
+                    {photo.visibility !== 'public' && (
+                      <span
+                        className="cyber-badge text-[10px]"
+                        style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
+                      >
+                        {photo.visibility}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[var(--cyber-text-dim)] mt-1">
+                    {formatDate(photo.uploaded_at)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* Documents list */}
+      {subTab === 'documents' && (
+        documents.length === 0 ? (
+          <p className="text-center text-[var(--cyber-text-dim)] py-12">No documents yet</p>
+        ) : (
+          <div className="space-y-3">
+            {documents.map(doc => (
+              <div key={doc.id} className="cyber-card p-4 flex items-center gap-4">
+                <div
+                  className="w-10 h-10 rounded flex items-center justify-center shrink-0 text-lg"
+                  style={{ background: 'var(--cyber-surface)', border: '1px solid var(--cyber-border)' }}
+                >
+                  {'\u{1F4C4}'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-[var(--cyber-text)] font-medium truncate">
+                    {doc.title || doc.file?.split('/').pop() || 'Untitled'}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <CaveStatusBadge item={doc} />
+                    {doc.visibility !== 'public' && (
+                      <span
+                        className="cyber-badge text-[10px]"
+                        style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
+                      >
+                        {doc.visibility}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[var(--cyber-text-dim)] mt-1">
+                    {formatDate(doc.uploaded_at)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* Videos grid */}
+      {subTab === 'videos' && (
+        videoLinks.length === 0 ? (
+          <p className="text-center text-[var(--cyber-text-dim)] py-12">No videos yet</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {videoLinks.map(video => (
+              <div key={video.id} className="cyber-card p-4">
+                <a
+                  href={video.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium truncate block"
+                  style={{ color: 'var(--cyber-cyan)' }}
+                >
+                  {video.title || video.url}
+                </a>
+                {video.description && (
+                  <p className="text-xs text-[var(--cyber-text-dim)] mt-1 line-clamp-2">
+                    {video.description}
+                  </p>
+                )}
+                <div className="flex items-center gap-2 mt-2">
+                  <CaveStatusBadge item={video} />
+                  {video.visibility !== 'public' && (
+                    <span
+                      className="cyber-badge text-[10px]"
+                      style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
+                    >
+                      {video.visibility}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-[var(--cyber-text-dim)] mt-1">
+                  {formatDate(video.added_at)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </>
+  )
+}
+
 // ── Profile Edit Panel ───────────────────────────────────────
 
 function ProfileEditPanel({ user, onSave, onCancel }) {
@@ -459,6 +645,7 @@ function ProfileEditPanel({ user, onSave, onCancel }) {
 
 const TABS = [
   { key: 'wall', label: 'Wall' },
+  { key: 'media', label: 'Media' },
   { key: 'routes', label: 'Routes' },
   { key: 'expeditions', label: 'Expeditions' },
   { key: 'ratings', label: 'Ratings' },
@@ -563,6 +750,7 @@ export default function Profile() {
 
       {/* Tab content */}
       {activeTab === 'wall' && userId && <WallTab userId={userId} />}
+      {activeTab === 'media' && userId && <MediaTab userId={userId} />}
       {activeTab === 'routes' && userId && <RoutesTab userId={userId} />}
       {activeTab === 'expeditions' && userId && <ExpeditionsTab userId={userId} />}
       {activeTab === 'ratings' && userId && <RatingsTab userId={userId} />}

@@ -312,7 +312,10 @@ def cave_photo_upload(request, cave_id):
 
     serializer = CavePhotoSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save(cave=cave)
+        kwargs = {'cave': cave, 'cave_name_cache': cave.name}
+        if request.user.is_authenticated:
+            kwargs['uploaded_by'] = request.user
+        serializer.save(**kwargs)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1035,6 +1038,7 @@ def cave_document_upload(request, cave_id):
         file_size=pdf_file.size,
         page_count=page_count,
         uploaded_by=request.user,
+        cave_name_cache=cave.name,
     )
     serializer = CaveDocumentSerializer(doc, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1092,6 +1096,7 @@ def cave_video_link_add(request, cave_id):
         embed_url=parsed['embed_url'],
         thumbnail_url=parsed['thumbnail_url'],
         added_by=request.user,
+        cave_name_cache=cave.name,
     )
     serializer = CaveVideoLinkSerializer(video_link)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1127,3 +1132,100 @@ def cave_video_link_detail(request, cave_id, video_id):
     if request.method == 'DELETE':
         vl.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── User media endpoints ─────────────────────────────────────
+
+@api_view(['GET'])
+def user_media(request, user_id):
+    """
+    Return all media (photos, documents, video links) uploaded by a user.
+    Includes images from wall posts.
+    Own profile: sees all visibility levels.
+    Other users: sees only 'public' items.
+    """
+    from social.models import Post
+
+    is_own = request.user.is_authenticated and request.user.id == user_id
+
+    photos_qs = CavePhoto.objects.filter(uploaded_by_id=user_id).select_related('cave')
+    docs_qs = CaveDocument.objects.filter(uploaded_by_id=user_id).select_related('cave')
+    videos_qs = CaveVideoLink.objects.filter(added_by_id=user_id).select_related('cave')
+
+    if not is_own:
+        photos_qs = photos_qs.filter(visibility='public')
+        docs_qs = docs_qs.filter(visibility='public')
+        videos_qs = videos_qs.filter(visibility='public')
+
+    # Include images from wall posts
+    post_images_qs = Post.objects.filter(
+        author_id=user_id,
+        image__isnull=False,
+        is_deleted=False,
+    ).exclude(image='').select_related('cave')
+    if not is_own:
+        post_images_qs = post_images_qs.filter(visibility='public')
+
+    post_images = [
+        {
+            'id': str(p.id),
+            'image': request.build_absolute_uri(p.image.url) if p.image else None,
+            'caption': p.text[:100] if p.text else '',
+            'cave': p.cave_id,
+            'cave_name_cache': p.cave_name_cache,
+            'visibility': p.visibility,
+            'uploaded_at': p.created_at,
+            'source': 'post',
+        }
+        for p in post_images_qs
+    ]
+
+    cave_photos = CavePhotoSerializer(photos_qs, many=True, context={'request': request}).data
+    for item in cave_photos:
+        item['source'] = 'cave'
+    all_photos = cave_photos + post_images
+
+    return Response({
+        'photos': all_photos,
+        'documents': CaveDocumentSerializer(docs_qs, many=True, context={'request': request}).data,
+        'video_links': CaveVideoLinkSerializer(videos_qs, many=True, context={'request': request}).data,
+        'photo_count': len(all_photos),
+        'document_count': docs_qs.count(),
+        'video_link_count': videos_qs.count(),
+    })
+
+
+@api_view(['PATCH'])
+def user_media_update(request, media_type, media_id):
+    """Update visibility of a user's media item."""
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    model_map = {
+        'photo': (CavePhoto, 'uploaded_by'),
+        'document': (CaveDocument, 'uploaded_by'),
+        'video': (CaveVideoLink, 'added_by'),
+    }
+    entry = model_map.get(media_type)
+    if not entry:
+        return Response({'error': 'Invalid media type'}, status=status.HTTP_400_BAD_REQUEST)
+
+    Model, owner_field = entry
+    try:
+        item = Model.objects.get(id=media_id, **{owner_field: request.user})
+    except Model.DoesNotExist:
+        return Response(
+            {'error': 'Media not found or not owned by you'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    visibility = request.data.get('visibility')
+    if visibility not in ('public', 'unlisted', 'private'):
+        return Response(
+            {'error': 'visibility must be public, unlisted, or private'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    item.visibility = visibility
+    item.save(update_fields=['visibility'])
+    return Response({'id': str(item.id), 'visibility': visibility})

@@ -4,6 +4,12 @@ from django.conf import settings
 from django.db import models
 
 
+class MediaVisibility(models.TextChoices):
+    PUBLIC = 'public', 'Public'
+    UNLISTED = 'unlisted', 'Unlisted'
+    PRIVATE = 'private', 'Private'
+
+
 def title_case_name(name):
     """Smart title case: handles apostrophes and Mc/Mac prefixes."""
     if not name:
@@ -251,13 +257,25 @@ class CavePhoto(models.Model):
     """Photos associated with a cave — mirrors cave-server exactly + device tracking."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    cave = models.ForeignKey(Cave, on_delete=models.CASCADE, related_name='photos')
+    cave = models.ForeignKey(
+        Cave, on_delete=models.SET_NULL, null=True, blank=True, related_name='photos'
+    )
     image = models.ImageField(upload_to='caves/photos/')
     caption = models.CharField(max_length=300, blank=True, default='')
     tags = models.CharField(
         max_length=500, blank=True, default='', help_text='Comma-separated tags'
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    # Ownership and persistence
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='uploaded_photos'
+    )
+    cave_name_cache = models.CharField(max_length=200, blank=True, default='')
+    visibility = models.CharField(
+        max_length=20, choices=MediaVisibility.choices, default=MediaVisibility.PUBLIC
+    )
 
     # Cloud-specific
     origin_device = models.ForeignKey(
@@ -269,7 +287,8 @@ class CavePhoto(models.Model):
         ordering = ['-uploaded_at']
 
     def __str__(self):
-        return f"Photo for {self.cave.name}: {self.caption[:50]}"
+        cave_name = self.cave.name if self.cave else self.cave_name_cache or 'Deleted Cave'
+        return f"Photo for {cave_name}: {self.caption[:50]}"
 
 
 class DescriptionRevision(models.Model):
@@ -489,7 +508,9 @@ class SurveyMap(models.Model):
 class CaveDocument(models.Model):
     """PDF documents associated with a cave — survey reports, permits, research papers."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    cave = models.ForeignKey(Cave, on_delete=models.CASCADE, related_name='documents')
+    cave = models.ForeignKey(
+        Cave, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents'
+    )
     file = models.FileField(upload_to='caves/documents/')
     title = models.CharField(max_length=300, blank=True, default='')
     description = models.TextField(blank=True, default='')
@@ -499,13 +520,18 @@ class CaveDocument(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='uploaded_documents',
     )
+    cave_name_cache = models.CharField(max_length=200, blank=True, default='')
+    visibility = models.CharField(
+        max_length=20, choices=MediaVisibility.choices, default=MediaVisibility.PUBLIC
+    )
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-uploaded_at']
 
     def __str__(self):
-        return f'{self.title or self.file.name} — {self.cave.name}'
+        cave_name = self.cave.name if self.cave else self.cave_name_cache or 'Deleted Cave'
+        return f'{self.title or self.file.name} — {cave_name}'
 
 
 class CaveVideoLink(models.Model):
@@ -518,7 +544,9 @@ class CaveVideoLink(models.Model):
         OTHER = 'other', 'Other'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    cave = models.ForeignKey(Cave, on_delete=models.CASCADE, related_name='video_links')
+    cave = models.ForeignKey(
+        Cave, on_delete=models.SET_NULL, null=True, blank=True, related_name='video_links'
+    )
     url = models.URLField(max_length=500)
     title = models.CharField(max_length=300, blank=True, default='')
     description = models.TextField(blank=True, default='')
@@ -530,10 +558,15 @@ class CaveVideoLink(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='added_video_links',
     )
+    cave_name_cache = models.CharField(max_length=200, blank=True, default='')
+    visibility = models.CharField(
+        max_length=20, choices=MediaVisibility.choices, default=MediaVisibility.PUBLIC
+    )
     added_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-added_at']
 
     def __str__(self):
-        return f'{self.title or self.url} — {self.cave.name}'
+        cave_name = self.cave.name if self.cave else self.cave_name_cache or 'Deleted Cave'
+        return f'{self.title or self.url} — {cave_name}'

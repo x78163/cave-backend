@@ -8,10 +8,18 @@ from .models import (
 
 
 class CavePhotoSerializer(serializers.ModelSerializer):
+    uploaded_by_username = serializers.CharField(
+        source='uploaded_by.username', read_only=True, default=None,
+    )
+
     class Meta:
         model = CavePhoto
-        fields = ['id', 'image', 'caption', 'tags', 'uploaded_at', 'origin_device']
-        read_only_fields = ['id', 'uploaded_at']
+        fields = [
+            'id', 'image', 'caption', 'tags', 'uploaded_at', 'origin_device',
+            'uploaded_by', 'uploaded_by_username',
+            'cave', 'cave_name_cache', 'visibility',
+        ]
+        read_only_fields = ['id', 'uploaded_at', 'uploaded_by', 'uploaded_by_username', 'cave_name_cache']
 
 
 class SurveyMapSerializer(serializers.ModelSerializer):
@@ -66,10 +74,12 @@ class CaveDocumentSerializer(serializers.ModelSerializer):
             'id', 'file_url', 'title', 'description',
             'file_size', 'page_count',
             'uploaded_by', 'uploaded_by_username', 'uploaded_at',
+            'cave', 'cave_name_cache', 'visibility',
         ]
         read_only_fields = [
             'id', 'file_size', 'page_count',
             'uploaded_by', 'uploaded_by_username', 'uploaded_at',
+            'cave_name_cache',
         ]
 
     def get_file_url(self, obj):
@@ -89,10 +99,12 @@ class CaveVideoLinkSerializer(serializers.ModelSerializer):
             'id', 'url', 'title', 'description',
             'platform', 'video_id', 'embed_url', 'thumbnail_url',
             'added_by', 'added_by_username', 'added_at',
+            'cave', 'cave_name_cache', 'visibility',
         ]
         read_only_fields = [
             'id', 'platform', 'video_id', 'embed_url', 'thumbnail_url',
             'added_by', 'added_by_username', 'added_at',
+            'cave_name_cache',
         ]
 
 

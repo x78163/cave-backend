@@ -3,6 +3,7 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView, TokenRefreshView, TokenVerifyView,
 )
 from . import views
+from caves.views import user_media, user_media_update
 
 urlpatterns = [
     # Auth
@@ -14,6 +15,8 @@ urlpatterns = [
     # Profile
     path('me/', views.me_view, name='user_me'),
     path('profile/<int:user_id>/', views.user_profile_detail, name='user_profile_detail'),
+    path('profile/<int:user_id>/media/', user_media, name='user_media'),
+    path('media/<str:media_type>/<uuid:media_id>/', user_media_update, name='user_media_update'),
 
     # Grottos
     path('grottos/', views.grotto_list, name='grotto_list'),

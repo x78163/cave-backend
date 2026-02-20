@@ -191,6 +191,11 @@ class Post(models.Model):
     visibility = models.CharField(
         max_length=20, choices=Visibility.choices, default=Visibility.PUBLIC
     )
+    # Soft delete: preserve post as "[Deleted by author]" when it has comments
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    # Cache cave name so it survives cave deletion
+    cave_name_cache = models.CharField(max_length=200, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -202,6 +207,8 @@ class Post(models.Model):
         ]
 
     def __str__(self):
+        if self.is_deleted:
+            return f'{self.author.username}: [Deleted]'
         return f'{self.author.username}: {self.text[:50]}'
 
 
