@@ -223,6 +223,12 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `PATCH /api/caves/{id}/survey-maps/{survey_id}/` - Update calibration
 - `DELETE /api/caves/{id}/survey-maps/{survey_id}/` - Delete survey map
 
+### Documents & Video Links
+- `POST /api/caves/{id}/documents/` - Upload PDF document
+- `PATCH/DELETE /api/caves/{id}/documents/{doc_id}/` - Edit/delete document
+- `POST /api/caves/{id}/video-links/` - Add video link (auto-detects platform)
+- `PATCH/DELETE /api/caves/{id}/video-links/{video_id}/` - Edit/delete video link
+
 ### 3D Processing (Post-MVP)
 - `POST /api/caves/{id}/generate-mesh/` - Trigger 3D generation
 - `GET /api/caves/{id}/mesh/` - Download mesh
@@ -612,6 +618,9 @@ This project includes:
 - Photo upload with caption/tags, camera capture
 - SurveyMap model with CRUD API — multi-survey overlays per cave with persistent calibration (anchor, scale, heading, opacity, lock state)
 - Survey map image processing pipeline (background removal + recolor via `caves/hand_drawn_map.py`)
+- CaveDocument model — PDF upload with file size tracking, optional page count (PyPDF2)
+- CaveVideoLink model — URL-based video links with auto-detection of platform (YouTube, Vimeo, TikTok, Facebook), embed URL, and thumbnail generation
+- Video URL parser (`caves/video_utils.py`) — regex-based platform detection, video ID extraction, embed/thumbnail URL generation
 - Cave routing system with A* pathfinding
 - Device management and sync infrastructure
 - CSV import: CLI management command + admin-only web UI with two-phase flow (preview + apply)
@@ -634,7 +643,10 @@ This project includes:
   - Survey map overlay system: guided 4-step ingestion modal (upload → pin entrance → set scale → orient & confirm), show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
   - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
-  - Photo gallery with carousel, upload dialog, camera capture
+  - Tabbed Media section (Photos / Documents / Videos) replacing standalone photo gallery
+  - Photo tab: gallery with carousel, upload dialog, camera capture
+  - Documents tab: PDF upload with drag-and-drop, in-app PDF viewer (blob URL + iframe), delete
+  - Videos tab: URL-based video links with auto platform detection, thumbnail grid with play overlay, full-screen embedded playback (YouTube/Vimeo/TikTok), fallback to external link for unsupported platforms
   - Wiki description editor with rich text (TipTap)
   - Star ratings and reviews
   - Property owner section with GIS lookup, visibility toggle, contact info tiers
@@ -665,14 +677,20 @@ This project includes:
 | `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection |
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
 | `caves/hand_drawn_map.py` | Survey map image processing (bg removal + recolor) |
-| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap |
-| `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer |
-| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload, request lifecycle, CSV import, survey map CRUD |
+| `caves/models.py` | Cave, LandOwner, CavePhoto, DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument, CaveVideoLink |
+| `caves/video_utils.py` | Video URL parser (platform detect, embed URL, thumbnail generation) |
+| `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer + CaveDocumentSerializer + CaveVideoLinkSerializer |
+| `caves/views.py` | Cave CRUD, GIS lookup, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD |
 | `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes) |
 | `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers, clustering, parcel polygon, cave overlay, survey overlays, center button |
 | `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with lock/edit mode |
 | `frontend/src/components/SurveyMapModal.jsx` | 4-step guided survey map ingestion modal |
+| `frontend/src/components/DocumentUploadModal.jsx` | PDF upload dialog with drag-and-drop |
+| `frontend/src/components/DocumentViewer.jsx` | Full-screen PDF viewer (blob URL + iframe) |
+| `frontend/src/components/VideoLinkModal.jsx` | Add video URL dialog with platform auto-detect + preview |
+| `frontend/src/components/VideoEmbed.jsx` | Full-screen video embed with platform-specific iframe |
+| `frontend/src/utils/videoUtils.js` | Client-side video URL parser (mirrors backend) |
 | `frontend/src/components/CsvImportModal.jsx` | Three-step admin CSV import modal (upload → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
 | `social/views.py` | Wall posts, ratings, activity feed |
@@ -687,6 +705,7 @@ This project includes:
 - 0006: gis_fields_visible boolean
 - 0007: CaveRequest model + contact_access_users M2M on LandOwner
 - 0008: SurveyMap model (multi-survey overlays with calibration)
+- 0009: CaveDocument + CaveVideoLink models (documents and video links)
 
 ### Future Features (To Be Developed)
 

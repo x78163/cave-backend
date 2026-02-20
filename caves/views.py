@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
-    SurveyMap,
+    SurveyMap, CaveDocument, CaveVideoLink,
 )
 from .serializers import (
     CaveListSerializer, CaveDetailSerializer,
@@ -24,7 +24,7 @@ from .serializers import (
     DescriptionRevisionSerializer,
     CavePermissionSerializer, CaveShareLinkSerializer,
     LandOwnerSerializer, CaveRequestSerializer,
-    SurveyMapSerializer,
+    SurveyMapSerializer, CaveDocumentSerializer, CaveVideoLinkSerializer,
 )
 
 
@@ -859,4 +859,143 @@ def survey_map_detail(request, cave_id, survey_id):
         survey.overlay_image.delete(save=False)
         survey.original_image.delete(save=False)
         survey.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Documents ────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def cave_document_upload(request, cave_id):
+    """Upload a PDF document to a cave."""
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    pdf_file = request.FILES.get('file')
+    if not pdf_file:
+        return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not pdf_file.name.lower().endswith('.pdf'):
+        return Response({'error': 'Only PDF files are accepted'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if pdf_file.size > 50 * 1024 * 1024:
+        return Response({'error': 'File too large (max 50MB)'}, status=status.HTTP_400_BAD_REQUEST)
+
+    title = request.data.get('title', '') or pdf_file.name.rsplit('.', 1)[0]
+    description = request.data.get('description', '')
+
+    page_count = None
+    try:
+        import io
+        from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_file.read()))
+        page_count = len(reader.pages)
+        pdf_file.seek(0)
+    except Exception:
+        pdf_file.seek(0)
+
+    doc = CaveDocument.objects.create(
+        cave=cave,
+        file=pdf_file,
+        title=title,
+        description=description,
+        file_size=pdf_file.size,
+        page_count=page_count,
+        uploaded_by=request.user,
+    )
+    serializer = CaveDocumentSerializer(doc, context={'request': request})
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH', 'DELETE'])
+@parser_classes([JSONParser])
+def cave_document_detail(request, cave_id, document_id):
+    """Update title/description or delete a document."""
+    try:
+        doc = CaveDocument.objects.get(id=document_id, cave_id=cave_id)
+    except CaveDocument.DoesNotExist:
+        return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'PATCH':
+        serializer = CaveDocumentSerializer(doc, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == 'DELETE':
+        doc.file.delete()
+        doc.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Video Links ──────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+def cave_video_link_add(request, cave_id):
+    """Add a video link to a cave. Auto-detects platform and generates embed URL."""
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    url = (request.data.get('url') or '').strip()
+    if not url:
+        return Response({'error': 'URL is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    from .video_utils import parse_video_url
+    parsed = parse_video_url(url)
+
+    video_link = CaveVideoLink.objects.create(
+        cave=cave,
+        url=url,
+        title=request.data.get('title', ''),
+        description=request.data.get('description', ''),
+        platform=parsed['platform'],
+        video_id=parsed['video_id'],
+        embed_url=parsed['embed_url'],
+        thumbnail_url=parsed['thumbnail_url'],
+        added_by=request.user,
+    )
+    serializer = CaveVideoLinkSerializer(video_link)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH', 'DELETE'])
+@parser_classes([JSONParser])
+def cave_video_link_detail(request, cave_id, video_id):
+    """Update title/description or delete a video link."""
+    try:
+        vl = CaveVideoLink.objects.get(id=video_id, cave_id=cave_id)
+    except CaveVideoLink.DoesNotExist:
+        return Response({'error': 'Video link not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'PATCH':
+        new_url = request.data.get('url')
+        if new_url and new_url != vl.url:
+            from .video_utils import parse_video_url
+            parsed = parse_video_url(new_url)
+            vl.url = new_url
+            vl.platform = parsed['platform']
+            vl.video_id = parsed['video_id']
+            vl.embed_url = parsed['embed_url']
+            vl.thumbnail_url = parsed['thumbnail_url']
+        if 'title' in request.data:
+            vl.title = request.data['title']
+        if 'description' in request.data:
+            vl.description = request.data['description']
+        vl.save()
+        serializer = CaveVideoLinkSerializer(vl)
+        return Response(serializer.data)
+
+    if request.method == 'DELETE':
+        vl.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

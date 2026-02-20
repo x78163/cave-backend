@@ -3,7 +3,7 @@ from rest_framework import serializers
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
-    SurveyMap,
+    SurveyMap, CaveDocument, CaveVideoLink,
 )
 
 
@@ -52,6 +52,48 @@ class SurveyMapSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         url = obj.original_image.url
         return request.build_absolute_uri(url) if request else url
+
+
+class CaveDocumentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    uploaded_by_username = serializers.CharField(
+        source='uploaded_by.username', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = CaveDocument
+        fields = [
+            'id', 'file_url', 'title', 'description',
+            'file_size', 'page_count',
+            'uploaded_by', 'uploaded_by_username', 'uploaded_at',
+        ]
+        read_only_fields = [
+            'id', 'file_size', 'page_count',
+            'uploaded_by', 'uploaded_by_username', 'uploaded_at',
+        ]
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        return obj.file.url
+
+
+class CaveVideoLinkSerializer(serializers.ModelSerializer):
+    added_by_username = serializers.CharField(
+        source='added_by.username', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = CaveVideoLink
+        fields = [
+            'id', 'url', 'title', 'description',
+            'platform', 'video_id', 'embed_url', 'thumbnail_url',
+            'added_by', 'added_by_username', 'added_at',
+        ]
+        read_only_fields = [
+            'id', 'platform', 'video_id', 'embed_url', 'thumbnail_url',
+            'added_by', 'added_by_username', 'added_at',
+        ]
 
 
 class CaveCommentSerializer(serializers.ModelSerializer):
@@ -166,8 +208,12 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     photos = CavePhotoSerializer(many=True, read_only=True)
     comments = CaveCommentSerializer(many=True, read_only=True)
     survey_maps = SurveyMapSerializer(many=True, read_only=True)
+    documents = CaveDocumentSerializer(many=True, read_only=True)
+    video_links = CaveVideoLinkSerializer(many=True, read_only=True)
     photo_count = serializers.IntegerField(source='photos.count', read_only=True)
     comment_count = serializers.IntegerField(source='comments.count', read_only=True)
+    document_count = serializers.IntegerField(source='documents.count', read_only=True)
+    video_link_count = serializers.IntegerField(source='video_links.count', read_only=True)
     revision_count = serializers.IntegerField(source='revisions.count', read_only=True)
     latest_revision = serializers.SerializerMethodField()
     average_rating = serializers.SerializerMethodField()
@@ -192,6 +238,8 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'photos', 'photo_count',
             'comments', 'comment_count',
             'survey_maps',
+            'documents', 'document_count',
+            'video_links', 'video_link_count',
             'average_rating', 'rating_count',
             'revision_count', 'latest_revision',
             'land_owner',

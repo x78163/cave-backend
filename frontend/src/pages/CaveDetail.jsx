@@ -8,6 +8,11 @@ import CameraCapture from '../components/CameraCapture'
 import CaveExplorer from '../components/CaveExplorer'
 import StarRating from '../components/StarRating'
 import SurveyMapModal from '../components/SurveyMapModal'
+import DocumentUploadModal from '../components/DocumentUploadModal'
+import DocumentViewer from '../components/DocumentViewer'
+import VideoLinkModal from '../components/VideoLinkModal'
+import VideoEmbed from '../components/VideoEmbed'
+import { PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
 import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
 import parseCoordinates from '../utils/parseCoordinates'
@@ -57,6 +62,13 @@ export default function CaveDetail() {
   const [activeSurveyId, setActiveSurveyId] = useState(null)
   const [editingSurveyId, setEditingSurveyId] = useState(null)
   const [showSurveyModal, setShowSurveyModal] = useState(false)
+
+  // Media tab + document/video state
+  const [mediaTab, setMediaTab] = useState('photos')
+  const [showDocUpload, setShowDocUpload] = useState(false)
+  const [docViewerDoc, setDocViewerDoc] = useState(null)
+  const [showVideoModal, setShowVideoModal] = useState(false)
+  const [expandedVideo, setExpandedVideo] = useState(null)
 
   // Photo carousel state
   const [carouselOpen, setCarouselOpen] = useState(false)
@@ -737,49 +749,184 @@ export default function CaveDetail() {
           </div>
         )}
 
-        {/* Photos section */}
+        {/* Media section — tabbed: Photos / Documents / Videos */}
         <div className="px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-white font-semibold">Photos ({cave.photo_count})</h3>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setCameraOpen(true)}
-                className="text-[var(--cyber-cyan)] text-sm hover:underline"
-              >
-                Take Photo
+          {/* Tab header */}
+          <div className="flex items-center gap-1 mb-3 border-b border-[var(--cyber-border)]">
+            {[
+              { key: 'photos', label: 'Photos', count: cave.photo_count },
+              { key: 'documents', label: 'Documents', count: cave.document_count || 0 },
+              { key: 'videos', label: 'Videos', count: cave.video_link_count || 0 },
+            ].map(tab => (
+              <button key={tab.key}
+                onClick={() => setMediaTab(tab.key)}
+                className={`px-4 py-2 text-sm font-medium transition-colors relative
+                  ${mediaTab === tab.key
+                    ? 'text-[var(--cyber-cyan)]'
+                    : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-text)]'}`}>
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className="ml-1.5 text-xs opacity-60">({tab.count})</span>
+                )}
+                {mediaTab === tab.key && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--cyber-cyan)]" />
+                )}
               </button>
-              <label className={`text-[var(--cyber-text-dim)] text-sm cursor-pointer hover:underline
-                ${uploadingPhoto ? 'opacity-50' : ''}`}>
-                {uploadingPhoto ? 'Uploading...' : 'Upload'}
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoSelect}
-                  className="hidden"
-                  disabled={uploadingPhoto}
-                />
-              </label>
-            </div>
+            ))}
           </div>
-          {photos.length > 0 ? (
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              {photos.map((photo, idx) => (
-                <div key={photo.id} className="flex-shrink-0 relative group">
-                  <button onClick={() => openCarousel(idx)} className="block">
-                    <img src={photo.image} alt={photo.caption}
-                      className="w-28 h-28 rounded-2xl object-cover border border-[var(--cyber-border)]
-                        hover:border-[var(--cyber-cyan)] transition-colors" />
-                  </button>
-                  {photo.caption && (
-                    <p className="text-[#555570] text-xs mt-1 truncate w-28">{photo.caption}</p>
-                  )}
+
+          {/* Photos tab */}
+          {mediaTab === 'photos' && (
+            <div>
+              <div className="flex items-center justify-end mb-2 gap-3">
+                <button onClick={() => setCameraOpen(true)}
+                  className="text-[var(--cyber-cyan)] text-sm hover:underline">
+                  Take Photo
+                </button>
+                <label className={`text-[var(--cyber-text-dim)] text-sm cursor-pointer hover:underline
+                  ${uploadingPhoto ? 'opacity-50' : ''}`}>
+                  {uploadingPhoto ? 'Uploading...' : 'Upload'}
+                  <input ref={photoInputRef} type="file" accept="image/*"
+                    onChange={handlePhotoSelect} className="hidden" disabled={uploadingPhoto} />
+                </label>
+              </div>
+              {photos.length > 0 ? (
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {photos.map((photo, idx) => (
+                    <div key={photo.id} className="flex-shrink-0 relative group">
+                      <button onClick={() => openCarousel(idx)} className="block">
+                        <img src={photo.image} alt={photo.caption}
+                          className="w-28 h-28 rounded-2xl object-cover border border-[var(--cyber-border)]
+                            hover:border-[var(--cyber-cyan)] transition-colors" />
+                      </button>
+                      {photo.caption && (
+                        <p className="text-[#555570] text-xs mt-1 truncate w-28">{photo.caption}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] py-8 text-center">
+                  <p className="text-[var(--cyber-text-dim)] text-sm">No photos yet</p>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] py-8 text-center">
-              <p className="text-[var(--cyber-text-dim)] text-sm">No photos yet</p>
+          )}
+
+          {/* Documents tab */}
+          {mediaTab === 'documents' && (
+            <div>
+              <div className="flex items-center justify-end mb-2">
+                <button onClick={() => setShowDocUpload(true)}
+                  className="text-[var(--cyber-cyan)] text-sm hover:underline">
+                  Upload PDF
+                </button>
+              </div>
+              {(cave.documents || []).length > 0 ? (
+                <div className="space-y-2">
+                  {cave.documents.map(doc => (
+                    <div key={doc.id}
+                      className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-3
+                        flex items-center justify-between group hover:border-cyan-800/30 transition-colors cursor-pointer"
+                      onClick={() => setDocViewerDoc(doc)}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 flex-shrink-0 rounded-lg bg-red-900/30 border border-red-800/30
+                          flex items-center justify-center text-red-400 text-xs font-bold">
+                          PDF
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-white text-sm font-medium truncate">{doc.title || 'Untitled'}</p>
+                          <p className="text-[var(--cyber-text-dim)] text-xs">
+                            {(doc.file_size / 1024 / 1024).toFixed(1)} MB
+                            {doc.page_count != null && ` \u00B7 ${doc.page_count} pages`}
+                            {doc.uploaded_by_username && ` \u00B7 ${doc.uploaded_by_username}`}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            await apiFetch(`/caves/${caveId}/documents/${doc.id}/`, { method: 'DELETE' })
+                            fetchCave()
+                          } catch (err) { console.error('Delete failed:', err) }
+                        }}
+                        className="text-red-400/50 text-xs hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] py-8 text-center">
+                  <p className="text-[var(--cyber-text-dim)] text-sm">No documents yet</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Videos tab */}
+          {mediaTab === 'videos' && (
+            <div>
+              <div className="flex items-center justify-end mb-2">
+                <button onClick={() => setShowVideoModal(true)}
+                  className="text-[var(--cyber-cyan)] text-sm hover:underline">
+                  Add Video
+                </button>
+              </div>
+              {(cave.video_links || []).length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {cave.video_links.map(video => (
+                    <div key={video.id} className="relative group">
+                      <button onClick={() => setExpandedVideo(video)} className="block w-full text-left">
+                        <div className="rounded-2xl overflow-hidden border border-[var(--cyber-border)]
+                          hover:border-cyan-800/30 transition-colors">
+                          {video.thumbnail_url ? (
+                            <div className="relative">
+                              <img src={video.thumbnail_url} alt={video.title}
+                                className="w-full h-32 object-cover" />
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+                                  <span className="text-white text-xl ml-1">&#9654;</span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="h-32 bg-[var(--cyber-surface)] flex items-center justify-center">
+                              <span className="text-[var(--cyber-cyan)] text-sm">Click to play</span>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                      <div className="mt-1 flex items-center justify-between">
+                        <div className="min-w-0">
+                          {video.title && <p className="text-white text-xs font-medium truncate">{video.title}</p>}
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] border
+                            ${PLATFORM_COLORS[video.platform] || PLATFORM_COLORS.other}`}>
+                            {PLATFORM_LABELS[video.platform] || 'Video'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/caves/${caveId}/video-links/${video.id}/`, { method: 'DELETE' })
+                              fetchCave()
+                            } catch (err) { console.error('Delete failed:', err) }
+                          }}
+                          className="text-red-400/50 text-[10px] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] py-8 text-center">
+                  <p className="text-[var(--cyber-text-dim)] text-sm">No videos yet</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1092,6 +1239,40 @@ export default function CaveDetail() {
             setShowSurveyModal(false)
           }}
           onClose={() => setShowSurveyModal(false)}
+        />
+      )}
+
+      {/* ====== DOCUMENT UPLOAD MODAL ====== */}
+      {showDocUpload && (
+        <DocumentUploadModal
+          caveId={caveId}
+          onComplete={() => { setShowDocUpload(false); fetchCave() }}
+          onClose={() => setShowDocUpload(false)}
+        />
+      )}
+
+      {/* ====== DOCUMENT VIEWER ====== */}
+      {docViewerDoc && (
+        <DocumentViewer
+          document={docViewerDoc}
+          onClose={() => setDocViewerDoc(null)}
+        />
+      )}
+
+      {/* ====== VIDEO LINK MODAL ====== */}
+      {showVideoModal && (
+        <VideoLinkModal
+          caveId={caveId}
+          onComplete={() => { setShowVideoModal(false); fetchCave() }}
+          onClose={() => setShowVideoModal(false)}
+        />
+      )}
+
+      {/* ====== VIDEO EMBED (EXPANDED) ====== */}
+      {expandedVideo && (
+        <VideoEmbed
+          video={expandedVideo}
+          onClose={() => setExpandedVideo(null)}
         />
       )}
     </div>

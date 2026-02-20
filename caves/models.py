@@ -455,3 +455,56 @@ class SurveyMap(models.Model):
     def __str__(self):
         label = self.name or f'Survey {str(self.id)[:8]}'
         return f'{label} — {self.cave.name}'
+
+
+class CaveDocument(models.Model):
+    """PDF documents associated with a cave — survey reports, permits, research papers."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cave = models.ForeignKey(Cave, on_delete=models.CASCADE, related_name='documents')
+    file = models.FileField(upload_to='caves/documents/')
+    title = models.CharField(max_length=300, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    file_size = models.IntegerField(default=0, help_text='File size in bytes')
+    page_count = models.IntegerField(null=True, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='uploaded_documents',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f'{self.title or self.file.name} — {self.cave.name}'
+
+
+class CaveVideoLink(models.Model):
+    """Video link embeds associated with a cave — YouTube, Vimeo, TikTok, etc."""
+    class Platform(models.TextChoices):
+        YOUTUBE = 'youtube', 'YouTube'
+        VIMEO = 'vimeo', 'Vimeo'
+        TIKTOK = 'tiktok', 'TikTok'
+        FACEBOOK = 'facebook', 'Facebook'
+        OTHER = 'other', 'Other'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cave = models.ForeignKey(Cave, on_delete=models.CASCADE, related_name='video_links')
+    url = models.URLField(max_length=500)
+    title = models.CharField(max_length=300, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    platform = models.CharField(max_length=20, choices=Platform.choices, default=Platform.OTHER)
+    video_id = models.CharField(max_length=200, blank=True, default='')
+    embed_url = models.URLField(max_length=500, blank=True, default='')
+    thumbnail_url = models.URLField(max_length=500, blank=True, default='')
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='added_video_links',
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-added_at']
+
+    def __str__(self):
+        return f'{self.title or self.url} — {self.cave.name}'
