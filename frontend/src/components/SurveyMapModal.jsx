@@ -342,31 +342,57 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
               Rotate until the north arrow points up. Adjust opacity for visibility.
             </p>
 
-            {/* Rotated preview */}
+            {/* Rotated preview — auto-scales to keep image visible at any angle */}
             <div className="flex justify-center">
               <div
                 className="relative border border-[var(--cyber-border)] rounded-lg overflow-hidden bg-[#111]"
-                style={{ maxWidth: '300px', maxHeight: '300px' }}
+                style={{ width: '300px', height: '300px' }}
               >
-                <img
-                  src={overlayUrl}
-                  alt="Oriented preview"
-                  className="block"
-                  style={{
-                    maxHeight: '300px',
-                    opacity: opacity,
-                    transform: `rotate(${heading}deg)`,
-                    transformOrigin: anchor
-                      ? `${anchor.x * 100}% ${anchor.y * 100}%`
-                      : '50% 50%',
-                  }}
-                />
-                {anchor && (
-                  <div
-                    className="absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full border-2 border-amber-400 bg-amber-400/30 pointer-events-none"
-                    style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }}
-                  />
-                )}
+                {(() => {
+                  // Calculate scale so rotated image fits within 300x300 preview
+                  const w = survey?.image_width || 300
+                  const h = survey?.image_height || 300
+                  const rad = Math.abs(heading) * Math.PI / 180
+                  const cosA = Math.abs(Math.cos(rad))
+                  const sinA = Math.abs(Math.sin(rad))
+                  const rotW = w * cosA + h * sinA
+                  const rotH = w * sinA + h * cosA
+                  // Base scale to fit unrotated image in 300px box
+                  const baseScale = Math.min(300 / w, 300 / h)
+                  // Additional scale to fit rotated bounding box
+                  const rotScale = Math.min(300 / (rotW * baseScale), 300 / (rotH * baseScale))
+                  const finalScale = baseScale * rotScale
+                  // Position: center the anchor point in the preview
+                  const ax = anchor?.x ?? 0.5
+                  const ay = anchor?.y ?? 0.5
+                  const imgLeft = 150 - ax * w * finalScale
+                  const imgTop = 150 - ay * h * finalScale
+
+                  return (
+                    <>
+                      <img
+                        src={overlayUrl}
+                        alt="Oriented preview"
+                        style={{
+                          position: 'absolute',
+                          left: imgLeft,
+                          top: imgTop,
+                          width: w * finalScale,
+                          height: h * finalScale,
+                          opacity: opacity,
+                          transform: `rotate(${heading}deg)`,
+                          transformOrigin: `${ax * 100}% ${ay * 100}%`,
+                        }}
+                      />
+                      {anchor && (
+                        <div
+                          className="absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full border-2 border-amber-400 bg-amber-400/30 pointer-events-none"
+                          style={{ left: 150, top: 150 }}
+                        />
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             </div>
 

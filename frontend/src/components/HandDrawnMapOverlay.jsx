@@ -110,27 +110,41 @@ export default function HandDrawnMapOverlay({
       const existing = layersRef.current.get(s.id)
       if (existing) existing.remove()
 
+      // Create overlay WITHOUT adding to map yet
       const overlay = L.imageOverlay(s.overlay_url, bounds, {
         opacity,
         interactive: false,
         className: 'hand-drawn-overlay',
-      }).addTo(map)
+      })
 
-      // Patch _reset to append rotation after Leaflet's translate3d
-      const origReset = overlay._reset.bind(overlay)
+      // Helper: append rotation to whatever transform Leaflet sets
       const originX = (ax * 100).toFixed(1)
       const originY = (ay * 100).toFixed(1)
-      overlay._reset = function () {
-        origReset()
-        const img = this._image
-        if (img) {
-          img.style.transformOrigin = `${originX}% ${originY}%`
-          if (heading !== 0) {
-            img.style.transform += ` rotate(${heading}deg)`
-          }
+      const applyRotation = (img) => {
+        if (!img) return
+        img.style.transformOrigin = `${originX}% ${originY}%`
+        if (heading !== 0) {
+          img.style.transform += ` rotate(${heading}deg)`
         }
       }
-      overlay._reset()
+
+      // Patch _reset and _animateZoom BEFORE addTo(map) — Leaflet's addTo
+      // captures method references via getEvents() for event binding, so
+      // patches must be in place before that happens
+      const origReset = overlay._reset.bind(overlay)
+      overlay._reset = function () {
+        origReset()
+        applyRotation(this._image)
+      }
+
+      const origAnimateZoom = overlay._animateZoom.bind(overlay)
+      overlay._animateZoom = function (e) {
+        origAnimateZoom(e)
+        applyRotation(this._image)
+      }
+
+      // Now add to map — Leaflet binds our patched methods as event handlers
+      overlay.addTo(map)
 
       layersRef.current.set(s.id, overlay)
     })
