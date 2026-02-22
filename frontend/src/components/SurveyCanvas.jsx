@@ -1,8 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
+import { BRANCH_COLORS } from '../utils/surveyColors'
 
 /**
  * Standalone 2D canvas renderer for survey data.
  * Pan/zoom with mouse/touch, renders centerline + passage walls + station labels.
+ * Color-codes branches and highlights junction stations.
  * No Leaflet dependency — works in survey-local coordinates (meters).
  */
 export default function SurveyCanvas({ renderData, height = 400 }) {
@@ -102,34 +104,107 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
       ctx.stroke()
     }
 
-    // Passage walls (amber filled polygon)
-    if (renderData.walls_left?.length > 1 && renderData.walls_right?.length > 1) {
-      ctx.fillStyle = 'rgba(255,167,38,0.12)'
+    // Passage walls — offscreen canvas with thick strokes, composited at low opacity.
+    // Each shot is drawn as a variable-width stroke (trapezoid + round caps).
+    // Painting opaquely on an offscreen canvas then compositing once ensures
+    // overlaps at junctions get uniform shading (no alpha stacking).
+    const strokes = renderData.passage_strokes || []
+    if (strokes.length > 0) {
+      const offscreen = document.createElement('canvas')
+      offscreen.width = canvas.width
+      offscreen.height = canvas.height
+      const oCtx = offscreen.getContext('2d')
+      oCtx.fillStyle = '#ffa726'
+      oCtx.strokeStyle = '#ffa726'
+
+      for (const s of strokes) {
+        const [x1, y1] = toScreen(s.from[0], s.from[1])
+        const [x2, y2] = toScreen(s.to[0], s.to[1])
+        const w1 = s.from_width * scale  // passage width in pixels
+        const w2 = s.to_width * scale
+
+        if (w1 < 0.5 && w2 < 0.5) continue
+
+        // Direction vector
+        const dx = x2 - x1
+        const dy = y2 - y1
+        const len = Math.sqrt(dx * dx + dy * dy)
+        if (len < 0.1) continue
+
+        // Perpendicular unit vector
+        const px = -dy / len
+        const py = dx / len
+
+        // Trapezoid: 4 corners (from-left, from-right, to-right, to-left)
+        const hw1 = w1 / 2
+        const hw2 = w2 / 2
+        oCtx.beginPath()
+        oCtx.moveTo(x1 + px * hw1, y1 + py * hw1)
+        oCtx.lineTo(x2 + px * hw2, y2 + py * hw2)
+        oCtx.lineTo(x2 - px * hw2, y2 - py * hw2)
+        oCtx.lineTo(x1 - px * hw1, y1 - py * hw1)
+        oCtx.closePath()
+        oCtx.fill()
+
+        // Round caps at endpoints
+        if (hw1 > 1) {
+          oCtx.beginPath()
+          oCtx.arc(x1, y1, hw1, 0, Math.PI * 2)
+          oCtx.fill()
+        }
+        if (hw2 > 1) {
+          oCtx.beginPath()
+          oCtx.arc(x2, y2, hw2, 0, Math.PI * 2)
+          oCtx.fill()
+        }
+      }
+
+      // Composite offscreen onto main canvas at low opacity
+      ctx.save()
+      ctx.globalAlpha = 0.18
+      ctx.drawImage(offscreen, 0, 0)
+      ctx.restore()
+
+      // Draw passage outlines on the main canvas (thin amber lines along edges)
       ctx.strokeStyle = 'rgba(255,167,38,0.5)'
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      const left = renderData.walls_left
-      const right = renderData.walls_right
-      const [sx0, sy0] = toScreen(left[0][0], left[0][1])
-      ctx.moveTo(sx0, sy0)
-      for (let i = 1; i < left.length; i++) {
-        const [sx, sy] = toScreen(left[i][0], left[i][1])
-        ctx.lineTo(sx, sy)
+      ctx.lineWidth = 1
+      for (const s of strokes) {
+        const [x1, y1] = toScreen(s.from[0], s.from[1])
+        const [x2, y2] = toScreen(s.to[0], s.to[1])
+        const w1 = s.from_width * scale
+        const w2 = s.to_width * scale
+        if (w1 < 0.5 && w2 < 0.5) continue
+
+        const dx = x2 - x1
+        const dy = y2 - y1
+        const len = Math.sqrt(dx * dx + dy * dy)
+        if (len < 0.1) continue
+
+        const px = -dy / len
+        const py = dx / len
+        const hw1 = w1 / 2
+        const hw2 = w2 / 2
+
+        // Left wall edge
+        ctx.beginPath()
+        ctx.moveTo(x1 + px * hw1, y1 + py * hw1)
+        ctx.lineTo(x2 + px * hw2, y2 + py * hw2)
+        ctx.stroke()
+
+        // Right wall edge
+        ctx.beginPath()
+        ctx.moveTo(x1 - px * hw1, y1 - py * hw1)
+        ctx.lineTo(x2 - px * hw2, y2 - py * hw2)
+        ctx.stroke()
       }
-      for (let i = right.length - 1; i >= 0; i--) {
-        const [sx, sy] = toScreen(right[i][0], right[i][1])
-        ctx.lineTo(sx, sy)
-      }
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
     }
 
-    // Centerline segments (cyan)
+    // Centerline segments (color-coded by branch)
     if (renderData.centerline?.length > 0) {
-      ctx.strokeStyle = '#00ffff'
       ctx.lineWidth = 2
       for (const seg of renderData.centerline) {
+        const branchId = seg[2] ?? 0
+        ctx.strokeStyle = BRANCH_COLORS[branchId % BRANCH_COLORS.length]
         const [x1, y1] = toScreen(seg[0][0], seg[0][1])
         const [x2, y2] = toScreen(seg[1][0], seg[1][1])
         ctx.beginPath()
@@ -139,17 +214,31 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
       }
     }
 
-    // Station dots + labels
+    // Station dots + labels (color-coded by branch, junction markers)
     if (renderData.stations?.length > 0) {
-      ctx.fillStyle = '#00ffff'
       ctx.font = `${Math.max(9, Math.min(12, scale * 3))}px monospace`
       ctx.textAlign = 'left'
       ctx.textBaseline = 'bottom'
       for (const st of renderData.stations) {
         const [sx, sy] = toScreen(st.x, st.y)
+        const color = BRANCH_COLORS[(st.branch ?? 0) % BRANCH_COLORS.length]
+
+        // Junction ring (larger outline for branching stations)
+        if (st.is_junction) {
+          ctx.strokeStyle = color
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.arc(sx, sy, 6, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+
+        // Filled dot
+        ctx.fillStyle = color
         ctx.beginPath()
         ctx.arc(sx, sy, 3, 0, Math.PI * 2)
         ctx.fill()
+
+        // Label
         ctx.fillText(st.name, sx + 5, sy - 3)
       }
     }
@@ -187,6 +276,21 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
       ctx.textAlign = 'center'
       ctx.fillText(`${barMeters}m`, 15 + barPx / 2, canvas.height - 20)
     }
+
+    // Branch legend (top-left, below Fit button area — only when 2+ branches)
+    if (renderData.branches?.length > 1) {
+      let legendY = 38
+      ctx.font = '10px monospace'
+      ctx.textAlign = 'left'
+      for (const branch of renderData.branches) {
+        const color = BRANCH_COLORS[branch.id % BRANCH_COLORS.length]
+        ctx.fillStyle = color
+        ctx.fillRect(10, legendY, 10, 10)
+        ctx.fillStyle = '#e0e0f0'
+        ctx.fillText(branch.name, 25, legendY + 9)
+        legendY += 16
+      }
+    }
   }, [renderData, transform, canvasSize])
 
   // Mouse handlers for pan + zoom
@@ -195,11 +299,12 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
   }, [transform])
 
   const handleMouseMove = useCallback((e) => {
-    if (!dragRef.current) return
+    const drag = dragRef.current
+    if (!drag) return
     setTransform(prev => ({
       ...prev,
-      x: dragRef.current.tx + (e.clientX - dragRef.current.startX),
-      y: dragRef.current.ty + (e.clientY - dragRef.current.startY),
+      x: drag.tx + (e.clientX - drag.startX),
+      y: drag.ty + (e.clientY - drag.startY),
     }))
   }, [])
 

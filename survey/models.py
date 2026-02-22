@@ -32,6 +32,9 @@ class CaveSurvey(models.Model):
     total_depth = models.FloatField(null=True, blank=True)
     station_count = models.IntegerField(default=0)
 
+    # Persisted render data (centerlines, walls, stations, branches)
+    render_data = models.JSONField(null=True, blank=True)
+
     class Meta:
         ordering = ['-created_at']
 

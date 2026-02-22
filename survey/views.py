@@ -100,7 +100,7 @@ def shot_bulk_create(request, cave_id, survey_id):
         'shot_order', flat=True,
     ).first() or 0
 
-    created_shots = []
+    result_shots = []
     for i, item in enumerate(serializer.validated_data):
         # Get or create stations
         from_station, _ = SurveyStation.objects.get_or_create(
@@ -110,24 +110,41 @@ def shot_bulk_create(request, cave_id, survey_id):
             survey=survey, name=item['to_station'],
         )
 
-        shot = SurveyShot.objects.create(
-            survey=survey,
-            from_station=from_station,
-            to_station=to_station,
-            distance=item['distance'],
-            azimuth=item['azimuth'],
-            inclination=item.get('inclination', 0),
-            left=item.get('left'),
-            right=item.get('right'),
-            up=item.get('up'),
-            down=item.get('down'),
-            shot_order=max_order + i + 1,
-            comment=item.get('comment', ''),
-        )
-        created_shots.append(shot)
+        # Update existing shot if one matches from→to, otherwise create
+        existing = SurveyShot.objects.filter(
+            survey=survey, from_station=from_station, to_station=to_station,
+        ).first()
+
+        if existing:
+            existing.distance = item['distance']
+            existing.azimuth = item['azimuth']
+            existing.inclination = item.get('inclination', 0)
+            existing.left = item.get('left')
+            existing.right = item.get('right')
+            existing.up = item.get('up')
+            existing.down = item.get('down')
+            existing.comment = item.get('comment', '')
+            existing.save()
+            result_shots.append(existing)
+        else:
+            shot = SurveyShot.objects.create(
+                survey=survey,
+                from_station=from_station,
+                to_station=to_station,
+                distance=item['distance'],
+                azimuth=item['azimuth'],
+                inclination=item.get('inclination', 0),
+                left=item.get('left'),
+                right=item.get('right'),
+                up=item.get('up'),
+                down=item.get('down'),
+                shot_order=max_order + i + 1,
+                comment=item.get('comment', ''),
+            )
+            result_shots.append(shot)
 
     return Response(
-        SurveyShotSerializer(created_shots, many=True).data,
+        SurveyShotSerializer(result_shots, many=True).data,
         status=status.HTTP_201_CREATED,
     )
 
@@ -193,15 +210,26 @@ def survey_compute(request, cave_id, survey_id):
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
     render_data = compute_survey(survey)
+
+    # Persist render data for instant reload
+    survey.render_data = render_data
+    survey.save(update_fields=['render_data'])
+
     return Response(render_data)
 
 
 @api_view(['GET'])
 def survey_render(request, cave_id, survey_id):
-    """Get computed render data for a survey (centerlines, walls, stations)."""
+    """Get computed render data for a survey (centerlines, walls, stations).
+    Returns cached render_data if available, otherwise recomputes."""
     survey = _get_survey_or_404(cave_id, survey_id)
     if not survey:
         return Response({'error': 'Survey not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    if survey.render_data:
+        return Response(survey.render_data)
+
     render_data = compute_survey(survey)
+    survey.render_data = render_data
+    survey.save(update_fields=['render_data'])
     return Response(render_data)

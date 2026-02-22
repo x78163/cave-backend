@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useApi, apiFetch } from '../hooks/useApi'
+import SurveyTopologyGraph from './SurveyTopologyGraph'
+import { BRANCH_COLORS } from '../utils/surveyColors'
 
 // ── Create Survey Form ──────────────────────────────────────
 
@@ -123,14 +125,55 @@ function nextStation(name) {
   return name + '1'
 }
 
-function ShotEntryTable({ caveId, survey, onCompute }) {
+function suggestBranchPrefix(stationNames) {
+  const used = new Set()
+  for (const name of stationNames) {
+    const match = name.match(/^([A-Za-z]+)/)
+    if (match) used.add(match[1].toUpperCase())
+  }
+  for (const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+    if (!used.has(c)) return c
+  }
+  return 'AA'
+}
+
+function ShotEntryTable({ caveId, survey, onCompute, onSave, renderData, branchFromStation, onBranchHandled }) {
   const [rows, setRows] = useState([{ ...EMPTY_ROW }])
   const [saving, setSaving] = useState(false)
-  const [pasteMode, setPasteMode] = useState(false)
   const tableRef = useRef(null)
+  const prevSurveyId = useRef(null)
 
-  // Load existing shots into rows
+  // Handle branch-from action: add a new row pre-filled with the junction station
   useEffect(() => {
+    if (!branchFromStation) return
+    const newRow = {
+      ...EMPTY_ROW,
+      from_station: branchFromStation.from,
+      to_station: branchFromStation.suggestedTo,
+    }
+    setRows(prev => [...prev.filter(r => r.from_station || r.to_station), newRow, { ...EMPTY_ROW }])
+    onBranchHandled?.()
+    // Focus the azimuth field since stations are pre-filled
+    setTimeout(() => {
+      const allRows = tableRef.current?.querySelectorAll('tr')
+      if (allRows) {
+        const targetRow = allRows[allRows.length - 2] // second to last (before empty)
+        targetRow?.querySelectorAll('input')?.[2]?.focus()
+      }
+    }, 50)
+  }, [branchFromStation])
+
+  // Load existing shots into rows — clear and rebuild when survey changes or shots reload
+  useEffect(() => {
+    const currentId = survey?.id
+    if (currentId !== prevSurveyId.current) {
+      // Survey changed — reset rows completely
+      prevSurveyId.current = currentId
+      if (!survey?.shots?.length) {
+        setRows([{ ...EMPTY_ROW }])
+        return
+      }
+    }
     if (survey?.shots?.length > 0) {
       const existing = survey.shots.map(s => ({
         from_station: s.from_station_name,
@@ -149,8 +192,10 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
       // Add empty row at end for new entry
       existing.push({ ...EMPTY_ROW })
       setRows(existing)
+    } else if (!survey?.shots?.length) {
+      setRows([{ ...EMPTY_ROW }])
     }
-  }, [survey?.id])
+  }, [survey?.id, survey?.shots])
 
   const updateRow = useCallback((idx, key, value) => {
     setRows(prev => {
@@ -162,9 +207,39 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
         updated[idx].to_station = nextStation(value)
       }
 
+      // Auto-compute azimuth/distance/inclination when reconnecting to a known station
+      if (key === 'to_station' && renderData?.stations?.length > 0) {
+        const fromName = updated[idx].from_station
+        const toName = value
+        const fromSt = renderData.stations.find(s => s.name === fromName)
+        const toSt = renderData.stations.find(s => s.name === toName)
+        if (fromSt && toSt && !updated[idx].azimuth && !updated[idx].distance) {
+          const dx = toSt.x - fromSt.x
+          const dy = toSt.y - fromSt.y
+          const dz = (toSt.z || 0) - (fromSt.z || 0)
+          const horizDist = Math.sqrt(dx * dx + dy * dy)
+          const dist3d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+          // Azimuth: atan2(dx, dy) → degrees, convert to 0-360
+          // dx = East component (sin), dy = North component (cos)
+          let az = Math.atan2(dx, dy) * (180 / Math.PI)
+          if (az < 0) az += 360
+          // Subtract declination to get magnetic bearing
+          const decl = survey?.declination || 0
+          az = ((az - decl) % 360 + 360) % 360
+          // Convert distance back to survey units
+          const unitScale = survey?.unit === 'feet' ? 0.3048 : 1.0
+          const distInUnits = dist3d / unitScale
+          const inc = horizDist > 0.001 ? Math.atan2(dz, horizDist) * (180 / Math.PI) : 0
+          updated[idx].azimuth = az.toFixed(1)
+          updated[idx].distance = distInUnits.toFixed(1)
+          updated[idx].inclination = inc.toFixed(1)
+          updated[idx]._autoFilled = true
+        }
+      }
+
       return updated
     })
-  }, [])
+  }, [renderData, survey])
 
   const handleKeyDown = useCallback((e, rowIdx, colIdx) => {
     if (e.key === 'Tab' && !e.shiftKey && colIdx === COLUMNS.length - 1) {
@@ -188,7 +263,7 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
       e.preventDefault()
       // Move to same column in next row
       const nextRow = tableRef.current?.querySelectorAll(
-        `tr:nth-child(${rowIdx + 3}) input`,
+        `tbody tr:nth-child(${rowIdx + 2}) input`,
       )
       if (nextRow?.[colIdx]) {
         nextRow[colIdx].focus()
@@ -276,8 +351,7 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
         _saved: (r.from_station && r.to_station && r.distance && r.azimuth) ? true : r._saved,
       })))
 
-      // Auto-compute after save
-      if (onCompute) onCompute()
+      if (onSave) onSave()
     } catch (err) {
       console.error('Save shots failed:', err)
     } finally {
@@ -288,6 +362,8 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
   const unsavedCount = rows.filter(r =>
     r.from_station && r.to_station && r.distance && r.azimuth && !r._saved,
   ).length
+
+  const totalShots = rows.filter(r => r.from_station && r.to_station && r.distance && r.azimuth).length
 
   return (
     <div>
@@ -303,12 +379,22 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
           )}
         </div>
         <div className="flex gap-2">
+          {unsavedCount > 0 && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="cyber-btn cyber-btn-cyan px-3 py-1.5 text-xs disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : `Save (${unsavedCount})`}
+            </button>
+          )}
           <button
-            onClick={handleSave}
-            disabled={saving || unsavedCount === 0}
-            className="cyber-btn cyber-btn-cyan px-3 py-1.5 text-xs disabled:opacity-50"
+            onClick={onCompute}
+            disabled={saving || totalShots === 0}
+            className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs disabled:opacity-50"
+            style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
           >
-            {saving ? 'Saving...' : 'Save & Compute'}
+            Compute
           </button>
         </div>
       </div>
@@ -330,10 +416,14 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, rowIdx) => (
+            {rows.map((row, rowIdx) => {
+              const branchId = renderData?.station_branches?.[row.from_station]
+              const branchColor = branchId != null ? BRANCH_COLORS[branchId % BRANCH_COLORS.length] : null
+              return (
               <tr
                 key={rowIdx}
                 className={row._saved ? 'opacity-70' : ''}
+                style={branchColor ? { borderLeft: `3px solid ${branchColor}` } : undefined}
               >
                 {COLUMNS.map((col, colIdx) => (
                   <td key={col.key} className="px-0.5 py-0.5">
@@ -358,7 +448,8 @@ function ShotEntryTable({ caveId, survey, onCompute }) {
                   </button>
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -379,11 +470,25 @@ export default function SurveyManager({ caveId, onRenderData }) {
   const [creating, setCreating] = useState(false)
   const [renderData, setRenderData] = useState(null)
   const [computing, setComputing] = useState(false)
+  const [branchFromStation, setBranchFromStation] = useState(null)
 
   // Fetch detail for selected survey
   const { data: detail, refetch: refetchDetail } = useApi(
     selectedId ? `/caves/${caveId}/surveys/${selectedId}/` : null,
   )
+
+  // Clear render data when switching surveys, then auto-load persisted data
+  useEffect(() => {
+    setRenderData(null)
+    if (onRenderData) onRenderData(null)
+  }, [selectedId])
+
+  useEffect(() => {
+    if (detail?.render_data) {
+      setRenderData(detail.render_data)
+      if (onRenderData) onRenderData(detail.render_data)
+    }
+  }, [detail?.id])
 
   const handleCompute = useCallback(async () => {
     if (!selectedId) return
@@ -414,6 +519,12 @@ export default function SurveyManager({ caveId, onRenderData }) {
       refetch()
     } catch { /* ignore */ }
   }, [caveId, selectedId, refetch, onRenderData])
+
+  const handleBranchFrom = useCallback((stationName) => {
+    const existingStations = renderData?.stations?.map(s => s.name) || []
+    const nextPrefix = suggestBranchPrefix(existingStations)
+    setBranchFromStation({ from: stationName, suggestedTo: nextPrefix + '1' })
+  }, [renderData])
 
   if (loading) {
     return <p className="text-center text-[var(--cyber-text-dim)] py-6">Loading surveys...</p>
@@ -530,11 +641,34 @@ export default function SurveyManager({ caveId, onRenderData }) {
             </div>
           )}
 
-          <ShotEntryTable
-            caveId={caveId}
-            survey={detail}
-            onCompute={handleCompute}
-          />
+          <div className="flex gap-3">
+            {/* Topology sidebar — only shown when 2+ branches */}
+            {renderData?.branches?.length > 1 && (
+              <div className="shrink-0" style={{ width: 180 }}>
+                <SurveyTopologyGraph
+                  renderData={renderData}
+                  onBranchFrom={handleBranchFrom}
+                  height={400}
+                />
+                <p className="text-[9px] text-[var(--cyber-text-dim)] mt-1 px-1">
+                  Click a station to branch from it
+                </p>
+              </div>
+            )}
+
+            {/* Shot entry table */}
+            <div className="flex-1 min-w-0">
+              <ShotEntryTable
+                caveId={caveId}
+                survey={detail}
+                onCompute={handleCompute}
+                onSave={() => refetchDetail()}
+                renderData={renderData}
+                branchFromStation={branchFromStation}
+                onBranchHandled={() => setBranchFromStation(null)}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>
