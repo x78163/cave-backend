@@ -12,6 +12,8 @@ import DocumentUploadModal from '../components/DocumentUploadModal'
 import DocumentViewer from '../components/DocumentViewer'
 import VideoLinkModal from '../components/VideoLinkModal'
 import VideoEmbed from '../components/VideoEmbed'
+import SurveyManager from '../components/SurveyManager'
+import SurveyCanvas from '../components/SurveyCanvas'
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
 import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
@@ -62,6 +64,10 @@ export default function CaveDetail() {
   const [activeSurveyId, setActiveSurveyId] = useState(null)
   const [editingSurveyId, setEditingSurveyId] = useState(null)
   const [showSurveyModal, setShowSurveyModal] = useState(false)
+
+  // Traditional survey data
+  const [surveyRenderData, setSurveyRenderData] = useState(null)
+  const [showSurveyOverlay, setShowSurveyOverlay] = useState(false)
 
   // Media tab + document/video state
   const [mediaTab, setMediaTab] = useState('photos')
@@ -700,6 +706,8 @@ export default function CaveDetail() {
                   }
                 }}
                 caveId={caveId}
+                surveyRenderData={surveyRenderData}
+                showSurveyOverlay={showSurveyOverlay}
               />
 
               {/* Floating layer panel — Google Earth style */}
@@ -969,6 +977,30 @@ export default function CaveDetail() {
               )}
             </div>
           )}
+        </div>
+
+        {/* Surveys section — traditional cave survey data entry + visualization */}
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-white font-semibold">Surveys</h3>
+            {surveyRenderData && (
+              <button
+                onClick={() => setShowSurveyOverlay(prev => !prev)}
+                className={`cyber-btn cyber-btn-ghost px-2 py-1 text-xs ${
+                  showSurveyOverlay ? 'border-[var(--cyber-cyan)] text-[var(--cyber-cyan)]' : ''
+                }`}
+              >
+                {showSurveyOverlay ? 'Hide on Map' : 'Show on Map'}
+              </button>
+            )}
+          </div>
+          <SurveyCanvas renderData={surveyRenderData} height={300} />
+          <div className="mt-3">
+            <SurveyManager
+              caveId={caveId}
+              onRenderData={setSurveyRenderData}
+            />
+          </div>
         </div>
 
         {/* Ratings section (cloud-specific) */}

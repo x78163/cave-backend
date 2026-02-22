@@ -58,6 +58,7 @@ urlpatterns = [
     path('api/reconstruction/', include('reconstruction.urls')),
     path('api/social/', include('social.urls')),
     path('api/', include('routing.urls')),
+    path('api/caves/', include('survey.urls')),
 ]
 
 if settings.DEBUG:

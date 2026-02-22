@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'social',
     'reconstruction',
     'routing',
+    'survey',
 ]
 
 MIDDLEWARE = [

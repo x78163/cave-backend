@@ -5,6 +5,7 @@ import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import CaveMapOverlay from './CaveMapOverlay'
 import HandDrawnMapOverlay from './HandDrawnMapOverlay'
+import SurveyOverlay from './SurveyOverlay'
 
 // Cyan marker SVG for cave locations
 const caveIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40">
@@ -65,6 +66,9 @@ export default function SurfaceMap({
   onEditEnd,
   onDeleteSurvey,
   caveId = null,
+  // Traditional survey overlay props
+  surveyRenderData = null,
+  showSurveyOverlay = false,
 }) {
   const [surveyDropdownOpen, setSurveyDropdownOpen] = useState(false)
   const containerRef = useRef(null)
@@ -402,6 +406,15 @@ export default function SurfaceMap({
         onDeleteSurvey={onDeleteSurvey}
         caveId={caveId}
       />
+      {showSurveyOverlay && surveyRenderData && (
+        <SurveyOverlay
+          map={mapRef.current}
+          renderData={surveyRenderData}
+          anchorLat={anchor?.lat}
+          anchorLon={anchor?.lon}
+          heading={caveHeading}
+        />
+      )}
     </>
   )
 }

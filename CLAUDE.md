@@ -176,6 +176,11 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `UserFollow` - Follow relationships
 - `Activity` - Activity feed entries
 
+#### Traditional Survey
+- `CaveSurvey` - Survey metadata (name, date, surveyors, unit, declination, computed totals)
+- `SurveyStation` - Computed station positions (x/y/z), optional fixed GPS coordinates
+- `SurveyShot` - Station-to-station measurements (azimuth, distance, inclination, LRUD)
+
 #### Sync Management
 - `SyncSession` - Track sync sessions
 - `SyncLog` - Detailed sync logs
@@ -232,6 +237,18 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `GET /api/caves/{id}/survey-maps/{survey_id}/` - Survey map detail
 - `PATCH /api/caves/{id}/survey-maps/{survey_id}/` - Update calibration
 - `DELETE /api/caves/{id}/survey-maps/{survey_id}/` - Delete survey map
+
+### Traditional Cave Surveys
+- `GET /api/caves/{id}/surveys/` - List surveys for cave
+- `POST /api/caves/{id}/surveys/` - Create new survey
+- `GET /api/caves/{id}/surveys/{survey_id}/` - Survey detail with stations + shots
+- `PATCH /api/caves/{id}/surveys/{survey_id}/` - Update survey metadata
+- `DELETE /api/caves/{id}/surveys/{survey_id}/` - Delete survey
+- `POST /api/caves/{id}/surveys/{survey_id}/shots/` - Bulk add shots (auto-creates stations)
+- `PATCH /api/caves/{id}/surveys/{survey_id}/shots/{shot_id}/` - Update shot
+- `DELETE /api/caves/{id}/surveys/{survey_id}/shots/{shot_id}/` - Delete shot
+- `POST /api/caves/{id}/surveys/{survey_id}/compute/` - Recompute station positions + render data
+- `GET /api/caves/{id}/surveys/{survey_id}/render/` - Get computed render data
 
 ### Documents & Video Links
 - `POST /api/caves/{id}/documents/` - Upload PDF document
@@ -617,7 +634,7 @@ This project includes:
 
 ## Current Session Context
 
-**Date**: 2026-02-20
+**Date**: 2026-02-21
 **Status**: Active development — core features operational
 
 ### What's Built
@@ -658,6 +675,10 @@ This project includes:
 - Visibility-filtered `cave_list` API — unlisted/private caves hidden from non-owners
 - Title case auto-normalization for cave names and aliases on save
 - `is_staff` exposed via UserProfileSerializer for frontend admin gating
+- Traditional cave survey system (`survey/` app): CaveSurvey, SurveyStation, SurveyShot models
+- Survey compute engine: polar→cartesian conversion, BFS station positioning, proportional loop closure, LRUD→passage wall generation
+- Survey API: CRUD + bulk shot create (auto-creates stations) + compute + render endpoints
+- Feet/meters unit support with automatic conversion to meters for computation
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode
@@ -689,6 +710,7 @@ This project includes:
   - Edit and Delete buttons in topbar (owner or admin only)
   - Delete confirmation modal with permanent deletion warning
   - Unlisted visibility badge (purple)
+  - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
 - Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
 - User profile page with avatar presets, saved routes, media gallery
   - Media tab with sub-tabs: Photos (grid), Documents (list), Videos (grid)
@@ -738,6 +760,12 @@ This project includes:
 | `frontend/src/components/CsvImportModal.jsx` | Three-step admin CSV import modal (upload → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
+| `survey/models.py` | CaveSurvey, SurveyStation, SurveyShot models |
+| `survey/compute.py` | Polar→cartesian, BFS traversal, loop closure, LRUD→walls |
+| `survey/views.py` | Survey CRUD, bulk shot create, compute + render endpoints |
+| `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table |
+| `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + walls on surface map |
+| `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar) |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets |
 
@@ -756,6 +784,9 @@ This project includes:
 - 0012: Unlisted visibility choice added
 - 0013: Media ownership (SET_NULL on cave FK, uploaded_by, cave_name_cache, MediaVisibility on CavePhoto/CaveDocument/CaveVideoLink)
 - 0014: Data migration — backfill cave_name_cache on existing media
+
+### Migrations (survey app)
+- 0001: CaveSurvey, SurveyStation, SurveyShot models
 
 ### Migrations (social app)
 - 0001: Initial social models
