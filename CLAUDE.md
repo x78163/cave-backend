@@ -715,7 +715,8 @@ This project includes:
   - Edit and Delete buttons in topbar (owner or admin only)
   - Delete confirmation modal with permanent deletion warning
   - Unlisted visibility badge (purple)
-  - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
+  - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar/symbol legend), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
+  - NSS cave cartography symbols: 62 SVG icons across 10 categories, keyword-matched from shot comments, rendered at shot midpoints on both Canvas and Leaflet overlays, auto-legend showing only used symbols
   - Survey OCR: "Scan Sheet" button opens SurveyOCRModal — photograph handwritten survey form, GOT-OCR 2.0 extracts shots, editable review table with ◀▶ cell shift buttons for fixing column alignment, row count hint dropdown
 - Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
 - User profile page with avatar presets, saved routes, media gallery
@@ -767,13 +768,14 @@ This project includes:
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
 | `survey/models.py` | CaveSurvey, SurveyStation, SurveyShot models |
-| `survey/compute.py` | Polar→cartesian, BFS traversal, loop closure, LRUD→walls |
+| `survey/compute.py` | Polar→cartesian, BFS traversal, loop closure, LRUD→walls, shot_annotations |
 | `survey/views.py` | Survey CRUD, bulk shot create, compute + render + OCR endpoints |
 | `survey/ocr.py` | GOT-OCR 2.0 model loading, inference, table parsing, LaTeX stripping |
 | `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table + OCR scan button |
 | `frontend/src/components/SurveyOCRModal.jsx` | Two-step OCR modal: upload image → review/edit/shift parsed shots |
-| `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + walls on surface map |
-| `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar) |
+| `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + walls + symbol icons on surface map |
+| `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar, symbol legend) |
+| `frontend/src/utils/surveySymbols.js` | 62 NSS cave cartography SVG symbols, keyword matching, colorize/dataURL helpers |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets |
 

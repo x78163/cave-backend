@@ -385,6 +385,12 @@ body {
   padding: 2px 4px;
 }
 
+/* Survey symbol icons on map */
+.survey-symbol-icon {
+  background: none !important;
+  border: none !important;
+}
+
 /* Cave name labels on map */
 .cave-label {
   background: rgba(10, 10, 18, 0.8) !important;

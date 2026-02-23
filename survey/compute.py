@@ -462,6 +462,7 @@ def compute_survey(survey_obj):
             'right': s.right,
             'up': s.up,
             'down': s.down,
+            'comment': s.comment or '',
         })
 
     if not shots:
@@ -480,6 +481,7 @@ def compute_survey(survey_obj):
             'junction_stations': [],
             'loop_closures': [],
             'next_branch_prefix': 'A',
+            'shot_annotations': [],
         }
 
     decl = survey_obj.declination
@@ -515,6 +517,22 @@ def compute_survey(survey_obj):
             tx, ty, _ = positions[tn]
             branch_id = station_branch_map.get(fn, 0)
             centerline.append([[round(fx, 4), round(fy, 4)], [round(tx, 4), round(ty, 4)], branch_id])
+
+    # Build shot annotations (midpoints + comments for symbol rendering)
+    shot_annotations = []
+    for shot in shots:
+        fn = shot['from_station']
+        tn = shot['to_station']
+        comment = shot.get('comment', '')
+        if comment and fn in positions and tn in positions:
+            fx, fy, _ = positions[fn]
+            tx, ty, _ = positions[tn]
+            shot_annotations.append({
+                'from': fn,
+                'to': tn,
+                'mid': [round((fx + tx) / 2, 4), round((fy + ty) / 2, 4)],
+                'comment': comment,
+            })
 
     # Build station list (with branch and junction info)
     station_list = []
@@ -567,4 +585,5 @@ def compute_survey(survey_obj):
         'junction_stations': branch_info['junction_stations'],
         'loop_closures': branch_info['loop_closures'],
         'next_branch_prefix': suggest_branch_prefix(list(positions.keys())),
+        'shot_annotations': shot_annotations,
     }

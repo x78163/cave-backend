@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import { slamToLatLng } from './CaveMapOverlay'
+import { matchSymbols, colorize, SYMBOLS } from '../utils/surveySymbols'
 
 /**
  * Renders survey centerlines, passage walls, and station labels on a Leaflet map.
@@ -101,6 +102,27 @@ export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, h
           })
           .addTo(group)
       }
+    }
+
+    // Symbol icons at shot midpoints (matched from comments)
+    for (const ann of (renderData.shot_annotations || [])) {
+      const keys = matchSymbols(ann.comment)
+      if (keys.length === 0) continue
+      const ll = toLL(ann.mid[0], ann.mid[1])
+      keys.forEach((key, i) => {
+        const svg = SYMBOLS[key]
+        if (!svg) return
+        const html = colorize(svg, '#ffa726')
+        const size = 22
+        const offset = keys.length > 1 ? (i - (keys.length - 1) / 2) * (size + 2) : 0
+        const icon = L.divIcon({
+          html,
+          className: 'survey-symbol-icon',
+          iconSize: [size, size],
+          iconAnchor: [size / 2 - offset, size / 2],
+        })
+        L.marker(ll, { icon, interactive: false }).addTo(group)
+      })
     }
 
     group.addTo(map)

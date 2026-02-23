@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { BRANCH_COLORS } from '../utils/surveyColors'
+import { matchSymbols, symbolToDataURL, symbolLabel, SYMBOLS } from '../utils/surveySymbols'
 
 /**
  * Standalone 2D canvas renderer for survey data.
@@ -12,6 +13,7 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
   const canvasRef = useRef(null)
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
   const dragRef = useRef(null)
+  const symbolImgCache = useRef({})
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 })
 
   // Resize canvas to match container width
@@ -243,6 +245,31 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
       }
     }
 
+    // Symbol icons at shot midpoints (matched from comments)
+    const usedSymbolKeys = new Set()
+    for (const ann of (renderData.shot_annotations || [])) {
+      const keys = matchSymbols(ann.comment)
+      // Pre-load any new symbol images
+      for (const key of keys) {
+        usedSymbolKeys.add(key)
+        if (!symbolImgCache.current[key]) {
+          const img = new Image()
+          img.src = symbolToDataURL(SYMBOLS[key], '#ffa726')
+          symbolImgCache.current[key] = img
+        }
+      }
+      if (keys.length === 0) continue
+      const [mx, my] = toScreen(ann.mid[0], ann.mid[1])
+      const iconSize = Math.max(16, Math.min(28, scale * 5))
+      keys.forEach((key, i) => {
+        const img = symbolImgCache.current[key]
+        if (img?.complete) {
+          const offset = keys.length > 1 ? (i - (keys.length - 1) / 2) * (iconSize + 2) : 0
+          ctx.drawImage(img, mx - iconSize / 2 + offset, my - iconSize / 2, iconSize, iconSize)
+        }
+      })
+    }
+
     // North arrow (top-right corner)
     ctx.save()
     ctx.translate(canvas.width - 30, 30)
@@ -290,6 +317,49 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
         ctx.fillText(branch.name, 25, legendY + 9)
         legendY += 16
       }
+    }
+
+    // Symbol legend (top-right, below north arrow — only when symbols are used)
+    if (usedSymbolKeys.size > 0) {
+      const legendIconSize = 16
+      const lineH = 20
+      const pad = 8
+      const sortedKeys = [...usedSymbolKeys].sort()
+
+      // Measure max label width for background
+      ctx.font = '10px monospace'
+      let maxLabelW = 0
+      for (const key of sortedKeys) {
+        const w = ctx.measureText(symbolLabel(key)).width
+        if (w > maxLabelW) maxLabelW = w
+      }
+      const boxW = pad + legendIconSize + 6 + maxLabelW + pad
+      const boxH = pad + sortedKeys.length * lineH - (lineH - legendIconSize) + pad
+      const boxX = canvas.width - boxW - 8
+      const boxY = 52
+
+      // Background
+      ctx.fillStyle = 'rgba(10, 14, 20, 0.8)'
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.roundRect(boxX, boxY, boxW, boxH, 6)
+      ctx.fill()
+      ctx.stroke()
+
+      // Items
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      sortedKeys.forEach((key, i) => {
+        const y = boxY + pad + i * lineH
+        const img = symbolImgCache.current[key]
+        if (img?.complete) {
+          ctx.drawImage(img, boxX + pad, y, legendIconSize, legendIconSize)
+        }
+        ctx.fillStyle = '#e0e0f0'
+        ctx.font = '10px monospace'
+        ctx.fillText(symbolLabel(key), boxX + pad + legendIconSize + 6, y + legendIconSize / 2)
+      })
     }
   }, [renderData, transform, canvasSize])
 
