@@ -998,6 +998,7 @@ export default function CaveDetail() {
           <div className="mt-3">
             <SurveyManager
               caveId={caveId}
+              hasMap={cave.has_map}
               onRenderData={setSurveyRenderData}
             />
           </div>

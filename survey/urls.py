@@ -9,4 +9,5 @@ urlpatterns = [
     path('<uuid:cave_id>/surveys/<uuid:survey_id>/compute/', views.survey_compute, name='survey_compute'),
     path('<uuid:cave_id>/surveys/<uuid:survey_id>/ocr/', views.survey_ocr, name='survey_ocr'),
     path('<uuid:cave_id>/surveys/<uuid:survey_id>/render/', views.survey_render, name='survey_render'),
+    path('<uuid:cave_id>/generate-slam-survey/', views.generate_slam_survey, name='generate_slam_survey'),
 ]

@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+
+from django.conf import settings
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -12,6 +16,7 @@ from .serializers import (
 )
 from .compute import compute_survey
 from .ocr import extract_shots_from_image
+from .slam_survey import generate_slam_survey_data, generate_merged_slam_survey
 
 
 def _get_cave_or_404(cave_id):
@@ -274,3 +279,146 @@ def survey_render(request, cave_id, survey_id):
     survey.render_data = render_data
     survey.save(update_fields=['render_data'])
     return Response(render_data)
+
+
+# ── SLAM Survey Generation ──────────────────────────────────
+
+def _create_slam_survey_for_level(cave, user, map_data, level_idx, min_spacing):
+    """Create a single SLAM survey for one level. Returns summary dict or None on error."""
+    try:
+        result = generate_slam_survey_data(map_data, level_idx, min_spacing)
+    except ValueError:
+        return None
+
+    level_name = map_data.get('levels', [{}])[level_idx].get('name', f'Level {level_idx + 1}')
+    survey = CaveSurvey.objects.create(
+        cave=cave,
+        name=f'SLAM Survey - {level_name}',
+        source='slam',
+        unit='meters',
+        declination=0,
+        created_by=user,
+    )
+
+    for i, shot_data in enumerate(result['shots']):
+        from_st, _ = SurveyStation.objects.get_or_create(
+            survey=survey, name=shot_data['from_station'],
+        )
+        to_st, _ = SurveyStation.objects.get_or_create(
+            survey=survey, name=shot_data['to_station'],
+        )
+        SurveyShot.objects.create(
+            survey=survey,
+            from_station=from_st,
+            to_station=to_st,
+            distance=shot_data['distance'],
+            azimuth=shot_data['azimuth'],
+            inclination=shot_data['inclination'],
+            left=shot_data['left'],
+            right=shot_data['right'],
+            up=shot_data['up'],
+            down=shot_data['down'],
+            comment=shot_data.get('comment', ''),
+            shot_order=i,
+        )
+
+    render_data = compute_survey(survey)
+    survey.render_data = render_data
+    survey.save(update_fields=['render_data'])
+
+    return {
+        'survey_id': str(survey.id),
+        'level': level_idx,
+        'level_name': level_name,
+        'stations': len(result['stations']),
+        'shots': len(result['shots']),
+        'leads': len(result.get('leads', [])),
+    }
+
+
+@api_view(['POST'])
+def generate_slam_survey(request, cave_id):
+    """Generate traditional surveys from SLAM map data (wall polylines + trajectory).
+
+    Reads map_data.json for the cave, raycasts against 2D walls to derive LRUD,
+    creates CaveSurvey records with synthetic shots, and auto-computes render data.
+
+    Pass level='all' (default) to generate for all levels, or level=0/1/... for a single level.
+    """
+    cave = _get_cave_or_404(cave_id)
+    if not cave:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Load map data
+    map_data_path = Path(settings.MEDIA_ROOT) / 'caves' / str(cave_id) / 'map_data.json'
+    if not map_data_path.exists():
+        return Response({'error': 'No map data available for this cave'}, status=status.HTTP_400_BAD_REQUEST)
+
+    map_data = json.loads(map_data_path.read_text())
+    min_spacing = float(request.data.get('min_spacing', 0.5))
+    level_param = request.data.get('level', 'all')
+
+    num_levels = len(map_data.get('levels', []))
+    if num_levels == 0:
+        return Response({'error': 'No levels in map data'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if level_param == 'all':
+        # Merged: all levels in one survey, connected via transitions
+        try:
+            result = generate_merged_slam_survey(map_data, min_spacing)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        survey_name = 'SLAM Survey'
+        if num_levels > 1:
+            survey_name += f' ({num_levels} levels)'
+
+        survey = CaveSurvey.objects.create(
+            cave=cave, name=survey_name, source='slam',
+            unit='meters', declination=0, created_by=request.user,
+        )
+
+        for i, shot_data in enumerate(result['shots']):
+            from_st, _ = SurveyStation.objects.get_or_create(
+                survey=survey, name=shot_data['from_station'],
+            )
+            to_st, _ = SurveyStation.objects.get_or_create(
+                survey=survey, name=shot_data['to_station'],
+            )
+            SurveyShot.objects.create(
+                survey=survey, from_station=from_st, to_station=to_st,
+                distance=shot_data['distance'], azimuth=shot_data['azimuth'],
+                inclination=shot_data['inclination'],
+                left=shot_data['left'], right=shot_data['right'],
+                up=shot_data['up'], down=shot_data['down'],
+                comment=shot_data.get('comment', ''),
+                shot_order=i,
+            )
+
+        render_data = compute_survey(survey)
+        survey.render_data = render_data
+        survey.save(update_fields=['render_data'])
+
+        return Response({
+            'survey_id': str(survey.id),
+            'stations': len(result['stations']),
+            'shots': len(result['shots']),
+            'leads': len(result.get('leads', [])),
+        }, status=status.HTTP_201_CREATED)
+    else:
+        # Single level
+        summary = _create_slam_survey_for_level(
+            cave, request.user, map_data, int(level_param), min_spacing,
+        )
+        if not summary:
+            return Response({'error': 'Failed to generate survey for this level'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'survey_id': summary['survey_id'],
+            'stations': summary['stations'],
+            'shots': summary['shots'],
+            'leads': summary['leads'],
+        }, status=status.HTTP_201_CREATED)

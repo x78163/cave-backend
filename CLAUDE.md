@@ -177,7 +177,7 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `Activity` - Activity feed entries
 
 #### Traditional Survey
-- `CaveSurvey` - Survey metadata (name, date, surveyors, unit, declination, computed totals)
+- `CaveSurvey` - Survey metadata (name, date, surveyors, unit, declination, computed totals, source: manual/slam)
 - `SurveyStation` - Computed station positions (x/y/z), optional fixed GPS coordinates
 - `SurveyShot` - Station-to-station measurements (azimuth, distance, inclination, LRUD)
 
@@ -250,6 +250,7 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/caves/{id}/surveys/{survey_id}/compute/` - Recompute station positions + render data
 - `GET /api/caves/{id}/surveys/{survey_id}/render/` - Get computed render data
 - `POST /api/caves/{id}/surveys/{survey_id}/ocr/` - OCR extract shots from survey sheet photo
+- `POST /api/caves/{id}/generate-slam-survey/` - Generate traditional survey from SLAM map data (level='all' for merged multi-level, level=0/1/... for single level)
 
 ### Documents & Video Links
 - `POST /api/caves/{id}/documents/` - Upload PDF document
@@ -684,6 +685,15 @@ This project includes:
   - `survey/ocr.py`: lazy model loading, markdown table + plain text parsers, LaTeX stripping, repetition trimming
   - OCR number correction (D/O/Q→0, O→0, l→1), fuzzy column header matching
   - Expected row count hint from frontend caps `max_new_tokens` to prevent hallucination
+- SLAM-to-survey generation (`survey/slam_survey.py`): converts SLAM map data into traditional survey format
+  - `select_stations()`: filters trajectory points by minimum spacing
+  - `cast_ray()` + `_ray_segment_intersect()`: 2D raycasting against wall polylines for L/R passage dimensions
+  - `raycast_lrud()`: perpendicular raycasts for LRUD, U/D derived from level z_range
+  - `detect_leads()` + `_find_void_gap()`: trailing-window void detection for side passage openings
+  - `generate_slam_survey_data()`: single-level entry point
+  - `generate_merged_slam_survey()`: multi-level merged survey with level-prefixed stations (L1-S1, L2-S1) and transition connecting shots
+  - `source` field on CaveSurvey (manual/slam) distinguishes hand-entered from generated surveys
+  - API: `POST /api/caves/{id}/generate-slam-survey/` — level='all' (default) merges all levels, level=0/1/... for single level; auto-computes render_data after creation
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode
@@ -718,6 +728,7 @@ This project includes:
   - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar/symbol legend), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
   - NSS cave cartography symbols: 62 SVG icons across 10 categories, keyword-matched from shot comments, rendered at shot midpoints on both Canvas and Leaflet overlays, auto-legend showing only used symbols
   - Survey OCR: "Scan Sheet" button opens SurveyOCRModal — photograph handwritten survey form, GOT-OCR 2.0 extracts shots, editable review table with ◀▶ cell shift buttons for fixing column alignment, row count hint dropdown
+  - "Generate from Map" button (magenta) in SurveyManager: appears when cave has SLAM map data and no SLAM-generated survey exists; generates traditional survey from SLAM data via API, SLAM badge on generated surveys
 - Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
 - User profile page with avatar presets, saved routes, media gallery
   - Media tab with sub-tabs: Photos (grid), Documents (list), Videos (grid)
@@ -767,9 +778,10 @@ This project includes:
 | `frontend/src/components/CsvImportModal.jsx` | Three-step admin CSV import modal (upload → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
-| `survey/models.py` | CaveSurvey, SurveyStation, SurveyShot models |
+| `survey/slam_survey.py` | SLAM-to-survey conversion: station selection, 2D raycasting for LRUD, lead detection, multi-level merging |
+| `survey/models.py` | CaveSurvey (source: manual/slam), SurveyStation, SurveyShot models |
 | `survey/compute.py` | Polar→cartesian, BFS traversal, loop closure, LRUD→walls, shot_annotations |
-| `survey/views.py` | Survey CRUD, bulk shot create, compute + render + OCR endpoints |
+| `survey/views.py` | Survey CRUD, bulk shot create, compute + render + OCR + SLAM-to-survey endpoints |
 | `survey/ocr.py` | GOT-OCR 2.0 model loading, inference, table parsing, LaTeX stripping |
 | `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table + OCR scan button |
 | `frontend/src/components/SurveyOCRModal.jsx` | Two-step OCR modal: upload image → review/edit/shift parsed shots |
@@ -797,6 +809,8 @@ This project includes:
 
 ### Migrations (survey app)
 - 0001: CaveSurvey, SurveyStation, SurveyShot models
+- 0002: render_data JSONField on CaveSurvey
+- 0003: source field (manual/slam) on CaveSurvey
 
 ### Migrations (social app)
 - 0001: Initial social models

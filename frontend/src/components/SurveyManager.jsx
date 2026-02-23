@@ -487,7 +487,7 @@ function ShotEntryTable({ caveId, survey, onCompute, onSave, renderData, branchF
 
 // ── Survey Manager (main component) ─────────────────────────
 
-export default function SurveyManager({ caveId, onRenderData }) {
+export default function SurveyManager({ caveId, hasMap, onRenderData }) {
   const { data, loading, refetch } = useApi(`/caves/${caveId}/surveys/`)
   const surveys = data ?? []
   const [selectedId, setSelectedId] = useState(null)
@@ -497,6 +497,7 @@ export default function SurveyManager({ caveId, onRenderData }) {
   const [branchFromStation, setBranchFromStation] = useState(null)
   const [showOCR, setShowOCR] = useState(false)
   const [importedShots, setImportedShots] = useState(null)
+  const [generating, setGenerating] = useState(false)
 
   // Fetch detail for selected survey
   const { data: detail, refetch: refetchDetail } = useApi(
@@ -552,6 +553,26 @@ export default function SurveyManager({ caveId, onRenderData }) {
     setBranchFromStation({ from: stationName, suggestedTo: nextPrefix + '1' })
   }, [renderData])
 
+  const handleGenerateFromMap = useCallback(async () => {
+    setGenerating(true)
+    try {
+      const result = await apiFetch(`/caves/${caveId}/generate-slam-survey/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: 'all' }),
+      })
+      refetch()
+      // Auto-select the first generated survey
+      if (result.survey_id) {
+        setSelectedId(result.survey_id)
+      }
+    } catch (err) {
+      console.error('Generate SLAM survey failed:', err)
+    } finally {
+      setGenerating(false)
+    }
+  }, [caveId, refetch])
+
   if (loading) {
     return <p className="text-center text-[var(--cyber-text-dim)] py-6">Loading surveys...</p>
   }
@@ -565,12 +586,24 @@ export default function SurveyManager({ caveId, onRenderData }) {
             <h3 className="text-sm font-bold" style={{ color: 'var(--cyber-cyan)' }}>
               Surveys ({surveys.length})
             </h3>
-            <button
-              onClick={() => setCreating(true)}
-              className="cyber-btn cyber-btn-cyan px-3 py-1.5 text-xs"
-            >
-              + New Survey
-            </button>
+            <div className="flex gap-2">
+              {hasMap && !surveys.some(s => s.source === 'slam') && (
+                <button
+                  onClick={handleGenerateFromMap}
+                  disabled={generating}
+                  className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs disabled:opacity-50"
+                  style={{ borderColor: 'var(--cyber-magenta)', color: 'var(--cyber-magenta)' }}
+                >
+                  {generating ? 'Generating...' : 'Generate from Map'}
+                </button>
+              )}
+              <button
+                onClick={() => setCreating(true)}
+                className="cyber-btn cyber-btn-cyan px-3 py-1.5 text-xs"
+              >
+                + New Survey
+              </button>
+            </div>
           </div>
 
           {surveys.length === 0 ? (
@@ -585,7 +618,15 @@ export default function SurveyManager({ caveId, onRenderData }) {
                     className="flex-1 cursor-pointer"
                     onClick={() => setSelectedId(s.id)}
                   >
-                    <h4 className="text-sm font-medium text-[var(--cyber-text)]">{s.name}</h4>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-medium text-[var(--cyber-text)]">{s.name}</h4>
+                      {s.source === 'slam' && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded"
+                          style={{ background: 'rgba(255,0,200,0.15)', color: 'var(--cyber-magenta)', border: '1px solid rgba(255,0,200,0.3)' }}>
+                          SLAM
+                        </span>
+                      )}
+                    </div>
                     <div className="flex gap-3 mt-1 text-[10px] text-[var(--cyber-text-dim)]">
                       {s.date_surveyed && <span>{s.date_surveyed}</span>}
                       {s.surveyors && <span>{s.surveyors}</span>}

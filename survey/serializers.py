@@ -34,7 +34,7 @@ class CaveSurveyListSerializer(serializers.ModelSerializer):
         model = CaveSurvey
         fields = [
             'id', 'name', 'date_surveyed', 'surveyors', 'unit', 'declination',
-            'total_length', 'total_depth', 'station_count', 'render_data',
+            'source', 'total_length', 'total_depth', 'station_count', 'render_data',
             'created_by', 'created_by_username', 'created_at',
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'total_length', 'total_depth', 'station_count', 'render_data']
@@ -51,7 +51,7 @@ class CaveSurveyDetailSerializer(serializers.ModelSerializer):
         model = CaveSurvey
         fields = [
             'id', 'name', 'date_surveyed', 'surveyors', 'unit', 'declination',
-            'total_length', 'total_depth', 'station_count', 'render_data',
+            'source', 'total_length', 'total_depth', 'station_count', 'render_data',
             'created_by', 'created_by_username', 'created_at', 'updated_at',
             'stations', 'shots',
         ]

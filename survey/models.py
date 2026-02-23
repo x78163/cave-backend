@@ -11,6 +11,11 @@ class CaveSurvey(models.Model):
         ('meters', 'Meters'),
     ]
 
+    SOURCE_CHOICES = [
+        ('manual', 'Manual'),
+        ('slam', 'SLAM'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     cave = models.ForeignKey(
         'caves.Cave', on_delete=models.CASCADE, related_name='surveys',
@@ -20,6 +25,7 @@ class CaveSurvey(models.Model):
     surveyors = models.CharField(max_length=500, blank=True, default='')
     unit = models.CharField(max_length=10, choices=UNIT_CHOICES, default='feet')
     declination = models.FloatField(default=0.0, help_text='Magnetic declination in degrees')
+    source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default='manual')
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='created_surveys',
