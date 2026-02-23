@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useApi, apiFetch } from '../hooks/useApi'
 import SurveyTopologyGraph from './SurveyTopologyGraph'
+import SurveyOCRModal from './SurveyOCRModal'
 import { BRANCH_COLORS } from '../utils/surveyColors'
 
 // ── Create Survey Form ──────────────────────────────────────
@@ -137,7 +138,7 @@ function suggestBranchPrefix(stationNames) {
   return 'AA'
 }
 
-function ShotEntryTable({ caveId, survey, onCompute, onSave, renderData, branchFromStation, onBranchHandled }) {
+function ShotEntryTable({ caveId, survey, onCompute, onSave, renderData, branchFromStation, onBranchHandled, importedShots, onImportHandled }) {
   const [rows, setRows] = useState([{ ...EMPTY_ROW }])
   const [saving, setSaving] = useState(false)
   const tableRef = useRef(null)
@@ -162,6 +163,29 @@ function ShotEntryTable({ caveId, survey, onCompute, onSave, renderData, branchF
       }
     }, 50)
   }, [branchFromStation])
+
+  // Handle imported shots from OCR
+  useEffect(() => {
+    if (!importedShots?.length) return
+    const newRows = importedShots.map(s => ({
+      from_station: s.from_station || '',
+      to_station: s.to_station || '',
+      azimuth: s.azimuth?.toString() ?? '',
+      distance: s.distance?.toString() ?? '',
+      inclination: s.inclination?.toString() ?? '',
+      left: s.left?.toString() ?? '',
+      right: s.right?.toString() ?? '',
+      up: s.up?.toString() ?? '',
+      down: s.down?.toString() ?? '',
+      comment: s.comment || '',
+    }))
+    setRows(prev => [
+      ...prev.filter(r => r.from_station || r.to_station),
+      ...newRows,
+      { ...EMPTY_ROW },
+    ])
+    onImportHandled?.()
+  }, [importedShots])
 
   // Load existing shots into rows — clear and rebuild when survey changes or shots reload
   useEffect(() => {
@@ -471,6 +495,8 @@ export default function SurveyManager({ caveId, onRenderData }) {
   const [renderData, setRenderData] = useState(null)
   const [computing, setComputing] = useState(false)
   const [branchFromStation, setBranchFromStation] = useState(null)
+  const [showOCR, setShowOCR] = useState(false)
+  const [importedShots, setImportedShots] = useState(null)
 
   // Fetch detail for selected survey
   const { data: detail, refetch: refetchDetail } = useApi(
@@ -622,9 +648,18 @@ export default function SurveyManager({ caveId, onRenderData }) {
                 {detail.total_depth != null && <span>depth: {detail.total_depth.toFixed(1)}m</span>}
               </div>
             </div>
-            {computing && (
-              <span className="text-xs" style={{ color: 'var(--cyber-cyan)' }}>Computing...</span>
-            )}
+            <div className="flex items-center gap-2">
+              {computing && (
+                <span className="text-xs" style={{ color: 'var(--cyber-cyan)' }}>Computing...</span>
+              )}
+              <button
+                onClick={() => setShowOCR(true)}
+                className="cyber-btn cyber-btn-ghost px-2 py-1 text-xs"
+                title="Scan a handwritten survey sheet"
+              >
+                Scan Sheet
+              </button>
+            </div>
           </div>
 
           {/* Stats from last compute */}
@@ -666,10 +701,22 @@ export default function SurveyManager({ caveId, onRenderData }) {
                 renderData={renderData}
                 branchFromStation={branchFromStation}
                 onBranchHandled={() => setBranchFromStation(null)}
+                importedShots={importedShots}
+                onImportHandled={() => setImportedShots(null)}
               />
             </div>
           </div>
         </div>
+      )}
+
+      {/* OCR Modal */}
+      {showOCR && selectedId && (
+        <SurveyOCRModal
+          caveId={caveId}
+          surveyId={selectedId}
+          onImport={(shots) => setImportedShots(shots)}
+          onClose={() => setShowOCR(false)}
+        />
       )}
     </div>
   )

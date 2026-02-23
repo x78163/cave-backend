@@ -249,6 +249,7 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `DELETE /api/caves/{id}/surveys/{survey_id}/shots/{shot_id}/` - Delete shot
 - `POST /api/caves/{id}/surveys/{survey_id}/compute/` - Recompute station positions + render data
 - `GET /api/caves/{id}/surveys/{survey_id}/render/` - Get computed render data
+- `POST /api/caves/{id}/surveys/{survey_id}/ocr/` - OCR extract shots from survey sheet photo
 
 ### Documents & Video Links
 - `POST /api/caves/{id}/documents/` - Upload PDF document
@@ -679,6 +680,10 @@ This project includes:
 - Survey compute engine: polar→cartesian conversion, BFS station positioning, proportional loop closure, LRUD→passage wall generation
 - Survey API: CRUD + bulk shot create (auto-creates stations) + compute + render endpoints
 - Feet/meters unit support with automatic conversion to meters for computation
+- Survey OCR: GOT-OCR 2.0 (`stepfun-ai/GOT-OCR-2.0-hf`) for handwritten survey sheet recognition
+  - `survey/ocr.py`: lazy model loading, markdown table + plain text parsers, LaTeX stripping, repetition trimming
+  - OCR number correction (D/O/Q→0, O→0, l→1), fuzzy column header matching
+  - Expected row count hint from frontend caps `max_new_tokens` to prevent hallucination
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode
@@ -711,6 +716,7 @@ This project includes:
   - Delete confirmation modal with permanent deletion warning
   - Unlisted visibility badge (purple)
   - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
+  - Survey OCR: "Scan Sheet" button opens SurveyOCRModal — photograph handwritten survey form, GOT-OCR 2.0 extracts shots, editable review table with ◀▶ cell shift buttons for fixing column alignment, row count hint dropdown
 - Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
 - User profile page with avatar presets, saved routes, media gallery
   - Media tab with sub-tabs: Photos (grid), Documents (list), Videos (grid)
@@ -762,8 +768,10 @@ This project includes:
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
 | `survey/models.py` | CaveSurvey, SurveyStation, SurveyShot models |
 | `survey/compute.py` | Polar→cartesian, BFS traversal, loop closure, LRUD→walls |
-| `survey/views.py` | Survey CRUD, bulk shot create, compute + render endpoints |
-| `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table |
+| `survey/views.py` | Survey CRUD, bulk shot create, compute + render + OCR endpoints |
+| `survey/ocr.py` | GOT-OCR 2.0 model loading, inference, table parsing, LaTeX stripping |
+| `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table + OCR scan button |
+| `frontend/src/components/SurveyOCRModal.jsx` | Two-step OCR modal: upload image → review/edit/shift parsed shots |
 | `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + walls on surface map |
 | `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar) |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |

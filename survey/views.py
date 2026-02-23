@@ -11,6 +11,7 @@ from .serializers import (
     SurveyShotBulkItemSerializer,
 )
 from .compute import compute_survey
+from .ocr import extract_shots_from_image
 
 
 def _get_cave_or_404(cave_id):
@@ -216,6 +217,46 @@ def survey_compute(request, cave_id, survey_id):
     survey.save(update_fields=['render_data'])
 
     return Response(render_data)
+
+
+@api_view(['POST'])
+def survey_ocr(request, cave_id, survey_id):
+    """Extract survey shots from a photographed/scanned survey sheet using OCR."""
+    survey = _get_survey_or_404(cave_id, survey_id)
+    if not survey:
+        return Response({'error': 'Survey not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    image = request.FILES.get('image')
+    if not image:
+        return Response({'error': 'No image file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Validate file type
+    allowed = {'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'}
+    if image.content_type not in allowed:
+        return Response(
+            {'error': f'Unsupported image type: {image.content_type}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Optional row count hint from user
+    expected_rows = request.data.get('expected_rows')
+    if expected_rows is not None:
+        try:
+            expected_rows = int(expected_rows)
+        except (ValueError, TypeError):
+            expected_rows = None
+
+    try:
+        result = extract_shots_from_image(image, expected_rows=expected_rows)
+        return Response(result)
+    except Exception as e:
+        return Response(
+            {'error': f'OCR processing failed: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(['GET'])
