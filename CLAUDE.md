@@ -725,7 +725,10 @@ This project includes:
   - Edit and Delete buttons in topbar (owner or admin only)
   - Delete confirmation modal with permanent deletion warning
   - Unlisted visibility badge (purple)
-  - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar/symbol legend), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
+  - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar/symbol legend/+−/center buttons), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
+  - Underpass dashed rendering: multi-level surveys detect vertical levels (z-gap > 1.5m), lower-level passages rendered with dashed outlines and dimmed fill, lower station labels hidden, dense survey label thinning (>20 stations)
+  - Continuous passage outline polygons: per-branch smoothed-bearing wall projection (left/right walls as separate polylines), flat caps at dead ends, hybrid approach with per-shot quads for loop closure shots
+  - Survey zoom controls: SurveyCanvas has +/−/Center buttons (bottom-right), SurfaceMap has "Survey" fit-bounds button (bottom-left, next to Center) when overlay is active
   - NSS cave cartography symbols: 62 SVG icons across 10 categories, keyword-matched from shot comments, rendered at shot midpoints on both Canvas and Leaflet overlays, auto-legend showing only used symbols
   - Survey OCR: "Scan Sheet" button opens SurveyOCRModal — photograph handwritten survey form, GOT-OCR 2.0 extracts shots, editable review table with ◀▶ cell shift buttons for fixing column alignment, row count hint dropdown
   - "Generate from Map" button (magenta) in SurveyManager: appears when cave has SLAM map data and no SLAM-generated survey exists; generates traditional survey from SLAM data via API, SLAM badge on generated surveys
@@ -780,13 +783,13 @@ This project includes:
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
 | `survey/slam_survey.py` | SLAM-to-survey conversion: station selection, 2D raycasting for LRUD, lead detection, multi-level merging |
 | `survey/models.py` | CaveSurvey (source: manual/slam), SurveyStation, SurveyShot models |
-| `survey/compute.py` | Polar→cartesian, BFS traversal, loop closure, LRUD→walls, shot_annotations |
+| `survey/compute.py` | Polar→cartesian, BFS traversal, loop closure, LRUD→walls, shot_annotations, vertical level detection, passage outline polygons |
 | `survey/views.py` | Survey CRUD, bulk shot create, compute + render + OCR + SLAM-to-survey endpoints |
 | `survey/ocr.py` | GOT-OCR 2.0 model loading, inference, table parsing, LaTeX stripping |
 | `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table + OCR scan button |
 | `frontend/src/components/SurveyOCRModal.jsx` | Two-step OCR modal: upload image → review/edit/shift parsed shots |
-| `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + walls + symbol icons on surface map |
-| `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar, symbol legend) |
+| `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + passage outline polygons + dashed underpass + symbol icons on surface map |
+| `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar, symbol legend, +−/center controls, dashed underpass, passage outline polygons) |
 | `frontend/src/utils/surveySymbols.js` | 62 NSS cave cartography SVG symbols, keyword matching, colorize/dataURL helpers |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets |

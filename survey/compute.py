@@ -222,7 +222,7 @@ def apply_loop_closure(shots, positions, declination=0.0, unit='feet'):
     return positions, loops
 
 
-def compute_passage_widths(shots, positions, declination=0.0, unit='feet', branch_info=None):
+def compute_passage_widths(shots, positions, declination=0.0, unit='feet', branch_info=None, level_info=None):
     """Compute passage width at each station for stroke-based rendering.
 
     Instead of computing polygon geometry, returns per-shot stroke data:
@@ -271,15 +271,189 @@ def compute_passage_widths(shots, positions, declination=0.0, unit='feet', branc
         fw = station_width.get(fn, 0)
         tw = station_width.get(tn, 0)
 
-        strokes.append({
+        stroke = {
             'from': [round(fx, 4), round(fy, 4)],
             'to': [round(tx, 4), round(ty, 4)],
             'from_width': round(fw, 4),
             'to_width': round(tw, 4),
             'branch': station_branch_map.get(fn, 0),
-        })
+        }
+        if level_info:
+            stroke['is_lower'] = level_info.get(fn, False)
+        strokes.append(stroke)
 
     return strokes
+
+
+def compute_passage_outlines(shots, positions, unit='feet', branch_info=None, level_info=None):
+    """Compute passage outline polygons using a hybrid strategy.
+
+    1. Per-branch continuous polygons: walks each branch in station order,
+       computes smoothed wall points at each station, creates a connected
+       polygon with continuous left/right wall polylines. This gives smooth
+       corners at bends.
+
+    2. Per-shot quads for loop closure shots: loop closures aren't part of
+       any branch, so they get individual quadrilaterals.
+
+    Returns list of dicts:
+        {polygon: [[x,y], ...], left: [[x,y], ...], right: [[x,y], ...],
+         caps: [[from,to], ...], branch: int, is_lower: bool}
+    """
+    if not shots or not positions or not branch_info:
+        return []
+
+    unit_scale = FEET_TO_METERS if unit == 'feet' else 1.0
+
+    # Build per-station left/right lookup
+    station_lr = {}
+    for shot in shots:
+        fn = shot['from_station']
+        if fn not in station_lr:
+            station_lr[fn] = {
+                'left': (shot.get('left') or 0) * unit_scale,
+                'right': (shot.get('right') or 0) * unit_scale,
+            }
+    for shot in shots:
+        tn = shot['to_station']
+        if tn not in station_lr:
+            fn = shot['from_station']
+            if fn in station_lr:
+                station_lr[tn] = dict(station_lr[fn])
+
+    # Count shots per station to detect terminals
+    station_shot_count = defaultdict(int)
+    for shot in shots:
+        fn, tn = shot['from_station'], shot['to_station']
+        if fn in positions and tn in positions:
+            station_shot_count[fn] += 1
+            station_shot_count[tn] += 1
+
+    outlines = []
+
+    # --- Strategy 1: Per-branch continuous polygons ---
+    for branch in branch_info.get('branches', []):
+        stations = branch['stations']
+        valid = [s for s in stations if s in positions]
+        if len(valid) < 2:
+            continue
+
+        # Split into level-consistent segments (for dashed underpass)
+        if level_info:
+            segments = []
+            seg_stations = [valid[0]]
+            seg_lower = level_info.get(valid[0], False)
+            for s in valid[1:]:
+                s_lower = level_info.get(s, False)
+                if s_lower != seg_lower:
+                    segments.append((seg_stations, seg_lower))
+                    seg_stations = [seg_stations[-1], s]
+                    seg_lower = s_lower
+                else:
+                    seg_stations.append(s)
+            segments.append((seg_stations, seg_lower))
+        else:
+            segments = [(valid, False)]
+
+        for seg_stations, seg_lower in segments:
+            if len(seg_stations) < 2:
+                continue
+
+            left_pts = []
+            right_pts = []
+
+            for i, name in enumerate(seg_stations):
+                x, y, _z = positions[name]
+
+                bearings = []
+                if i > 0:
+                    px, py, _ = positions[seg_stations[i - 1]]
+                    dx, dy = x - px, y - py
+                    if dx * dx + dy * dy > 1e-6:
+                        bearings.append(math.atan2(dx, dy))
+                if i < len(seg_stations) - 1:
+                    nx, ny, _ = positions[seg_stations[i + 1]]
+                    dx, dy = nx - x, ny - y
+                    if dx * dx + dy * dy > 1e-6:
+                        bearings.append(math.atan2(dx, dy))
+
+                if not bearings:
+                    continue
+
+                if len(bearings) == 2:
+                    az = math.atan2(
+                        sum(math.sin(b) for b in bearings),
+                        sum(math.cos(b) for b in bearings),
+                    )
+                else:
+                    az = bearings[0]
+
+                lx, ly = -math.cos(az), math.sin(az)
+                lr = station_lr.get(name, {'left': 0, 'right': 0})
+                left_pts.append([round(x + lx * lr['left'], 4), round(y + ly * lr['left'], 4)])
+                right_pts.append([round(x - lx * lr['right'], 4), round(y - ly * lr['right'], 4)])
+
+            if len(left_pts) < 2:
+                continue
+
+            polygon = left_pts + list(reversed(right_pts))
+
+            outline = {
+                'polygon': polygon,
+                'left': left_pts,
+                'right': right_pts,
+                'branch': branch['id'],
+                'is_lower': seg_lower,
+            }
+
+            # Flat caps at terminal (dead-end) endpoints
+            caps = []
+            first_name = seg_stations[0]
+            last_name = seg_stations[-1]
+            if station_shot_count.get(first_name, 0) == 1:
+                caps.append([left_pts[0], right_pts[0]])
+            if station_shot_count.get(last_name, 0) == 1:
+                caps.append([left_pts[-1], right_pts[-1]])
+            if caps:
+                outline['caps'] = caps
+
+            outlines.append(outline)
+
+    # --- Strategy 2: Individual quads for loop closure shots ---
+    station_branch_map = branch_info.get('station_branches', {})
+    for lc in branch_info.get('loop_closures', []):
+        fn, tn = lc['from'], lc['to']
+        if fn not in positions or tn not in positions:
+            continue
+
+        fx, fy, _fz = positions[fn]
+        tx, ty, _tz = positions[tn]
+        dx, dy = tx - fx, ty - fy
+        if dx * dx + dy * dy < 1e-6:
+            continue
+
+        az = math.atan2(dx, dy)
+        lx, ly = -math.cos(az), math.sin(az)
+
+        fn_lr = station_lr.get(fn, {'left': 0, 'right': 0})
+        tn_lr = station_lr.get(tn, {'left': 0, 'right': 0})
+
+        fl = [round(fx + lx * fn_lr['left'], 4), round(fy + ly * fn_lr['left'], 4)]
+        fr = [round(fx - lx * fn_lr['right'], 4), round(fy - ly * fn_lr['right'], 4)]
+        tl = [round(tx + lx * tn_lr['left'], 4), round(ty + ly * tn_lr['left'], 4)]
+        tr = [round(tx - lx * tn_lr['right'], 4), round(ty - ly * tn_lr['right'], 4)]
+
+        is_lower = level_info.get(fn, False) if level_info else False
+
+        outlines.append({
+            'polygon': [fl, tl, tr, fr],
+            'left': [fl, tl],
+            'right': [fr, tr],
+            'branch': station_branch_map.get(fn, 0),
+            'is_lower': is_lower,
+        })
+
+    return outlines
 
 
 def _extract_prefix(name):
@@ -415,6 +589,40 @@ def detect_branches(shots, positions):
     }
 
 
+def detect_vertical_levels(positions, min_gap=1.5):
+    """Detect vertical level separation from station z values.
+
+    Finds the largest gap in z values across all stations. If the gap exceeds
+    min_gap (meters), stations below the gap are classified as 'lower' for
+    dashed underpass rendering (standard NSS convention).
+
+    Returns:
+        dict mapping station_name -> bool (True if lower level), or empty dict
+        if no significant vertical separation exists.
+    """
+    if not positions or len(positions) < 2:
+        return {}
+
+    z_values = [(name, pos[2]) for name, pos in positions.items()]
+    z_values.sort(key=lambda x: x[1])
+
+    # Find largest gap in sorted z values
+    max_gap = 0
+    max_gap_idx = -1
+    for i in range(1, len(z_values)):
+        gap = z_values[i][1] - z_values[i - 1][1]
+        if gap > max_gap:
+            max_gap = gap
+            max_gap_idx = i
+
+    if max_gap < min_gap:
+        return {}  # No significant vertical separation
+
+    # Stations below the gap are "lower"
+    lower_set = {z_values[j][0] for j in range(max_gap_idx)}
+    return {name: name in lower_set for name, _ in z_values}
+
+
 def suggest_branch_prefix(station_names):
     """Suggest next unused letter prefix for a new branch station name."""
     used = set()
@@ -482,6 +690,7 @@ def compute_survey(survey_obj):
             'loop_closures': [],
             'next_branch_prefix': 'A',
             'shot_annotations': [],
+            'passage_outlines': [],
         }
 
     decl = survey_obj.declination
@@ -504,10 +713,16 @@ def compute_survey(survey_obj):
     station_branch_map = branch_info['station_branches']
     junction_stations = set(branch_info['junction_stations'])
 
-    # Compute passage width strokes for rendering
-    passage_strokes = compute_passage_widths(shots, positions, decl, unit, branch_info)
+    # Detect vertical levels for underpass rendering (dashed lower level)
+    level_info = detect_vertical_levels(positions)
 
-    # Build centerline segments (with branch_id as third element)
+    # Compute passage width strokes for rendering (legacy per-shot trapezoids)
+    passage_strokes = compute_passage_widths(shots, positions, decl, unit, branch_info, level_info)
+
+    # Compute continuous passage outline polygons (preferred rendering)
+    passage_outlines = compute_passage_outlines(shots, positions, unit, branch_info, level_info)
+
+    # Build centerline segments (with branch_id as third element, is_lower as fourth)
     centerline = []
     for shot in shots:
         fn = shot['from_station']
@@ -516,7 +731,8 @@ def compute_survey(survey_obj):
             fx, fy, _ = positions[fn]
             tx, ty, _ = positions[tn]
             branch_id = station_branch_map.get(fn, 0)
-            centerline.append([[round(fx, 4), round(fy, 4)], [round(tx, 4), round(ty, 4)], branch_id])
+            lower = level_info.get(fn, False) if level_info else False
+            centerline.append([[round(fx, 4), round(fy, 4)], [round(tx, 4), round(ty, 4)], branch_id, lower])
 
     # Build shot annotations (midpoints + comments for symbol rendering)
     shot_annotations = []
@@ -534,27 +750,36 @@ def compute_survey(survey_obj):
                 'comment': comment,
             })
 
-    # Build station list (with branch and junction info)
+    # Build station list (with branch, junction, and level info)
     station_list = []
     for name, (x, y, z) in positions.items():
-        station_list.append({
+        st = {
             'name': name,
             'x': round(x, 4),
             'y': round(y, 4),
             'z': round(z, 4),
             'branch': station_branch_map.get(name, 0),
             'is_junction': name in junction_stations,
-        })
+        }
+        if level_info:
+            st['is_lower'] = level_info.get(name, False)
+        station_list.append(st)
 
-    # Compute bounds (expand by max passage width at each station)
+    # Compute bounds from passage outline polygons (or strokes as fallback)
     all_x = [s['x'] for s in station_list]
     all_y = [s['y'] for s in station_list]
-    for stroke in passage_strokes:
-        max_w = max(stroke['from_width'], stroke['to_width']) / 2
-        all_x.extend([stroke['from'][0] - max_w, stroke['from'][0] + max_w,
-                       stroke['to'][0] - max_w, stroke['to'][0] + max_w])
-        all_y.extend([stroke['from'][1] - max_w, stroke['from'][1] + max_w,
-                       stroke['to'][1] - max_w, stroke['to'][1] + max_w])
+    if passage_outlines:
+        for outline in passage_outlines:
+            for pt in outline['polygon']:
+                all_x.append(pt[0])
+                all_y.append(pt[1])
+    else:
+        for stroke in passage_strokes:
+            max_w = max(stroke['from_width'], stroke['to_width']) / 2
+            all_x.extend([stroke['from'][0] - max_w, stroke['from'][0] + max_w,
+                           stroke['to'][0] - max_w, stroke['to'][0] + max_w])
+            all_y.extend([stroke['from'][1] - max_w, stroke['from'][1] + max_w,
+                           stroke['to'][1] - max_w, stroke['to'][1] + max_w])
 
     bounds = [min(all_x), min(all_y), max(all_x), max(all_y)] if all_x else [0, 0, 0, 0]
 
@@ -586,4 +811,6 @@ def compute_survey(survey_obj):
         'loop_closures': branch_info['loop_closures'],
         'next_branch_prefix': suggest_branch_prefix(list(positions.keys())),
         'shot_annotations': shot_annotations,
+        'has_vertical_levels': bool(level_info),
+        'passage_outlines': passage_outlines,
     }

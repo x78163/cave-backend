@@ -106,107 +106,147 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
       ctx.stroke()
     }
 
-    // Passage walls — offscreen canvas with thick strokes, composited at low opacity.
-    // Each shot is drawn as a variable-width stroke (trapezoid + round caps).
-    // Painting opaquely on an offscreen canvas then compositing once ensures
-    // overlaps at junctions get uniform shading (no alpha stacking).
-    const strokes = renderData.passage_strokes || []
-    if (strokes.length > 0) {
-      const offscreen = document.createElement('canvas')
-      offscreen.width = canvas.width
-      offscreen.height = canvas.height
-      const oCtx = offscreen.getContext('2d')
-      oCtx.fillStyle = '#ffa726'
-      oCtx.strokeStyle = '#ffa726'
+    // Passage walls — per-shot quads (trapezoids without round caps).
+    // Each shot produces a quad from LRUD projected perpendicular to the shot bearing.
+    // Offscreen canvas compositing ensures uniform fill at overlapping junctions.
+    // Falls back to legacy passage_strokes if passage_outlines is absent.
+    const outlines = renderData.passage_outlines || []
+    const hasLevels = renderData.has_vertical_levels
 
-      for (const s of strokes) {
-        const [x1, y1] = toScreen(s.from[0], s.from[1])
-        const [x2, y2] = toScreen(s.to[0], s.to[1])
-        const w1 = s.from_width * scale  // passage width in pixels
-        const w2 = s.to_width * scale
+    if (outlines.length > 0) {
+      const upperOutlines = hasLevels ? outlines.filter(o => !o.is_lower) : outlines
+      const lowerOutlines = hasLevels ? outlines.filter(o => o.is_lower) : []
 
-        if (w1 < 0.5 && w2 < 0.5) continue
+      const drawQuadFills = (list, alpha) => {
+        const offscreen = document.createElement('canvas')
+        offscreen.width = canvas.width
+        offscreen.height = canvas.height
+        const oCtx = offscreen.getContext('2d')
+        oCtx.fillStyle = '#ffa726'
 
-        // Direction vector
-        const dx = x2 - x1
-        const dy = y2 - y1
-        const len = Math.sqrt(dx * dx + dy * dy)
-        if (len < 0.1) continue
-
-        // Perpendicular unit vector
-        const px = -dy / len
-        const py = dx / len
-
-        // Trapezoid: 4 corners (from-left, from-right, to-right, to-left)
-        const hw1 = w1 / 2
-        const hw2 = w2 / 2
-        oCtx.beginPath()
-        oCtx.moveTo(x1 + px * hw1, y1 + py * hw1)
-        oCtx.lineTo(x2 + px * hw2, y2 + py * hw2)
-        oCtx.lineTo(x2 - px * hw2, y2 - py * hw2)
-        oCtx.lineTo(x1 - px * hw1, y1 - py * hw1)
-        oCtx.closePath()
-        oCtx.fill()
-
-        // Round caps at endpoints
-        if (hw1 > 1) {
+        for (const o of list) {
+          const pts = o.polygon.map(p => toScreen(p[0], p[1]))
+          if (pts.length < 3) continue
           oCtx.beginPath()
-          oCtx.arc(x1, y1, hw1, 0, Math.PI * 2)
+          oCtx.moveTo(pts[0][0], pts[0][1])
+          for (let i = 1; i < pts.length; i++) oCtx.lineTo(pts[i][0], pts[i][1])
+          oCtx.closePath()
           oCtx.fill()
         }
-        if (hw2 > 1) {
-          oCtx.beginPath()
-          oCtx.arc(x2, y2, hw2, 0, Math.PI * 2)
-          oCtx.fill()
-        }
+
+        ctx.save()
+        ctx.globalAlpha = alpha
+        ctx.drawImage(offscreen, 0, 0)
+        ctx.restore()
       }
 
-      // Composite offscreen onto main canvas at low opacity
-      ctx.save()
-      ctx.globalAlpha = 0.18
-      ctx.drawImage(offscreen, 0, 0)
-      ctx.restore()
+      if (lowerOutlines.length > 0) drawQuadFills(lowerOutlines, 0.10)
+      drawQuadFills(upperOutlines, 0.18)
 
-      // Draw passage outlines on the main canvas (thin amber lines along edges)
-      ctx.strokeStyle = 'rgba(255,167,38,0.5)'
-      ctx.lineWidth = 1
-      for (const s of strokes) {
-        const [x1, y1] = toScreen(s.from[0], s.from[1])
-        const [x2, y2] = toScreen(s.to[0], s.to[1])
-        const w1 = s.from_width * scale
-        const w2 = s.to_width * scale
-        if (w1 < 0.5 && w2 < 0.5) continue
+      // Wall outlines — per-shot left/right wall segments + caps at dead ends
+      const drawWallLines = (list, dashed) => {
+        ctx.strokeStyle = 'rgba(255,167,38,0.5)'
+        ctx.lineWidth = 1
+        ctx.setLineDash(dashed ? [8, 6] : [])
+        for (const o of list) {
+          // Left wall segment
+          const lp = (o.left || []).map(p => toScreen(p[0], p[1]))
+          if (lp.length >= 2) {
+            ctx.beginPath()
+            ctx.moveTo(lp[0][0], lp[0][1])
+            ctx.lineTo(lp[1][0], lp[1][1])
+            ctx.stroke()
+          }
+          // Right wall segment
+          const rp = (o.right || []).map(p => toScreen(p[0], p[1]))
+          if (rp.length >= 2) {
+            ctx.beginPath()
+            ctx.moveTo(rp[0][0], rp[0][1])
+            ctx.lineTo(rp[1][0], rp[1][1])
+            ctx.stroke()
+          }
+          // Flat caps at terminal (dead-end) stations
+          if (o.caps) {
+            for (const cap of o.caps) {
+              const [c0, c1] = cap.map(p => toScreen(p[0], p[1]))
+              ctx.beginPath()
+              ctx.moveTo(c0[0], c0[1])
+              ctx.lineTo(c1[0], c1[1])
+              ctx.stroke()
+            }
+          }
+        }
+        ctx.setLineDash([])
+      }
 
-        const dx = x2 - x1
-        const dy = y2 - y1
-        const len = Math.sqrt(dx * dx + dy * dy)
-        if (len < 0.1) continue
+      if (lowerOutlines.length > 0) drawWallLines(lowerOutlines, true)
+      drawWallLines(upperOutlines, false)
+    } else {
+      // Legacy fallback: per-shot trapezoid strokes
+      const strokes = renderData.passage_strokes || []
+      if (strokes.length > 0) {
+        const offscreen = document.createElement('canvas')
+        offscreen.width = canvas.width
+        offscreen.height = canvas.height
+        const oCtx = offscreen.getContext('2d')
+        oCtx.fillStyle = '#ffa726'
 
-        const px = -dy / len
-        const py = dx / len
-        const hw1 = w1 / 2
-        const hw2 = w2 / 2
+        for (const s of strokes) {
+          const [x1, y1] = toScreen(s.from[0], s.from[1])
+          const [x2, y2] = toScreen(s.to[0], s.to[1])
+          const w1 = s.from_width * scale
+          const w2 = s.to_width * scale
+          if (w1 < 0.5 && w2 < 0.5) continue
+          const dx = x2 - x1, dy = y2 - y1
+          const len = Math.sqrt(dx * dx + dy * dy)
+          if (len < 0.1) continue
+          const px = -dy / len, py = dx / len
+          const hw1 = w1 / 2, hw2 = w2 / 2
+          oCtx.beginPath()
+          oCtx.moveTo(x1 + px * hw1, y1 + py * hw1)
+          oCtx.lineTo(x2 + px * hw2, y2 + py * hw2)
+          oCtx.lineTo(x2 - px * hw2, y2 - py * hw2)
+          oCtx.lineTo(x1 - px * hw1, y1 - py * hw1)
+          oCtx.closePath()
+          oCtx.fill()
+        }
+        ctx.save()
+        ctx.globalAlpha = 0.18
+        ctx.drawImage(offscreen, 0, 0)
+        ctx.restore()
 
-        // Left wall edge
-        ctx.beginPath()
-        ctx.moveTo(x1 + px * hw1, y1 + py * hw1)
-        ctx.lineTo(x2 + px * hw2, y2 + py * hw2)
-        ctx.stroke()
-
-        // Right wall edge
-        ctx.beginPath()
-        ctx.moveTo(x1 - px * hw1, y1 - py * hw1)
-        ctx.lineTo(x2 - px * hw2, y2 - py * hw2)
-        ctx.stroke()
+        ctx.strokeStyle = 'rgba(255,167,38,0.5)'
+        ctx.lineWidth = 1
+        for (const s of strokes) {
+          const [x1, y1] = toScreen(s.from[0], s.from[1])
+          const [x2, y2] = toScreen(s.to[0], s.to[1])
+          const w1 = s.from_width * scale, w2 = s.to_width * scale
+          if (w1 < 0.5 && w2 < 0.5) continue
+          const dx = x2 - x1, dy = y2 - y1
+          const len = Math.sqrt(dx * dx + dy * dy)
+          if (len < 0.1) continue
+          const px = -dy / len, py = dx / len
+          const hw1 = w1 / 2, hw2 = w2 / 2
+          ctx.beginPath()
+          ctx.moveTo(x1 + px * hw1, y1 + py * hw1)
+          ctx.lineTo(x2 + px * hw2, y2 + py * hw2)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.moveTo(x1 - px * hw1, y1 - py * hw1)
+          ctx.lineTo(x2 - px * hw2, y2 - py * hw2)
+          ctx.stroke()
+        }
       }
     }
 
-    // Centerline segments (color-coded by branch)
+    // Centerline segments (color-coded by branch, dashed for lower level)
     if (renderData.centerline?.length > 0) {
       ctx.lineWidth = 2
       for (const seg of renderData.centerline) {
         const branchId = seg[2] ?? 0
+        const isLower = seg[3] ?? false
         ctx.strokeStyle = BRANCH_COLORS[branchId % BRANCH_COLORS.length]
+        ctx.setLineDash(isLower ? [8, 6] : [])
         const [x1, y1] = toScreen(seg[0][0], seg[0][1])
         const [x2, y2] = toScreen(seg[1][0], seg[1][1])
         ctx.beginPath()
@@ -214,33 +254,59 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
         ctx.lineTo(x2, y2)
         ctx.stroke()
       }
+      ctx.setLineDash([])
     }
 
     // Station dots + labels (color-coded by branch, junction markers)
+    // For multi-level caves, lower-level stations are dimmed (no labels, smaller dots)
+    // For dense surveys (>20 stations), thin out labels to reduce clutter
     if (renderData.stations?.length > 0) {
+      const stationCount = renderData.stations.length
+      const dense = stationCount > 20
+      // For dense surveys, only label every Nth station plus first/last/junctions
+      const labelInterval = dense ? Math.max(3, Math.floor(stationCount / 12)) : 1
+
       ctx.font = `${Math.max(9, Math.min(12, scale * 3))}px monospace`
       ctx.textAlign = 'left'
       ctx.textBaseline = 'bottom'
-      for (const st of renderData.stations) {
+      for (let idx = 0; idx < stationCount; idx++) {
+        const st = renderData.stations[idx]
+        const isLower = hasLevels && st.is_lower
         const [sx, sy] = toScreen(st.x, st.y)
         const color = BRANCH_COLORS[(st.branch ?? 0) % BRANCH_COLORS.length]
 
         // Junction ring (larger outline for branching stations)
         if (st.is_junction) {
           ctx.strokeStyle = color
+          ctx.globalAlpha = isLower ? 0.3 : 1
           ctx.lineWidth = 2
           ctx.beginPath()
           ctx.arc(sx, sy, 6, 0, Math.PI * 2)
           ctx.stroke()
+          ctx.globalAlpha = 1
         }
 
-        // Filled dot
-        ctx.fillStyle = color
-        ctx.beginPath()
-        ctx.arc(sx, sy, 3, 0, Math.PI * 2)
-        ctx.fill()
+        // Dot — lower level gets smaller hollow circles
+        if (isLower) {
+          ctx.strokeStyle = color
+          ctx.globalAlpha = 0.35
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.arc(sx, sy, 2, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.globalAlpha = 1
+        } else {
+          ctx.fillStyle = color
+          ctx.beginPath()
+          ctx.arc(sx, sy, 3, 0, Math.PI * 2)
+          ctx.fill()
+        }
 
-        // Label
+        // Label — skip for lower level; thin out for dense surveys
+        if (isLower) continue
+        const isEndpoint = idx === 0 || idx === stationCount - 1
+        if (dense && !isEndpoint && !st.is_junction && idx % labelInterval !== 0) continue
+        ctx.fillStyle = color
         ctx.fillText(st.name, sx + 5, sy - 3)
       }
     }
@@ -313,8 +379,28 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
         const color = BRANCH_COLORS[branch.id % BRANCH_COLORS.length]
         ctx.fillStyle = color
         ctx.fillRect(10, legendY, 10, 10)
+
+        // Add dashed indicator for lower-level branches
+        const isLower = hasLevels && branch.stations?.some(s => {
+          const st = renderData.stations?.find(st => st.name === s)
+          return st?.is_lower
+        })
         ctx.fillStyle = '#e0e0f0'
-        ctx.fillText(branch.name, 25, legendY + 9)
+        const label = isLower ? `${branch.name} (lower)` : branch.name
+        ctx.fillText(label, 25, legendY + 9)
+
+        // Draw dashed line through the legend swatch for lower levels
+        if (isLower) {
+          ctx.strokeStyle = color
+          ctx.lineWidth = 1
+          ctx.setLineDash([3, 2])
+          ctx.beginPath()
+          ctx.moveTo(10, legendY + 5)
+          ctx.lineTo(20, legendY + 5)
+          ctx.stroke()
+          ctx.setLineDash([])
+        }
+
         legendY += 16
       }
     }
@@ -413,13 +499,53 @@ export default function SurveyCanvas({ renderData, height = 400 }) {
         onWheel={handleWheel}
       />
       {renderData?.stations?.length > 0 && (
-        <button
-          onClick={fitToView}
-          className="absolute top-2 left-2 cyber-btn cyber-btn-ghost px-2 py-1 text-[10px]"
-          title="Fit to view"
-        >
-          Fit
-        </button>
+        <div className="absolute bottom-3 right-3 z-10 flex gap-1.5">
+          <button
+            onClick={() => {
+              const cx = canvasSize.w / 2
+              const cy = canvasSize.h / 2
+              const zf = 1.3
+              setTransform(prev => ({
+                scale: prev.scale * zf,
+                x: cx - (cx - prev.x) * zf,
+                y: cy - (cy - prev.y) * zf,
+              }))
+            }}
+            className="w-8 h-8 rounded-full text-sm font-bold
+              bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+              backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            onClick={() => {
+              const cx = canvasSize.w / 2
+              const cy = canvasSize.h / 2
+              const zf = 1 / 1.3
+              setTransform(prev => ({
+                scale: prev.scale * zf,
+                x: cx - (cx - prev.x) * zf,
+                y: cy - (cy - prev.y) * zf,
+              }))
+            }}
+            className="w-8 h-8 rounded-full text-sm font-bold
+              bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+              backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <button
+            onClick={fitToView}
+            className="px-3 h-8 rounded-full text-xs font-medium
+              bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+              backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
+            title="Fit survey to view"
+          >
+            ⌖ Center
+          </button>
+        </div>
       )}
     </div>
   )

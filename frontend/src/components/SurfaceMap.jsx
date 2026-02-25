@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
-import CaveMapOverlay from './CaveMapOverlay'
+import CaveMapOverlay, { slamToLatLng } from './CaveMapOverlay'
 import HandDrawnMapOverlay from './HandDrawnMapOverlay'
 import SurveyOverlay from './SurveyOverlay'
 
@@ -365,19 +365,42 @@ export default function SurfaceMap({
           </svg>
         </div>
         {showCenterButton && (
-          <button
-            onClick={() => {
-              if (mapRef.current) {
-                mapRef.current.setView(center, mapRef.current.getZoom(), { animate: true })
-              }
-            }}
-            className="absolute bottom-3 left-3 z-[1000] px-3 py-1.5 rounded-full text-xs font-medium
-              bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
-              backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
-            title="Center on cave"
-          >
-            ⌖ Center
-          </button>
+          <div className="absolute bottom-3 left-3 z-[1000] flex gap-2">
+            <button
+              onClick={() => {
+                if (mapRef.current) {
+                  mapRef.current.setView(center, mapRef.current.getZoom(), { animate: true })
+                }
+              }}
+              className="px-3 py-1.5 rounded-full text-xs font-medium
+                bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+                backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
+              title="Center on cave"
+            >
+              ⌖ Center
+            </button>
+            {showSurveyOverlay && surveyRenderData?.bounds && (
+              <button
+                onClick={() => {
+                  if (!mapRef.current || !surveyRenderData?.bounds) return
+                  const toLL = (x, y) => slamToLatLng(x, y, anchor?.lat, anchor?.lon, caveHeading || 0)
+                  const [minX, minY, maxX, maxY] = surveyRenderData.bounds
+                  // Convert all four corners since rotation may skew the bounds
+                  const corners = [
+                    toLL(minX, minY), toLL(maxX, minY),
+                    toLL(minX, maxY), toLL(maxX, maxY),
+                  ]
+                  mapRef.current.fitBounds(corners, { padding: [40, 40], animate: true })
+                }}
+                className="px-3 py-1.5 rounded-full text-xs font-medium
+                  bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+                  backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
+                title="Zoom to fit survey"
+              >
+                ⊞ Survey
+              </button>
+            )}
+          </div>
         )}
       </div>
       <CaveMapOverlay

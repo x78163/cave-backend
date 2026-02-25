@@ -23,76 +23,94 @@ export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, h
 
     const toLL = (x, y) => slamToLatLng(x, y, anchorLat, anchorLon, heading || 0)
 
-    // Draw passage walls — thick polylines per shot using passage_strokes data.
-    // Each shot gets a polyline with weight = average passage width (meters → approx pixels).
-    // Round lineCap ensures smooth overlap at junctions.
-    const strokes = renderData.passage_strokes || []
-    for (const s of strokes) {
-      const fromLL = toLL(s.from[0], s.from[1])
-      const toLL_ = toLL(s.to[0], s.to[1])
-      const avgWidth = (s.from_width + s.to_width) / 2
-      if (avgWidth < 0.1) continue
+    // Passage walls — continuous polygon outlines per branch.
+    // Falls back to per-shot thick polylines for legacy render_data.
+    const outlines = renderData.passage_outlines || []
+    const hasLevels = renderData.has_vertical_levels
 
-      // Convert meters to approximate pixels at current zoom
-      // At the equator, 1 degree ≈ 111320m. Use map's meters-per-pixel.
-      const metersPerPixel = 40075016.686 * Math.cos(anchorLat * Math.PI / 180) /
-        Math.pow(2, map.getZoom() + 8)
-      const weightPx = Math.max(2, avgWidth / metersPerPixel)
+    if (outlines.length > 0) {
+      for (const o of outlines) {
+        const isLower = hasLevels && o.is_lower
+        const wallStyle = {
+          color: '#ffa726', weight: 1, opacity: 0.5,
+          dashArray: isLower ? '8 6' : null,
+        }
+        // Fill quad (no stroke — walls drawn separately)
+        const latlngs = o.polygon.map(p => toLL(p[0], p[1]))
+        if (latlngs.length < 3) continue
+        L.polygon(latlngs, {
+          color: 'transparent', weight: 0,
+          fillColor: '#ffa726',
+          fillOpacity: isLower ? 0.10 : 0.18,
+        }).addTo(group)
 
-      L.polyline([fromLL, toLL_], {
-        color: '#ffa726',
-        weight: weightPx,
-        opacity: 0.18,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(group)
+        // Left wall segment
+        const leftLL = (o.left || []).map(p => toLL(p[0], p[1]))
+        if (leftLL.length >= 2) L.polyline(leftLL, wallStyle).addTo(group)
+        // Right wall segment
+        const rightLL = (o.right || []).map(p => toLL(p[0], p[1]))
+        if (rightLL.length >= 2) L.polyline(rightLL, wallStyle).addTo(group)
+        // Flat caps at dead ends
+        if (o.caps) {
+          for (const cap of o.caps) {
+            const capLL = cap.map(p => toLL(p[0], p[1]))
+            L.polyline(capLL, wallStyle).addTo(group)
+          }
+        }
+      }
+    } else {
+      // Legacy fallback: thick polylines per shot
+      const strokes = renderData.passage_strokes || []
+      for (const s of strokes) {
+        const fromLL = toLL(s.from[0], s.from[1])
+        const toLL_ = toLL(s.to[0], s.to[1])
+        const avgWidth = (s.from_width + s.to_width) / 2
+        if (avgWidth < 0.1) continue
+        const metersPerPixel = 40075016.686 * Math.cos(anchorLat * Math.PI / 180) /
+          Math.pow(2, map.getZoom() + 8)
+        const weightPx = Math.max(2, avgWidth / metersPerPixel)
+        L.polyline([fromLL, toLL_], {
+          color: '#ffa726',
+          weight: weightPx + 2,
+          opacity: 0.4,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }).addTo(group)
+      }
     }
 
-    // Passage outlines (thin lines along edges)
-    for (const s of strokes) {
-      const fromLL = toLL(s.from[0], s.from[1])
-      const toLL_ = toLL(s.to[0], s.to[1])
-      const avgWidth = (s.from_width + s.to_width) / 2
-      if (avgWidth < 0.1) continue
-
-      const metersPerPixel = 40075016.686 * Math.cos(anchorLat * Math.PI / 180) /
-        Math.pow(2, map.getZoom() + 8)
-      const weightPx = Math.max(2, avgWidth / metersPerPixel)
-
-      // Left and right offset lines would be complex — just draw
-      // the outline as a slightly wider stroke behind the fill
-      L.polyline([fromLL, toLL_], {
-        color: '#ffa726',
-        weight: weightPx + 2,
-        opacity: 0.4,
-        lineCap: 'round',
-        lineJoin: 'round',
-        fill: false,
-      }).addTo(group)
-    }
-
-    // Draw centerline segments (seg[0] and seg[1] are coordinates, seg[2] is branch_id)
+    // Draw centerline segments (seg[0]/seg[1] = coords, seg[2] = branch_id, seg[3] = is_lower)
     if (renderData.centerline?.length > 0) {
       for (const seg of renderData.centerline) {
+        const isLower = seg[3] ?? false
         const ll = [toLL(seg[0][0], seg[0][1]), toLL(seg[1][0], seg[1][1])]
         L.polyline(ll, {
           color: 'var(--cyber-cyan, #00ffff)',
           weight: 2,
           opacity: 0.9,
+          dashArray: isLower ? '8 6' : null,
         }).addTo(group)
       }
     }
 
     // Draw station markers + labels
+    // Lower-level stations are dimmed; dense surveys thin out labels
     if (renderData.stations?.length > 0) {
-      for (const station of renderData.stations) {
+      const stationCount = renderData.stations.length
+      const dense = stationCount > 20
+      const labelInterval = dense ? Math.max(3, Math.floor(stationCount / 12)) : 1
+
+      renderData.stations.forEach((station, idx) => {
+        const isLower = hasLevels && station.is_lower
         const ll = toLL(station.x, station.y)
+
         L.circleMarker(ll, {
-          radius: 4,
+          radius: isLower ? 2 : 4,
           color: '#00ffff',
-          fillColor: '#00ffff',
-          fillOpacity: 0.8,
+          fillColor: isLower ? 'transparent' : '#00ffff',
+          fillOpacity: isLower ? 0 : 0.8,
           weight: 1,
+          opacity: isLower ? 0.35 : 1,
         })
           .bindTooltip(station.name, {
             permanent: false,
@@ -101,7 +119,7 @@ export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, h
             className: 'survey-station-tooltip',
           })
           .addTo(group)
-      }
+      })
     }
 
     // Symbol icons at shot midpoints (matched from comments)
