@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.markercluster'
@@ -6,6 +6,10 @@ import 'leaflet.markercluster/dist/MarkerCluster.css'
 import CaveMapOverlay, { slamToLatLng } from './CaveMapOverlay'
 import HandDrawnMapOverlay from './HandDrawnMapOverlay'
 import SurveyOverlay from './SurveyOverlay'
+import {
+  BASE_LAYERS, getStoredLayerId, storeLayerId, getLayerById,
+  getStoredHillshade, storeHillshade, create3DEPHillshadeLayer, HILLSHADE_OVERLAY,
+} from '../utils/mapLayers'
 
 // Cyan marker SVG for cave locations
 const caveIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40">
@@ -71,6 +75,13 @@ export default function SurfaceMap({
   showSurveyOverlay = false,
 }) {
   const [surveyDropdownOpen, setSurveyDropdownOpen] = useState(false)
+  const [activeLayerId, setActiveLayerId] = useState(getStoredLayerId)
+  const [layerMenuOpen, setLayerMenuOpen] = useState(false)
+  const [hillshadeOn, setHillshadeOn] = useState(getStoredHillshade)
+  const activeLayerRef = useRef(getStoredLayerId())
+  const tileLayerRef = useRef(null)
+  const hillshadeLayerRef = useRef(null)
+  const hillshadeOnRef = useRef(getStoredHillshade())
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const parcelLayerRef = useRef(null)
@@ -93,16 +104,26 @@ export default function SurfaceMap({
       doubleClickZoom: interactive,
       boxZoom: false,
       keyboard: false,
-      attributionControl: false,
+      attributionControl: true,
       renderer: L.svg({ padding: 2.0 }),
     })
 
-    // Public OSM tile layer (native tiles up to 19, Leaflet upscales to 21)
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 21,
-      maxNativeZoom: 19,
-      minZoom: 3,
+    // Dynamic tile layer based on user selection
+    const layerConfig = getLayerById(activeLayerRef.current)
+    const tile = L.tileLayer(layerConfig.url, {
+      ...layerConfig.options,
+      attribution: layerConfig.attribution,
     }).addTo(map)
+    tileLayerRef.current = tile
+
+    // Apply per-layer CSS filter directly on the tile pane
+    const tilePane = map.getPane('tilePane')
+    if (tilePane) tilePane.style.filter = layerConfig.filter || ''
+
+    // 3DEP LiDAR hillshade overlay (if previously enabled)
+    const hsLayer = create3DEPHillshadeLayer(L)
+    hillshadeLayerRef.current = hsLayer
+    if (hillshadeOnRef.current) hsLayer.addTo(map)
 
     // Report view changes for persistence
     if (onViewChange) {
@@ -248,6 +269,51 @@ export default function SurfaceMap({
     parcelLayerRef.current = polygon
   }, [parcelGeometry, center?.[0], center?.[1]])
 
+  // Switch tile layer without recreating the map
+  const switchLayer = useCallback((newLayerId) => {
+    storeLayerId(newLayerId)
+    activeLayerRef.current = newLayerId
+    setActiveLayerId(newLayerId)
+    setLayerMenuOpen(false)
+
+    const map = mapRef.current
+    if (!map) return
+
+    const layerConfig = getLayerById(newLayerId)
+
+    // Apply filter BEFORE swapping tiles so old tiles get new filter instantly
+    const tilePane = map.getPane('tilePane')
+    if (tilePane) tilePane.style.filter = layerConfig.filter || ''
+
+    if (tileLayerRef.current) map.removeLayer(tileLayerRef.current)
+
+    const newTile = L.tileLayer(layerConfig.url, {
+      ...layerConfig.options,
+      attribution: layerConfig.attribution,
+    })
+    newTile.addTo(map)
+    newTile.bringToBack()
+    tileLayerRef.current = newTile
+  }, [])
+
+  // Toggle 3DEP LiDAR hillshade overlay
+  const toggleHillshade = useCallback(() => {
+    const map = mapRef.current
+    const hs = hillshadeLayerRef.current
+    if (!map || !hs) return
+
+    const next = !hillshadeOnRef.current
+    hillshadeOnRef.current = next
+    setHillshadeOn(next)
+    storeHillshade(next)
+
+    if (next) {
+      hs.addTo(map)
+    } else {
+      map.removeLayer(hs)
+    }
+  }, [])
+
   // Determine anchor point for cave overlay (first marker with lat/lon)
   const anchor = markers.find(m => m.lat != null && m.lon != null)
 
@@ -261,9 +327,71 @@ export default function SurfaceMap({
           className={`surface-map rounded-xl overflow-hidden ${className}`}
           style={{ height, width: '100%' }}
         />
+        {/* Tile layer switcher — top-left */}
+        {interactive && (
+          <div className="absolute top-3 left-12 z-[1200]">
+            <button
+              onClick={() => setLayerMenuOpen(v => !v)}
+              className="px-2.5 py-1.5 rounded-full text-xs font-medium transition-all shadow-lg
+                bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+                backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50"
+            >
+              <span className="flex items-center gap-1.5">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 0L0 4l8 4 8-4L8 0z" opacity="0.9"/>
+                  <path d="M0 8l8 4 8-4" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M0 12l8 4 8-4" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+                {getLayerById(activeLayerId).label}
+              </span>
+            </button>
+            {layerMenuOpen && (
+              <div className="mt-1 rounded-lg bg-[#0a0a12]/95 border border-[var(--cyber-border)]
+                backdrop-blur-sm shadow-xl overflow-hidden min-w-[120px]">
+                {BASE_LAYERS.map(layer => (
+                  <button
+                    key={layer.id}
+                    onClick={() => switchLayer(layer.id)}
+                    className={`w-full text-left px-3 py-1.5 text-xs transition-colors
+                      hover:bg-[var(--cyber-surface-2)]
+                      ${activeLayerId === layer.id
+                        ? 'text-[var(--cyber-cyan)]'
+                        : 'text-[var(--cyber-text-dim)]'
+                      }`}
+                  >
+                    {layer.label}
+                  </button>
+                ))}
+                {/* 3DEP LiDAR hillshade overlay toggle */}
+                <div className="border-t border-[var(--cyber-border)]">
+                  <button
+                    onClick={toggleHillshade}
+                    className={`w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center gap-2
+                      hover:bg-[var(--cyber-surface-2)]
+                      ${hillshadeOn ? 'text-[var(--cyber-cyan)]' : 'text-[var(--cyber-text-dim)]'}`}
+                  >
+                    <span className={`inline-block w-3 h-3 rounded-sm border transition-colors
+                      ${hillshadeOn
+                        ? 'bg-[var(--cyber-cyan)] border-[var(--cyber-cyan)]'
+                        : 'border-[var(--cyber-border)]'
+                      }`}
+                    >
+                      {hillshadeOn && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <path d="M2.5 6L5 8.5L9.5 3.5" stroke="#0a0a12" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </span>
+                    {HILLSHADE_OVERLAY.label}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {/* Survey map button — above center button */}
         {(onToggleSurveyMap || onAddSurveyMap) && (
-          <div className="absolute bottom-12 left-3 z-[1000]">
+          <div className="absolute bottom-12 left-3 z-[1100]">
             <div className="flex items-center">
             <button
               onClick={() => {
@@ -351,7 +479,7 @@ export default function SurfaceMap({
         )}
         {/* North arrow — 12.5% of viewport height, visual reference for overlay alignment */}
         <div
-          className="absolute top-3 right-3 z-[1000] flex flex-col items-center pointer-events-none"
+          className="absolute top-3 right-3 z-[1100] flex flex-col items-center pointer-events-none"
           style={{ height: '12.5%', minHeight: 40 }}
           title="North"
         >
@@ -365,7 +493,7 @@ export default function SurfaceMap({
           </svg>
         </div>
         {showCenterButton && (
-          <div className="absolute bottom-3 left-3 z-[1000] flex gap-2">
+          <div className="absolute bottom-3 left-3 z-[1100] flex gap-2">
             <button
               onClick={() => {
                 if (mapRef.current) {

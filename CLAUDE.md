@@ -708,7 +708,7 @@ This project includes:
 - Cave detail page with:
   - 2D interactive cave map (multi-level, POIs, route overlay, 7 render modes)
   - 3D cave explorer (Three.js point cloud viewer)
-  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, center-on-cave button, zoom to level 21)
+  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
   - Survey map overlay system: guided 4-step ingestion modal (upload → pin entrance → set scale → orient & confirm), show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
   - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
@@ -791,6 +791,7 @@ This project includes:
 | `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + passage outline polygons + dashed underpass + symbol icons on surface map |
 | `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar, symbol legend, +−/center controls, dashed underpass, passage outline polygons) |
 | `frontend/src/utils/surveySymbols.js` | 62 NSS cave cartography SVG symbols, keyword matching, colorize/dataURL helpers |
+| `frontend/src/utils/mapLayers.js` | Tile layer configs (6 base layers + 3DEP hillshade), per-layer CSS filters, localStorage persistence, custom TileLayer for ArcGIS ImageServer |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets |
 
