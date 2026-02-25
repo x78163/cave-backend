@@ -1,4 +1,10 @@
 import { useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react'
+import {
+  drawSurveyGrid, drawSurveyPassageWalls, drawSurveyCenterline,
+  drawSurveyStations, drawSurveySymbols, loadSymbolImages,
+  drawNorthArrow, drawBranchLegend, drawSymbolLegend,
+  drawSurveyScaleBar, combineBounds,
+} from '../utils/surveyCanvasRenderers'
 
 const POI_COLORS = {
   entrance: '#4ade80',
@@ -33,11 +39,14 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   compact = true,
   selectedPoiId = null,
   routeOverlay = null,       // { path, waypoints, junctions, instructions, activeInstruction }
+  surveyRenderData = null,   // Traditional survey computed data
+  showSurvey = true,         // Toggle survey layer visibility
 }, ref) {
   const canvasRef = useRef(null)
   const containerRef = useRef(null)
   const viewportRef = useRef({ x: 0, y: 0, scale: 1 })
   const initialFitDone = useRef(false)
+  const symbolImgCacheRef = useRef({})
   const touchRef = useRef({
     dragging: false,
     startX: 0, startY: 0,
@@ -75,11 +84,17 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
     })
   }, [mapData, pois, selectedLevel])
 
-  // Fit map to canvas view
+  // Fit map to canvas view (combines SLAM + survey bounds when both present)
   const fitToView = useCallback(() => {
-    if (!mapData || !canvasRef.current) return
+    if (!canvasRef.current) return
     const canvas = canvasRef.current
-    const [xMin, yMin, xMax, yMax] = mapData.bounds
+
+    const bounds = combineBounds(
+      mapData?.bounds || null,
+      (showSurvey && surveyRenderData?.bounds) || null,
+    )
+    if (!bounds) return
+    const [xMin, yMin, xMax, yMax] = bounds
     const mapW = xMax - xMin
     const mapH = yMax - yMin
     if (mapW <= 0 || mapH <= 0) return
@@ -97,7 +112,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       y: centerY * scale,  // Y flipped
       scale,
     }
-  }, [mapData])
+  }, [mapData, surveyRenderData, showSurvey])
 
   // Center on a world point at a given scale
   const centerOn = useCallback((worldX, worldY, targetScale) => {
@@ -164,10 +179,19 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
     }
   }, [mapData, selectedLevel])
 
+  // Pre-load survey symbol images when annotations change
+  useEffect(() => {
+    if (surveyRenderData?.shot_annotations) {
+      loadSymbolImages(surveyRenderData.shot_annotations, symbolImgCacheRef.current)
+    }
+  }, [surveyRenderData])
+
   // Render
   const render = useCallback(() => {
     const canvas = canvasRef.current
-    if (!canvas || !mapData) return
+    if (!canvas) return
+    // Need either SLAM data or survey data to render
+    if (!mapData && !surveyRenderData) return
 
     const ctx = canvas.getContext('2d')
     const { width, height } = canvas
@@ -177,8 +201,40 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
     ctx.fillStyle = '#0a0a14'
     ctx.fillRect(0, 0, width, height)
 
-    const level = mapData.levels[selectedLevel]
-    if (!level) return
+    const level = mapData?.levels?.[selectedLevel]
+
+    // Survey grid (behind everything, only when survey is visible)
+    if (showSurvey && surveyRenderData?.stations?.length) {
+      drawSurveyGrid(ctx, vp, canvas)
+    }
+
+    // If no SLAM level data, skip to survey rendering
+    if (!level) {
+      // Survey-only rendering
+      if (showSurvey && surveyRenderData?.stations?.length) {
+        ctx.save()
+        ctx.translate(width / 2 + vp.x, height / 2 + vp.y)
+        ctx.scale(vp.scale, -vp.scale)
+        drawSurveyPassageWalls(ctx, surveyRenderData, vp, canvas)
+        drawSurveyCenterline(ctx, surveyRenderData, vp)
+        drawSurveyStations(ctx, surveyRenderData, vp)
+        const usedKeys = drawSurveySymbols(ctx, surveyRenderData, vp, symbolImgCacheRef.current)
+        ctx.restore()
+
+        // Screen-space overlays
+        drawNorthArrow(ctx, canvas)
+        drawSurveyScaleBar(ctx, vp, canvas)
+        drawBranchLegend(ctx, surveyRenderData, canvas)
+        drawSymbolLegend(ctx, surveyRenderData, symbolImgCacheRef.current, canvas, usedKeys)
+      } else if (!mapData) {
+        // No data at all — placeholder
+        ctx.fillStyle = 'rgba(255,255,255,0.3)'
+        ctx.font = '14px monospace'
+        ctx.textAlign = 'center'
+        ctx.fillText('No map data available', width / 2, height / 2)
+      }
+      return
+    }
 
     ctx.save()
 
@@ -417,6 +473,15 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       }
     }
 
+    // Survey layers (on top of SLAM data, below POIs)
+    let surveyUsedKeys = new Set()
+    if (showSurvey && surveyRenderData?.stations?.length) {
+      drawSurveyPassageWalls(ctx, surveyRenderData, vp, canvas)
+      drawSurveyCenterline(ctx, surveyRenderData, vp)
+      drawSurveyStations(ctx, surveyRenderData, vp)
+      surveyUsedKeys = drawSurveySymbols(ctx, surveyRenderData, vp, symbolImgCacheRef.current)
+    }
+
     // Draw POIs
     const levelPois = getLevelPois()
     const poiRadius = 6 / vp.scale
@@ -515,7 +580,14 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
     if (crosshairMode) {
       drawCrosshair(ctx, width, height)
     }
-  }, [mapData, selectedLevel, mode, getLevelPois, crosshairMode, selectedPoiId])
+
+    // Survey screen-space overlays (legends, north arrow)
+    if (showSurvey && surveyRenderData?.stations?.length) {
+      drawNorthArrow(ctx, canvas)
+      drawBranchLegend(ctx, surveyRenderData, canvas)
+      drawSymbolLegend(ctx, surveyRenderData, symbolImgCacheRef.current, canvas, surveyUsedKeys)
+    }
+  }, [mapData, selectedLevel, mode, getLevelPois, crosshairMode, selectedPoiId, surveyRenderData, showSurvey])
 
   // Schedule render (cancels pending to ensure latest render closure is used)
   const scheduleRender = useCallback(() => {
@@ -540,18 +612,18 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
     return () => window.removeEventListener('resize', onResize)
   }, [resizeCanvas, scheduleRender])
 
-  // Initial fit: only on first mapData arrival
+  // Initial fit: on first data arrival (SLAM or survey)
   useEffect(() => {
-    if (mapData && !initialFitDone.current) {
+    if ((mapData || surveyRenderData) && !initialFitDone.current) {
       resizeCanvas()
       fitToView()
       initialFitDone.current = true
     }
     scheduleRender()
-  }, [mapData, fitToView, resizeCanvas, scheduleRender])
+  }, [mapData, surveyRenderData, fitToView, resizeCanvas, scheduleRender])
 
   // Re-render when visual props change (no viewport reset)
-  useEffect(() => { scheduleRender() }, [selectedLevel, crosshairMode, selectedPoiId, pois, scheduleRender])
+  useEffect(() => { scheduleRender() }, [selectedLevel, crosshairMode, selectedPoiId, pois, showSurvey, scheduleRender])
 
   // --- Touch / pointer handlers ---
 

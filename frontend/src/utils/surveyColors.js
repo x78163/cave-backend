@@ -1,6 +1,6 @@
 /**
  * Shared branch color palette for survey visualization.
- * Used by SurveyCanvas, SurveyTopologyGraph, and SurveyManager.
+ * Used by CaveMapCanvas (via surveyCanvasRenderers), SurveyTopologyGraph, SurveyOverlay, and SurveyManager.
  */
 export const BRANCH_COLORS = [
   '#00e5ff', // cyan — main trunk

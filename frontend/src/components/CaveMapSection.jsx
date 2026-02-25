@@ -39,15 +39,20 @@ const MODE_ORDER = ['quick', 'standard', 'detailed', 'heatmap', 'edges', 'raw_sl
 // Scale that makes the scale bar show ~1m
 const ONE_METER_SCALE = 80
 
-export default function CaveMapSection({ caveId, preloadedRoute }) {
+export default function CaveMapSection({
+  caveId, preloadedRoute, hasMap = true,
+  surveyRenderData = null, showSurveyOverlay = false, onSurveyOverlayToggle,
+}) {
   const [mapData, setMapData] = useState(null)
   const [pois, setPois] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(hasMap)
   const [selectedLevel, setSelectedLevel] = useState(0)
   const [fullscreen, setFullscreen] = useState(false)
   const [selectedPoi, setSelectedPoi] = useState(null)
   const [crosshairMode, setCrosshairMode] = useState(false)
   const [addPoiCoords, setAddPoiCoords] = useState(null)
+  const [showSurvey, setShowSurvey] = useState(true)
+  const [detailsPanelOpen, setDetailsPanelOpen] = useState(false)
 
   // Map mode state
   const [availableModes, setAvailableModes] = useState([])
@@ -76,19 +81,21 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
     return false
   }, [caveId])
 
-  // Initial load: fetch best available map
+  // Initial load: fetch best available map (skip if no SLAM data)
   useEffect(() => {
+    if (!hasMap) return
     fetchMapData(null).then(() => {
       setLoading(false)
     })
-  }, [fetchMapData])
+  }, [fetchMapData, hasMap])
 
-  // Fetch POIs
+  // Fetch POIs (only if cave has SLAM data)
   useEffect(() => {
+    if (!hasMap) return
     apiFetch(`/mapping/caves/${caveId}/pois/`)
       .then(data => setPois(data.pois || []))
       .catch(() => {})
-  }, [caveId])
+  }, [caveId, hasMap])
 
   // Load preloaded route as overlay
   useEffect(() => {
@@ -103,8 +110,9 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
     })
   }, [preloadedRoute])
 
-  // Fetch saved routes for this cave
+  // Fetch saved routes for this cave (only if SLAM data)
   useEffect(() => {
+    if (!hasMap) return
     setSavedRoutesLoading(true)
     apiFetch(`/caves/${caveId}/routes/`)
       .then(data => setSavedRoutes(data.routes || []))
@@ -289,7 +297,7 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
     )
   }
 
-  if (!mapData) {
+  if (!mapData && !surveyRenderData) {
     return (
       <div className="mx-4 my-3 rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-6
         flex flex-col items-center gap-3">
@@ -306,7 +314,8 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
 
   // --- Main map render ---
 
-  const levels = mapData.levels || []
+  const surveyOnly = !mapData && !!surveyRenderData
+  const levels = mapData?.levels || []
   const multiLevel = levels.length > 1
   const multiMode = availableModes.length > 1
 
@@ -328,23 +337,53 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
                 &larr;
               </button>
             )}
-            <span className="text-white text-sm font-semibold">Cave Map</span>
+            <span className="text-white text-sm font-semibold">
+              {surveyOnly ? 'Survey' : 'Cave Map'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Survey toggle (when survey data exists) */}
+            {surveyRenderData && !surveyOnly && (
+              <button
+                onClick={() => setShowSurvey(p => !p)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all
+                  ${showSurvey
+                    ? 'bg-amber-900/40 text-amber-300 border border-amber-700/50'
+                    : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:border-amber-700/50 hover:text-amber-300'
+                  }`}
+              >
+                Survey
+              </button>
+            )}
+            {/* Show on Surface Map toggle */}
+            {surveyRenderData && onSurveyOverlayToggle && (
+              <button
+                onClick={onSurveyOverlayToggle}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all
+                  ${showSurveyOverlay
+                    ? 'border-[var(--cyber-cyan)] text-[var(--cyber-cyan)] border'
+                    : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:border-[var(--cyber-cyan)] hover:text-[var(--cyber-cyan)]'
+                  }`}
+              >
+                On Map
+              </button>
+            )}
             {crosshairMode && (
               <span className="text-[10px] text-red-400 font-mono animate-pulse">TAP TO PLACE</span>
             )}
-            <button
-              onClick={() => { setCrosshairMode(!crosshairMode); setSelectedPoi(null) }}
-              className={`px-3 py-1 rounded-full text-xs font-semibold transition-all
-                ${crosshairMode
-                  ? 'bg-red-900/50 text-red-300 border border-red-700/50'
-                  : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:border-[var(--cyber-cyan)] hover:text-[var(--cyber-cyan)]'
-                }`}
-            >
-              {crosshairMode ? 'Cancel' : '+ POI'}
-            </button>
+            {!surveyOnly && (
+              <button
+                onClick={() => { setCrosshairMode(!crosshairMode); setSelectedPoi(null) }}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all
+                  ${crosshairMode
+                    ? 'bg-red-900/50 text-red-300 border border-red-700/50'
+                    : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:border-[var(--cyber-cyan)] hover:text-[var(--cyber-cyan)]'
+                  }`}
+              >
+                {crosshairMode ? 'Cancel' : '+ POI'}
+              </button>
+            )}
             {!fullscreen && (
               <button
                 onClick={() => setFullscreen(true)}
@@ -358,8 +397,8 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
           </div>
         </div>
 
-        {/* Mode selector row */}
-        {multiMode && (
+        {/* Mode selector row (SLAM only) */}
+        {!surveyOnly && multiMode && (
           <div className="flex gap-1.5 px-3 py-2 overflow-x-auto border-b border-[var(--cyber-border)]">
             {MODE_ORDER.filter(m => availableModes.includes(m)).map(mode => (
               <button
@@ -377,8 +416,8 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
           </div>
         )}
 
-        {/* Level selector */}
-        {multiLevel && (
+        {/* Level selector (SLAM only) */}
+        {!surveyOnly && multiLevel && (
           <div className="flex gap-1.5 px-3 py-2 overflow-x-auto border-b border-[var(--cyber-border)]">
             {levels.map((level, i) => (
               <button
@@ -396,20 +435,22 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
           </div>
         )}
 
-        {/* Route builder panel */}
-        <RouteBuilder
-          caveId={caveId}
-          mapData={mapData}
-          mapMode={currentMode}
-          pois={pois}
-          selectedLevel={selectedLevel}
-          onRouteComputed={handleRouteComputed}
-          onRouteClear={handleRouteClear}
-          onEnterPlaceMode={() => setRoutePlaceMode(true)}
-          onExitPlaceMode={() => setRoutePlaceMode(false)}
-          placedPoint={routePlacedPoint}
-          onPlacedPointConsumed={() => setRoutePlacedPoint(null)}
-        />
+        {/* Route builder panel (SLAM only) */}
+        {!surveyOnly && (
+          <RouteBuilder
+            caveId={caveId}
+            mapData={mapData}
+            mapMode={currentMode}
+            pois={pois}
+            selectedLevel={selectedLevel}
+            onRouteComputed={handleRouteComputed}
+            onRouteClear={handleRouteClear}
+            onEnterPlaceMode={() => setRoutePlaceMode(true)}
+            onExitPlaceMode={() => setRoutePlaceMode(false)}
+            placedPoint={routePlacedPoint}
+            onPlacedPointConsumed={() => setRoutePlacedPoint(null)}
+          />
+        )}
 
         {/* Canvas */}
         <CaveMapCanvas
@@ -418,16 +459,18 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
           pois={pois}
           selectedLevel={selectedLevel}
           mode={currentMode}
-          onPoiTap={handlePoiTap}
-          onMapTap={handleMapTap}
-          crosshairMode={crosshairMode || routePlaceMode}
+          onPoiTap={surveyOnly ? undefined : handlePoiTap}
+          onMapTap={surveyOnly ? undefined : handleMapTap}
+          crosshairMode={!surveyOnly && (crosshairMode || routePlaceMode)}
           compact={!fullscreen}
           selectedPoiId={selectedPoi?.id}
           routeOverlay={routeOverlay}
+          surveyRenderData={surveyRenderData}
+          showSurvey={showSurvey}
         />
 
-        {/* Add POI dialog */}
-        {addPoiCoords && (
+        {/* Add POI dialog (SLAM only) */}
+        {!surveyOnly && addPoiCoords && (
           <AddPoiDialog
             coords={addPoiCoords}
             onSubmit={submitPoi}
@@ -445,67 +488,90 @@ export default function CaveMapSection({ caveId, preloadedRoute }) {
         )}
       </div>
 
-      {/* Saved Routes Panel — below the map */}
-      {!fullscreen && savedRoutes.length > 0 && (
+      {/* Routes + POIs — collapsible two-column layout (SLAM only) */}
+      {!surveyOnly && !fullscreen && (savedRoutes.length > 0 || pois.length > 0) && (
         <div className="mx-4 mb-3">
-          <h3 className="text-white font-semibold text-sm mb-2">
-            Saved Routes ({savedRoutes.length})
-          </h3>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {savedRoutes.map(route => {
-              const computed = route.computed_route || {}
-              return (
-                <button
-                  key={route.id}
-                  onClick={() => loadSavedRoute(route)}
-                  className="flex-shrink-0 cyber-card p-3 text-left hover:border-[var(--cyber-cyan)] transition-all"
-                  style={{ minWidth: '160px' }}
-                >
-                  <div className="text-white text-xs font-semibold truncate">
-                    {route.name || 'Unnamed'}
-                  </div>
-                  <div className="flex gap-2 mt-1">
-                    {computed.total_distance_m != null && (
-                      <span className="text-[var(--cyber-cyan)] text-[10px]">
-                        {computed.total_distance_m.toFixed(1)}m
-                      </span>
-                    )}
-                    {route.waypoints?.length > 0 && (
-                      <span className="text-[var(--cyber-text-dim)] text-[10px]">
-                        {route.waypoints.length} pts
-                      </span>
-                    )}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
+          <button
+            onClick={() => setDetailsPanelOpen(p => !p)}
+            className="flex items-center gap-2 w-full text-left mb-2"
+          >
+            <span className={`text-[var(--cyber-text-dim)] text-xs transition-transform ${detailsPanelOpen ? 'rotate-90' : ''}`}>
+              &#x25B6;
+            </span>
+            <span className="text-white font-semibold text-sm">
+              Routes &amp; POIs
+            </span>
+            <span className="text-[var(--cyber-text-dim)] text-xs">
+              ({savedRoutes.length} route{savedRoutes.length !== 1 ? 's' : ''}, {pois.length} POI{pois.length !== 1 ? 's' : ''})
+            </span>
+          </button>
 
-      {/* POI List Cards — below the map */}
-      {!fullscreen && pois.length > 0 && (
-        <div ref={poiListRef} className="mx-4 mb-3">
-          <h3 className="text-white font-semibold text-sm mb-2">
-            Points of Interest ({pois.length})
-          </h3>
-          <div className="space-y-2">
-            {pois.map(poi => (
-              <PoiCard
-                key={poi.id}
-                poi={poi}
-                isSelected={selectedPoi?.id === poi.id}
-                onClick={() => handlePoiListClick(poi)}
-                onUpdate={updatePoi}
-                onDelete={deletePoi}
-                onPickPhoto={() => setPhotoPickerPoiId(poi.id)}
-                onDetachPhoto={() => detachPoiPhoto(poi.id)}
-                levelName={mapData && mapData.levels.length > 1
-                  ? mapData.levels[getPoiLevel(poi)]?.name
-                  : null}
-              />
-            ))}
-          </div>
+          {detailsPanelOpen && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Saved Routes column */}
+              {savedRoutes.length > 0 && (
+                <div>
+                  <h4 className="text-[var(--cyber-text-dim)] text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                    Saved Routes
+                  </h4>
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+                    {savedRoutes.map(route => {
+                      const computed = route.computed_route || {}
+                      return (
+                        <button
+                          key={route.id}
+                          onClick={() => loadSavedRoute(route)}
+                          className="w-full cyber-card p-2.5 text-left hover:border-[var(--cyber-cyan)] transition-all"
+                        >
+                          <div className="text-white text-xs font-semibold truncate">
+                            {route.name || 'Unnamed'}
+                          </div>
+                          <div className="flex gap-2 mt-0.5">
+                            {computed.total_distance_m != null && (
+                              <span className="text-[var(--cyber-cyan)] text-[10px]">
+                                {computed.total_distance_m.toFixed(1)}m
+                              </span>
+                            )}
+                            {route.waypoints?.length > 0 && (
+                              <span className="text-[var(--cyber-text-dim)] text-[10px]">
+                                {route.waypoints.length} pts
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* POIs column */}
+              {pois.length > 0 && (
+                <div ref={poiListRef}>
+                  <h4 className="text-[var(--cyber-text-dim)] text-xs font-semibold mb-1.5 uppercase tracking-wider">
+                    Points of Interest
+                  </h4>
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+                    {pois.map(poi => (
+                      <PoiCard
+                        key={poi.id}
+                        poi={poi}
+                        isSelected={selectedPoi?.id === poi.id}
+                        onClick={() => handlePoiListClick(poi)}
+                        onUpdate={updatePoi}
+                        onDelete={deletePoi}
+                        onPickPhoto={() => setPhotoPickerPoiId(poi.id)}
+                        onDetachPhoto={() => detachPoiPhoto(poi.id)}
+                        levelName={mapData && mapData.levels.length > 1
+                          ? mapData.levels[getPoiLevel(poi)]?.name
+                          : null}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </>

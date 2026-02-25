@@ -636,7 +636,7 @@ This project includes:
 
 ## Current Session Context
 
-**Date**: 2026-02-21
+**Date**: 2026-02-24
 **Status**: Active development — core features operational
 
 ### What's Built
@@ -706,12 +706,19 @@ This project includes:
   - Default US center with fitBounds auto-zoom to markers
   - Cave cards show aliases in parentheses after name
 - Cave detail page with:
-  - 2D interactive cave map (multi-level, POIs, route overlay, 7 render modes)
+  - Unified cave detail canvas (CaveMapCanvas): shows SLAM LiDAR scans and/or traditional survey data as toggleable layers in a single canvas
+    - Three modes: SLAM-only, survey-only, combined (SLAM + survey)
+    - Survey rendering extracted to `surveyCanvasRenderers.js` — 8 draw functions in world coordinates
+    - Survey-only mode: grid, north arrow, scale bar, branch legend, symbol legend, passage walls, centerline, stations
+    - Combined mode: survey layers drawn between SLAM trajectory and POIs, survey toggle button in toolbar
+    - Offscreen canvas compositing for uniform alpha passage wall fills
+    - Combined bounding box calculation (`combineBounds`) for fitToView across both datasets
   - 3D cave explorer (Three.js point cloud viewer)
   - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
   - Survey map overlay system: guided 4-step ingestion modal (upload → pin entrance → set scale → orient & confirm), show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
   - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
+  - CaveMapSection: unified toolbar with Survey toggle (amber), "On Map" button for Leaflet overlay, collapsible Routes & POIs panel (two-column grid, collapsed by default)
   - Tabbed Media section (Photos / Documents / Videos) replacing standalone photo gallery
   - Photo tab: gallery with carousel, upload dialog, camera capture
   - Documents tab: PDF upload with drag-and-drop, in-app PDF viewer (blob URL + iframe), delete
@@ -725,13 +732,13 @@ This project includes:
   - Edit and Delete buttons in topbar (owner or admin only)
   - Delete confirmation modal with permanent deletion warning
   - Unlisted visibility badge (purple)
-  - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyCanvas (standalone 2D renderer with pan/zoom/grid/north arrow/scale bar/symbol legend/+−/center buttons), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete, "Show on Map" toggle
+  - Traditional survey section: spreadsheet-style shot entry (azimuth/distance/inclination/LRUD), SurveyOverlay (Leaflet layer for surface map), survey list with create/delete
   - Underpass dashed rendering: multi-level surveys detect vertical levels (z-gap > 1.5m), lower-level passages rendered with dashed outlines and dimmed fill, lower station labels hidden, dense survey label thinning (>20 stations)
   - Continuous passage outline polygons: per-branch smoothed-bearing wall projection (left/right walls as separate polylines), flat caps at dead ends, hybrid approach with per-shot quads for loop closure shots
-  - Survey zoom controls: SurveyCanvas has +/−/Center buttons (bottom-right), SurfaceMap has "Survey" fit-bounds button (bottom-left, next to Center) when overlay is active
   - NSS cave cartography symbols: 62 SVG icons across 10 categories, keyword-matched from shot comments, rendered at shot midpoints on both Canvas and Leaflet overlays, auto-legend showing only used symbols
   - Survey OCR: "Scan Sheet" button opens SurveyOCRModal — photograph handwritten survey form, GOT-OCR 2.0 extracts shots, editable review table with ◀▶ cell shift buttons for fixing column alignment, row count hint dropdown
   - "Generate from Map" button (magenta) in SurveyManager: appears when cave has SLAM map data and no SLAM-generated survey exists; generates traditional survey from SLAM data via API, SLAM badge on generated surveys
+  - Page layout order: Cave Map → Surveys → Equipment → Description → Surface Map → Media → Ratings → Comments
 - Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
 - User profile page with avatar presets, saved routes, media gallery
   - Media tab with sub-tabs: Photos (grid), Documents (list), Videos (grid)
@@ -789,7 +796,8 @@ This project includes:
 | `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table + OCR scan button |
 | `frontend/src/components/SurveyOCRModal.jsx` | Two-step OCR modal: upload image → review/edit/shift parsed shots |
 | `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + passage outline polygons + dashed underpass + symbol icons on surface map |
-| `frontend/src/components/SurveyCanvas.jsx` | Standalone 2D canvas renderer (pan/zoom, grid, north arrow, scale bar, symbol legend, +−/center controls, dashed underpass, passage outline polygons) |
+| `frontend/src/utils/surveyCanvasRenderers.js` | Survey drawing functions for CaveMapCanvas (grid, walls, centerline, stations, symbols, legends, north arrow, scale bar) |
+| `frontend/src/utils/surveyColors.js` | Shared branch color palette used by CaveMapCanvas, SurveyOverlay, SurveyManager, topology graph |
 | `frontend/src/utils/surveySymbols.js` | 62 NSS cave cartography SVG symbols, keyword matching, colorize/dataURL helpers |
 | `frontend/src/utils/mapLayers.js` | Tile layer configs (6 base layers + 3DEP hillshade), per-layer CSS filters, localStorage persistence, custom TileLayer for ArcGIS ImageServer |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
