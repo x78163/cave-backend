@@ -685,7 +685,7 @@ export default function CaveDetail() {
             <div className="relative">
               <SurfaceMap
                 center={[cave.latitude, cave.longitude]}
-                markers={[{ lat: cave.latitude, lon: cave.longitude, label: cave.name }]}
+                markers={[{ lat: cave.latitude, lon: cave.longitude, label: cave.name, approximate: cave.coordinates_approximate }]}
                 zoom={14}
                 height={surveyMapVisible ? '28rem' : showOverlay ? '20rem' : '12rem'}
                 className="border border-[var(--cyber-border)]"
@@ -1455,11 +1455,13 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
   const [resolving, setResolving] = useState(false)
+  const [approximate, setApproximate] = useState(false)
 
   const startEdit = () => {
     setRaw(hasLocation ? `${cave.latitude}, ${cave.longitude}` : '')
     setParsed(hasLocation ? { lat: cave.latitude, lon: cave.longitude } : null)
     setError(null)
+    setApproximate(!!cave.coordinates_approximate)
     setEditing(true)
   }
 
@@ -1510,7 +1512,7 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
     try {
       await apiFetch(`/caves/${caveId}/`, {
         method: 'PATCH',
-        body: { latitude: parsed.lat, longitude: parsed.lon },
+        body: { latitude: parsed.lat, longitude: parsed.lon, coordinates_approximate: approximate },
       })
       setEditing(false)
       onUpdate()
@@ -1546,18 +1548,26 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
             Cancel
           </button>
         </div>
-        <div className="mt-1 min-h-[1rem]">
-          {resolving && (
-            <span className="text-[var(--cyber-cyan)] text-xs animate-pulse">
-              Resolving map link...
-            </span>
-          )}
-          {!resolving && parsed && (
-            <span className="text-emerald-400 text-xs">
-              {parsed.lat.toFixed(6)}°, {parsed.lon.toFixed(6)}°
-            </span>
-          )}
-          {!resolving && error && <span className="text-red-400 text-xs">{error}</span>}
+        <div className="mt-1 flex items-center gap-3 min-h-[1rem]">
+          <div className="flex-1">
+            {resolving && (
+              <span className="text-[var(--cyber-cyan)] text-xs animate-pulse">
+                Resolving map link...
+              </span>
+            )}
+            {!resolving && parsed && (
+              <span className="text-emerald-400 text-xs">
+                {parsed.lat.toFixed(6)}°, {parsed.lon.toFixed(6)}°
+              </span>
+            )}
+            {!resolving && error && <span className="text-red-400 text-xs">{error}</span>}
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-[var(--cyber-text-dim)] cursor-pointer select-none">
+            <input type="checkbox" checked={approximate}
+              onChange={e => setApproximate(e.target.checked)}
+              className="accent-red-500" />
+            <span className={approximate ? 'text-red-400' : ''}>Approximate</span>
+          </label>
         </div>
       </div>
     )
@@ -1566,8 +1576,9 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
   return (
     <div className="flex items-center gap-2 mt-1">
       {hasLocation ? (
-        <p className="text-[#555570] text-xs">
+        <p className={`text-xs ${cave.coordinates_approximate ? 'text-red-400' : 'text-[#555570]'}`}>
           {cave.latitude.toFixed(4)}, {cave.longitude.toFixed(4)}
+          {cave.coordinates_approximate && <span className="ml-1 italic">(approximate)</span>}
         </p>
       ) : isCaveOwner ? (
         <p className="text-[#555570] text-xs italic">No coordinates set</p>

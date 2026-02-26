@@ -54,6 +54,7 @@ class Cave(models.Model):
     # Location
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+    coordinates_approximate = models.BooleanField(default=False)
     region = models.CharField(max_length=200, blank=True, default='')
     country = models.CharField(max_length=100, blank=True, default='')
     city = models.CharField(max_length=200, blank=True, default='')

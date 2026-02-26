@@ -183,6 +183,8 @@ def proximity_check(request):
     lat_range = 0.00045
     lon_range = 0.00045 / max(cos(radians(lat)), 0.01)
 
+    is_approximate = bool(request.data.get('approximate', False))
+
     nearby = Cave.objects.filter(
         latitude__range=(lat - lat_range, lat + lat_range),
         longitude__range=(lon - lon_range, lon + lon_range),
@@ -194,11 +196,13 @@ def proximity_check(request):
         return Response({
             'nearby': True,
             'count': nearby.count(),
+            'approximate': is_approximate,
             'caves': [
                 {
                     'id': str(c.id),
                     'name': c.name if (is_own and c.owner_id == request.user.id) else None,
                     'owned': is_own and c.owner_id == request.user.id,
+                    'coordinates_approximate': c.coordinates_approximate,
                 }
                 for c in caves
             ],
@@ -766,7 +770,7 @@ def cave_import_preview(request):
     if csv_file.size > 5 * 1024 * 1024:
         return Response({'error': 'CSV file too large (max 5MB)'}, status=status.HTTP_400_BAD_REQUEST)
 
-    from .csv_import import normalize_csv_rows, parse_cave_row, find_proximity_duplicates
+    from .csv_import import normalize_csv_rows, parse_cave_row, find_proximity_duplicates, find_intra_csv_duplicates
 
     threshold = float(request.data.get('threshold_meters', 100))
     defaults = {
@@ -775,7 +779,17 @@ def cave_import_preview(request):
         'visibility': request.data.get('visibility', 'public'),
     }
 
-    content = csv_file.read().decode('utf-8-sig')
+    raw_bytes = csv_file.read()
+    try:
+        content = raw_bytes.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        try:
+            content = raw_bytes.decode('windows-1252')
+        except UnicodeDecodeError:
+            return Response(
+                {'error': 'Unable to decode CSV file. Please save as UTF-8.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
     rows = normalize_csv_rows(content)
 
     parsed = []
@@ -805,14 +819,19 @@ def cave_import_preview(request):
             if result['latitude'] is None:
                 summary['without_coordinates'] += 1
             else:
+                is_approx = result['data'].get('coordinates_approximate', False)
                 dupes = find_proximity_duplicates(
-                    result['latitude'], result['longitude'], threshold
+                    result['latitude'], result['longitude'], threshold,
+                    is_approximate=is_approx,
                 )
                 entry['duplicates'] = dupes
                 if dupes:
                     summary['with_duplicates'] += 1
 
         parsed.append(entry)
+
+    intra_csv_count = find_intra_csv_duplicates(parsed, threshold)
+    summary['intra_csv_duplicates'] = intra_csv_count
 
     return Response({
         'total_rows': len(rows),

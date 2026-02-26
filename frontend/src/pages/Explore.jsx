@@ -56,7 +56,7 @@ export default function Explore() {
   const markers = useMemo(
     () => filtered
       .filter(c => c.latitude != null && c.longitude != null)
-      .map(c => ({ lat: c.latitude, lon: c.longitude, label: c.name, id: c.id })),
+      .map(c => ({ lat: c.latitude, lon: c.longitude, label: c.name, id: c.id, approximate: c.coordinates_approximate })),
     [filtered]
   )
 

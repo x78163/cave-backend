@@ -375,6 +375,12 @@ body {
   justify-content: center;
   box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
 }
+.cave-cluster-approx {
+  background: rgba(255, 0, 110, 0.2);
+  border-color: #ff006e;
+  color: #ff006e;
+  box-shadow: 0 0 10px rgba(255, 0, 110, 0.3);
+}
 
 /* Cave popup styling */
 .cave-popup-container .leaflet-popup-content-wrapper {

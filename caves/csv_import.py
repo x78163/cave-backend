@@ -9,8 +9,12 @@ Used by both the management command and the REST API import endpoints.
 import csv
 import io
 import math
+import re
 
 from caves.coord_parser import parse_coordinates
+
+
+APPROX_PATTERN = re.compile(r'\b(approximate|approx\.?|estimated|est\.?)\b', re.IGNORECASE)
 
 
 FT_TO_M = 0.3048
@@ -109,11 +113,33 @@ def parse_cave_row(row, defaults=None):
         return result
     result['name'] = name
 
+    # Detect approximate coordinates
+    coordinates_approximate = False
+    approx_col = (row.get('coordinates_approximate') or '').strip().lower()
+    if approx_col in TRUTHY:
+        coordinates_approximate = True
+
     # Parse coordinates
     lat, lon = None, None
     coord_raw = (row.get('coordinates') or '').strip()
     lat_raw = (row.get('latitude') or '').strip()
     lon_raw = (row.get('longitude') or '').strip()
+
+    # Strip approximate keywords from coordinate strings and flag
+    for raw_ref in ('coord_raw', 'lat_raw', 'lon_raw'):
+        val = locals()[raw_ref]
+        if APPROX_PATTERN.search(val):
+            coordinates_approximate = True
+    coord_raw = APPROX_PATTERN.sub('', coord_raw).strip().strip(',').strip()
+    lat_raw = APPROX_PATTERN.sub('', lat_raw).strip()
+    lon_raw = APPROX_PATTERN.sub('', lon_raw).strip()
+    # Also detect ~ prefix (e.g., ~35.5)
+    for raw_ref in (coord_raw, lat_raw, lon_raw):
+        if raw_ref.startswith('~'):
+            coordinates_approximate = True
+    coord_raw = coord_raw.lstrip('~').strip()
+    lat_raw = lat_raw.lstrip('~').strip()
+    lon_raw = lon_raw.lstrip('~').strip()
 
     if coord_raw:
         try:
@@ -190,6 +216,7 @@ def parse_cave_row(row, defaults=None):
         'description': description,
         'latitude': lat,
         'longitude': lon,
+        'coordinates_approximate': coordinates_approximate,
         'region': region,
         'country': country,
         'total_length': total_length,
@@ -228,12 +255,13 @@ def haversine_distance_meters(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def find_proximity_duplicates(lat, lon, threshold_meters=100):
+def find_proximity_duplicates(lat, lon, threshold_meters=100, is_approximate=False):
     """
     Find existing caves within threshold_meters of (lat, lon).
 
     Returns list of dicts sorted by distance:
-      [{'id': uuid_str, 'name': str, 'distance_m': float, 'latitude': float, 'longitude': float}]
+      [{'id': uuid_str, 'name': str, 'distance_m': float, 'latitude': float,
+        'longitude': float, 'coordinates_approximate': bool, 'approximate_match': bool}]
     """
     from caves.models import Cave
 
@@ -250,18 +278,127 @@ def find_proximity_duplicates(lat, lon, threshold_meters=100):
         latitude__lte=lat + degree_margin,
         longitude__gte=lon - degree_margin,
         longitude__lte=lon + degree_margin,
-    ).values('id', 'name', 'latitude', 'longitude')
+    ).values('id', 'name', 'latitude', 'longitude', 'coordinates_approximate')
 
     matches = []
     for cave in candidates:
         dist = haversine_distance_meters(lat, lon, cave['latitude'], cave['longitude'])
         if dist <= threshold_meters:
+            # approximate_match = True when either side has approximate coords
+            approx_match = is_approximate or cave['coordinates_approximate']
             matches.append({
                 'id': str(cave['id']),
                 'name': cave['name'],
                 'distance_m': round(dist, 1),
                 'latitude': cave['latitude'],
                 'longitude': cave['longitude'],
+                'coordinates_approximate': cave['coordinates_approximate'],
+                'approximate_match': approx_match,
             })
 
     return sorted(matches, key=lambda m: m['distance_m'])
+
+
+def find_intra_csv_duplicates(parsed_rows, threshold_meters=100):
+    """
+    Detect duplicates within a list of parsed CSV rows.
+
+    Checks two criteria:
+    1. Coordinate proximity: rows within threshold_meters of each other (Haversine)
+    2. Exact name match: rows with identical names (case-insensitive)
+
+    Mutates each entry in parsed_rows by adding an 'intra_csv_duplicates' list.
+    Returns the count of rows that have at least one intra-CSV duplicate.
+    """
+    for entry in parsed_rows:
+        entry['intra_csv_duplicates'] = []
+
+    valid = [(i, entry) for i, entry in enumerate(parsed_rows) if not entry.get('error')]
+
+    # Track flagged pairs to avoid double-adding
+    flagged_pairs = set()
+
+    def add_match(idx_a, idx_b, distance_m, match_type):
+        pair = (min(idx_a, idx_b), max(idx_a, idx_b))
+
+        if pair in flagged_pairs:
+            # Upgrade match_type to 'both' if different criteria matched
+            for dup in parsed_rows[idx_a]['intra_csv_duplicates']:
+                if dup['row_number'] == parsed_rows[idx_b]['row_number']:
+                    if dup['match_type'] != match_type:
+                        dup['match_type'] = 'both'
+                    if distance_m is not None:
+                        dup['distance_m'] = distance_m
+                    break
+            for dup in parsed_rows[idx_b]['intra_csv_duplicates']:
+                if dup['row_number'] == parsed_rows[idx_a]['row_number']:
+                    if dup['match_type'] != match_type:
+                        dup['match_type'] = 'both'
+                    if distance_m is not None:
+                        dup['distance_m'] = distance_m
+                    break
+            return
+
+        flagged_pairs.add(pair)
+        entry_a = parsed_rows[idx_a]
+        entry_b = parsed_rows[idx_b]
+
+        entry_a['intra_csv_duplicates'].append({
+            'row_number': entry_b['row_number'],
+            'name': entry_b.get('name', ''),
+            'distance_m': distance_m,
+            'match_type': match_type,
+        })
+        entry_b['intra_csv_duplicates'].append({
+            'row_number': entry_a['row_number'],
+            'name': entry_a.get('name', ''),
+            'distance_m': distance_m,
+            'match_type': match_type,
+        })
+
+    # Pass 1: Name matching via grouping (O(n))
+    name_groups = {}
+    for i, entry in valid:
+        name_lower = (entry.get('name') or '').lower().strip()
+        if name_lower:
+            name_groups.setdefault(name_lower, []).append(i)
+
+    for indices in name_groups.values():
+        if len(indices) < 2:
+            continue
+        for a in range(len(indices)):
+            for b in range(a + 1, len(indices)):
+                add_match(indices[a], indices[b], None, 'name')
+
+    # Pass 2: Coordinate proximity (latitude-sorted scan with banding)
+    degree_margin = (threshold_meters / 111_000) * 1.5
+
+    coords = []
+    for i, entry in valid:
+        lat = entry.get('latitude')
+        lon = entry.get('longitude')
+        if lat is not None and lon is not None:
+            approx = entry.get('cave_data', {}).get('coordinates_approximate', False)
+            coords.append((i, lat, lon, approx))
+
+    coords.sort(key=lambda c: c[1])
+
+    for a in range(len(coords)):
+        idx_a, lat_a, lon_a, approx_a = coords[a]
+        for b in range(a + 1, len(coords)):
+            idx_b, lat_b, lon_b, approx_b = coords[b]
+            # Skip proximity between two approximate rows (meaningless)
+            if approx_a and approx_b:
+                continue
+            if lat_b - lat_a > degree_margin:
+                break
+            if abs(lon_b - lon_a) > degree_margin:
+                continue
+            dist = haversine_distance_meters(lat_a, lon_a, lat_b, lon_b)
+            if dist <= threshold_meters:
+                match_type = 'proximity'
+                if approx_a or approx_b:
+                    match_type = 'approximate_proximity'
+                add_match(idx_a, idx_b, round(dist, 1), match_type)
+
+    return sum(1 for entry in parsed_rows if entry.get('intra_csv_duplicates'))

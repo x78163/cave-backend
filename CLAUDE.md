@@ -636,7 +636,7 @@ This project includes:
 
 ## Current Session Context
 
-**Date**: 2026-02-24
+**Date**: 2026-02-26
 **Status**: Active development — core features operational
 
 ### What's Built
@@ -668,8 +668,10 @@ This project includes:
 - Video URL parser (`caves/video_utils.py`) — regex-based platform detection, video ID extraction, embed/thumbnail URL generation
 - Cave routing system with A* pathfinding
 - Device management and sync infrastructure
-- CSV import: CLI management command + admin-only web UI with two-phase flow (preview + apply)
+- CSV import: CLI management command + admin-only web UI with two-phase flow (preview + apply), Windows-1252 encoding fallback
 - Coordinate-based duplicate detection (Haversine distance) with conflict resolution (keep/replace/rename)
+- Intra-CSV duplicate detection: name matching (O(n) grouping) + coordinate proximity (latitude-sorted banding), bidirectional flagging with match_type upgrade
+- Approximate coordinates: `coordinates_approximate` BooleanField on Cave, keyword detection in CSV imports ("approximate", "approx", "~", "estimated"), modified conflict logic (approx+approx skips proximity)
 - Universal coordinate parser (decimal, DMS, UTM, MGRS, Google/Apple Maps URLs)
 - Google Maps short URL resolver (server-side redirect following)
 - Reverse geocode endpoint (Nominatim) — auto-fills city, state, country, zip from coordinates
@@ -699,8 +701,8 @@ This project includes:
 - Cyberpunk-themed UI with dark mode
 - Explore page with searchable cave list + surface map + sort/filter (stars, mapped, unmapped, needs details, activity)
   - Search by name, city, state, zip code, aliases
-  - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, conflict resolution UI)
-  - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons
+  - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, intra-CSV duplicate detection, conflict resolution UI, approx badges)
+  - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons (red when all children are approximate)
   - Map auto-pans/zooms to fit filtered search results
   - Map view persistence via sessionStorage (restored on back-navigation)
   - Default US center with fitBounds auto-zoom to markers
@@ -727,7 +729,7 @@ This project includes:
   - Star ratings and reviews
   - Property owner section with GIS lookup, visibility toggle, contact info tiers
   - CaveRequest system: request contact access, submit contact info, pending requests with accept/deny for cave owners
-  - Inline coordinate editor (accepts any format)
+  - Inline coordinate editor (accepts any format, approximate checkbox)
   - Inline alias editor for cave owners/admins
   - Edit and Delete buttons in topbar (owner or admin only)
   - Delete confirmation modal with permanent deletion warning
@@ -739,7 +741,7 @@ This project includes:
   - Survey OCR: "Scan Sheet" button opens SurveyOCRModal — photograph handwritten survey form, GOT-OCR 2.0 extracts shots, editable review table with ◀▶ cell shift buttons for fixing column alignment, row count hint dropdown
   - "Generate from Map" button (magenta) in SurveyManager: appears when cave has SLAM map data and no SLAM-generated survey exists; generates traditional survey from SLAM data via API, SLAM badge on generated surveys
   - Page layout order: Cave Map → Surveys → Equipment → Description → Surface Map → Media → Ratings → Comments
-- Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), aliases, unlisted visibility option
+- Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), approximate checkbox with softer warning, aliases, unlisted visibility option
 - User profile page with avatar presets, saved routes, media gallery
   - Media tab with sub-tabs: Photos (grid), Documents (list), Videos (grid)
   - Aggregates cave photos + wall post images into unified photo gallery
@@ -768,16 +770,16 @@ This project includes:
 
 | File | Purpose |
 |------|---------|
-| `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection |
+| `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection + intra-CSV dedup + approximate coordinate handling |
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
 | `caves/hand_drawn_map.py` | Survey map image processing (bg removal + recolor) |
-| `caves/models.py` | Cave, LandOwner, CavePhoto (SET_NULL + uploaded_by), DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument (SET_NULL), CaveVideoLink (SET_NULL), MediaVisibility |
+| `caves/models.py` | Cave (coordinates_approximate), LandOwner, CavePhoto (SET_NULL + uploaded_by), DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument (SET_NULL), CaveVideoLink (SET_NULL), MediaVisibility |
 | `caves/video_utils.py` | Video URL parser (platform detect, embed URL, thumbnail generation) |
 | `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer + CaveDocumentSerializer + CaveVideoLinkSerializer |
 | `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD, user_media + user_media_update |
 | `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes) |
-| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers, clustering, parcel polygon, cave overlay, survey overlays, center button |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers (cyan/red approximate), clustering (red when all approx), parcel polygon, cave overlay, survey overlays, center button |
 | `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with lock/edit mode |
 | `frontend/src/components/SurveyMapModal.jsx` | 4-step guided survey map ingestion modal |
 | `frontend/src/components/DocumentUploadModal.jsx` | PDF upload dialog with drag-and-drop |
@@ -818,6 +820,7 @@ This project includes:
 - 0012: Unlisted visibility choice added
 - 0013: Media ownership (SET_NULL on cave FK, uploaded_by, cave_name_cache, MediaVisibility on CavePhoto/CaveDocument/CaveVideoLink)
 - 0014: Data migration — backfill cave_name_cache on existing media
+- 0015: coordinates_approximate BooleanField on Cave
 
 ### Migrations (survey app)
 - 0001: CaveSurvey, SurveyStation, SurveyShot models
@@ -847,4 +850,5 @@ This project includes:
 - Exact game engine choice for 3D exploration (deferred to Phase 4)
 - Map stitching algorithm details (deferred to Phase 5)
 - Hosting provider for production (AWS vs NameHero — deferred)
+- Multiple cave entrances (deferred — needs schema + UI design)
 - Property sale monitoring architecture at scale (deferred)

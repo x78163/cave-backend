@@ -27,6 +27,7 @@ const emptyForm = {
   water_present: false,
   water_description: '',
   requires_equipment: '',
+  coordinates_approximate: false,
   visibility: 'private',
 }
 
@@ -185,7 +186,7 @@ export default function CreateCave() {
                 if (!isEdit) {
                   apiFetch('/caves/proximity-check/', {
                     method: 'POST',
-                    body: { lat: Number(lat), lon: Number(lon) },
+                    body: { lat: Number(lat), lon: Number(lon), approximate: form.coordinates_approximate },
                   })
                     .then(data => setProximityWarning(data.nearby ? data : null))
                     .catch(() => {})
@@ -195,19 +196,48 @@ export default function CreateCave() {
               }
             }}
           />
+          <label className="flex items-center gap-2 text-sm text-[var(--cyber-text-dim)] mt-1">
+            <input
+              type="checkbox"
+              checked={form.coordinates_approximate}
+              onChange={e => {
+                update('coordinates_approximate', e.target.checked)
+                // Re-run proximity check with updated approximate flag
+                if (form.latitude && form.longitude && !isEdit) {
+                  apiFetch('/caves/proximity-check/', {
+                    method: 'POST',
+                    body: { lat: Number(form.latitude), lon: Number(form.longitude), approximate: e.target.checked },
+                  })
+                    .then(data => setProximityWarning(data.nearby ? data : null))
+                    .catch(() => {})
+                }
+              }}
+              className="accent-red-400"
+            />
+            Approximate location
+          </label>
           {proximityWarning && (
-            <div className="p-3 rounded-xl bg-amber-900/20 border border-amber-700/30">
-              <p className="text-amber-300 text-sm mb-2">
-                {proximityWarning.caves.some(c => c.owned)
-                  ? `You already have a cave entry near these coordinates: ${proximityWarning.caves.filter(c => c.owned).map(c => c.name).join(', ')}`
-                  : `A cave entry may already exist near these coordinates (${proximityWarning.count} found within ~50m).`}
+            <div className={`p-3 rounded-xl ${
+              form.coordinates_approximate
+                ? 'bg-[#1a1a2e] border border-[var(--cyber-border)]'
+                : 'bg-amber-900/20 border border-amber-700/30'
+            }`}>
+              <p className={`text-sm mb-2 ${form.coordinates_approximate ? 'text-[var(--cyber-text-dim)]' : 'text-amber-300'}`}>
+                {form.coordinates_approximate
+                  ? `Note: A cave entry may exist near these approximate coordinates (${proximityWarning.count} found within ~50m). Since your coordinates are approximate, this may not be a true conflict.`
+                  : proximityWarning.caves.some(c => c.owned)
+                    ? `You already have a cave entry near these coordinates: ${proximityWarning.caves.filter(c => c.owned).map(c => c.name).join(', ')}`
+                    : `A cave entry may already exist near these coordinates (${proximityWarning.count} found within ~50m).`}
               </p>
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => navigate(`/caves/${proximityWarning.caves[0].id}`)}
-                  className="px-3 py-1 rounded-full text-xs font-semibold
-                    border border-amber-600 text-amber-300 hover:bg-amber-900/30 transition-all"
+                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${
+                    form.coordinates_approximate
+                      ? 'border-[var(--cyber-border)] text-[var(--cyber-text-dim)] hover:border-[var(--cyber-cyan)]'
+                      : 'border-amber-600 text-amber-300 hover:bg-amber-900/30'
+                  }`}
                 >
                   View Existing Entry
                 </button>

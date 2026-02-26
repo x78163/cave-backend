@@ -44,13 +44,28 @@ export default function CsvImportModal({ onClose, onComplete }) {
       setPreviewData(data)
       // Initialize resolutions
       const init = {}
+      const intraPrimaries = new Set()
       for (const row of data.parsed_rows) {
         if (row.error) continue
-        if (row.duplicates.length > 0) {
+        const hasDbDupes = row.duplicates.length > 0
+        const hasIntraDupes = (row.intra_csv_duplicates || []).length > 0
+
+        if (hasDbDupes) {
+          const isApproxMatch = row.cave_data?.coordinates_approximate || row.duplicates[0].approximate_match
           init[row.row_number] = {
-            resolution: 'skip',
+            resolution: isApproxMatch ? 'create' : 'skip',
             existing_cave_id: row.duplicates[0].id,
             new_name: '',
+          }
+        } else if (hasIntraDupes) {
+          // First row in cluster creates, later rows skip
+          const clusterRowNumbers = row.intra_csv_duplicates.map(d => d.row_number)
+          const earliest = Math.min(row.row_number, ...clusterRowNumbers)
+          if (earliest === row.row_number && !intraPrimaries.has(earliest)) {
+            intraPrimaries.add(row.row_number)
+            init[row.row_number] = { resolution: 'create', existing_cave_id: null, new_name: '' }
+          } else {
+            init[row.row_number] = { resolution: 'skip', existing_cave_id: null, new_name: '' }
           }
         } else {
           init[row.row_number] = {
@@ -124,8 +139,9 @@ export default function CsvImportModal({ onClose, onComplete }) {
   }
 
   // ── Partition rows for preview ──
-  const conflictRows = previewData?.parsed_rows.filter(r => !r.error && r.duplicates.length > 0) || []
-  const cleanRows = previewData?.parsed_rows.filter(r => !r.error && r.duplicates.length === 0) || []
+  const hasAnyDuplicate = r => !r.error && (r.duplicates.length > 0 || (r.intra_csv_duplicates || []).length > 0)
+  const conflictRows = previewData?.parsed_rows.filter(hasAnyDuplicate) || []
+  const cleanRows = previewData?.parsed_rows.filter(r => !r.error && !hasAnyDuplicate(r)) || []
   const errorRows = previewData?.parsed_rows.filter(r => r.error) || []
 
   return (
@@ -312,7 +328,15 @@ export default function CsvImportModal({ onClose, onComplete }) {
               </span>
               <span className="text-green-400">{previewData.summary.valid} valid</span>
               {previewData.summary.with_duplicates > 0 && (
-                <span className="text-amber-400">{previewData.summary.with_duplicates} potential duplicates</span>
+                <span className="text-amber-400">{previewData.summary.with_duplicates} DB duplicates</span>
+              )}
+              {previewData.summary.intra_csv_duplicates > 0 && (
+                <span className="text-purple-400">{previewData.summary.intra_csv_duplicates} CSV-internal duplicates</span>
+              )}
+              {previewData.parsed_rows.filter(r => r.cave_data?.coordinates_approximate).length > 0 && (
+                <span className="text-red-400">
+                  {previewData.parsed_rows.filter(r => r.cave_data?.coordinates_approximate).length} approximate
+                </span>
               )}
               {previewData.summary.errors > 0 && (
                 <span className="text-red-400">{previewData.summary.errors} errors</span>
@@ -331,30 +355,75 @@ export default function CsvImportModal({ onClose, onComplete }) {
                 <div className="space-y-3">
                   {conflictRows.map(row => {
                     const r = resolutions[row.row_number] || {}
-                    const match = row.duplicates[0]
+                    const dbMatch = row.duplicates[0] || null
+                    const intraDupes = row.intra_csv_duplicates || []
+                    const hasDbDupes = row.duplicates.length > 0
+                    const hasIntraDupes = intraDupes.length > 0
+                    const isApprox = row.cave_data?.coordinates_approximate
+                    const isApproxDbMatch = hasDbDupes && (isApprox || dbMatch.approximate_match)
+
                     return (
                       <div key={row.row_number}
-                        className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-                        {/* Import row vs matched cave */}
+                        className={`rounded-lg p-3 space-y-2 ${
+                          isApproxDbMatch && !hasIntraDupes
+                            ? 'border border-[var(--cyber-border)] bg-[var(--cyber-surface)]/30'
+                            : 'border border-amber-500/30 bg-amber-500/5'
+                        }`}>
+                        {/* Row header */}
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-[var(--cyber-text)] truncate">
-                              CSV: {row.name}
+                              <span className="text-[var(--cyber-text-dim)] text-xs mr-1">Row {row.row_number}:</span>
+                              {row.name}
+                              {isApprox && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400">approx</span>
+                              )}
                             </p>
                             <p className="text-[10px] text-[var(--cyber-text-dim)]">
                               {row.latitude?.toFixed(4)}, {row.longitude?.toFixed(4)}
                               {row.total_length ? ` \u2022 ${row.total_length}m` : ''}
                             </p>
                           </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-sm text-[var(--cyber-text-dim)]">
-                              Matches: <span className="text-[var(--cyber-text)]">{match.name}</span>
-                            </p>
-                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400">
-                              {match.distance_m}m away
+                        </div>
+
+                        {/* DB duplicate match */}
+                        {hasDbDupes && (
+                          <div className="flex items-center gap-2 text-xs flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-semibold">DB</span>
+                            <span className="text-[var(--cyber-text-dim)]">
+                              Matches existing: <span className="text-[var(--cyber-text)]">{dbMatch.name}</span>
+                              {dbMatch.coordinates_approximate && (
+                                <span className="ml-1 text-red-400 italic">(approx)</span>
+                              )}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400">
+                              {dbMatch.distance_m}m away
+                            </span>
+                            {isApproxDbMatch && (
+                              <span className="text-[10px] text-[var(--cyber-text-dim)] italic">approximate match</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Intra-CSV duplicate matches */}
+                        {hasIntraDupes && intraDupes.map(dup => (
+                          <div key={dup.row_number} className="flex items-center gap-2 text-xs flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[10px] font-semibold">CSV</span>
+                            <span className="text-[var(--cyber-text-dim)]">
+                              Matches row {dup.row_number}: <span className="text-[var(--cyber-text)]">{dup.name}</span>
+                            </span>
+                            {dup.distance_m != null && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/20 text-purple-400">
+                                {dup.distance_m}m away
+                              </span>
+                            )}
+                            <span className="text-[10px] text-[var(--cyber-text-dim)] italic">
+                              {dup.match_type === 'both' ? 'name + proximity'
+                                : dup.match_type === 'approximate_proximity' ? 'approx proximity'
+                                : dup.match_type}
                             </span>
                           </div>
-                        </div>
+                        ))}
 
                         {/* Resolution options */}
                         <div className="flex flex-wrap gap-2">
@@ -370,25 +439,27 @@ export default function CsvImportModal({ onClose, onComplete }) {
                               onChange={() => setRowResolution(row.row_number, 'skip')}
                               className="hidden"
                             />
-                            Keep Original
+                            {hasDbDupes ? 'Keep Original' : 'Skip'}
                           </label>
 
-                          <label className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs cursor-pointer border transition-all ${
-                            r.resolution === 'update'
-                              ? 'border-[var(--cyber-cyan)] bg-[var(--cyber-cyan)]/10 text-[var(--cyber-cyan)]'
-                              : 'border-[var(--cyber-border)] text-[var(--cyber-text-dim)] hover:border-[var(--cyber-text-dim)]'
-                          }`}>
-                            <input
-                              type="radio"
-                              name={`res-${row.row_number}`}
-                              checked={r.resolution === 'update'}
-                              onChange={() => setRowResolution(row.row_number, 'update', {
-                                existing_cave_id: match.id,
-                              })}
-                              className="hidden"
-                            />
-                            Replace
-                          </label>
+                          {hasDbDupes && (
+                            <label className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs cursor-pointer border transition-all ${
+                              r.resolution === 'update'
+                                ? 'border-[var(--cyber-cyan)] bg-[var(--cyber-cyan)]/10 text-[var(--cyber-cyan)]'
+                                : 'border-[var(--cyber-border)] text-[var(--cyber-text-dim)] hover:border-[var(--cyber-text-dim)]'
+                            }`}>
+                              <input
+                                type="radio"
+                                name={`res-${row.row_number}`}
+                                checked={r.resolution === 'update'}
+                                onChange={() => setRowResolution(row.row_number, 'update', {
+                                  existing_cave_id: dbMatch.id,
+                                })}
+                                className="hidden"
+                              />
+                              Replace
+                            </label>
+                          )}
 
                           <label className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs cursor-pointer border transition-all ${
                             r.resolution === 'create'
@@ -402,12 +473,12 @@ export default function CsvImportModal({ onClose, onComplete }) {
                               onChange={() => setRowResolution(row.row_number, 'create')}
                               className="hidden"
                             />
-                            Rename & Import
+                            {hasDbDupes ? 'Rename & Import' : 'Import Anyway'}
                           </label>
                         </div>
 
-                        {/* Rename input */}
-                        {r.resolution === 'create' && (
+                        {/* Rename input (for DB duplicate rename) */}
+                        {r.resolution === 'create' && hasDbDupes && (
                           <input
                             type="text"
                             value={r.new_name || ''}
@@ -434,6 +505,9 @@ export default function CsvImportModal({ onClose, onComplete }) {
                     <div key={row.row_number} className="px-3 py-2 flex items-center justify-between">
                       <div>
                         <span className="text-sm text-[var(--cyber-text)]">{row.name}</span>
+                        {row.cave_data?.coordinates_approximate && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400">approx</span>
+                        )}
                         <span className="text-[10px] text-[var(--cyber-text-dim)] ml-2">
                           {row.region}{row.region && row.country ? ', ' : ''}{row.country}
                         </span>

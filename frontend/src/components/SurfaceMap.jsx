@@ -25,6 +25,20 @@ const caveIcon = L.divIcon({
   popupAnchor: [0, -40],
 })
 
+// Red marker SVG for approximate locations
+const approxIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40">
+  <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 26 14 26s14-15.5 14-26C28 6.3 21.7 0 14 0z" fill="#ff006e" stroke="#0a0a12" stroke-width="2"/>
+  <circle cx="14" cy="14" r="6" fill="#0a0a12"/>
+</svg>`
+
+const approxIcon = L.divIcon({
+  html: approxIconSvg,
+  className: 'cave-marker',
+  iconSize: [28, 40],
+  iconAnchor: [14, 40],
+  popupAnchor: [0, -40],
+})
+
 /**
  * Reusable Leaflet map component for surface maps.
  *
@@ -140,17 +154,23 @@ export default function SurfaceMap({
           maxClusterRadius: 50,
           spiderfyOnMaxZoom: true,
           showCoverageOnHover: false,
-          iconCreateFunction: (cluster) => L.divIcon({
-            html: `<div class="cave-cluster">${cluster.getChildCount()}</div>`,
-            className: 'cave-cluster-icon',
-            iconSize: [36, 36],
-          }),
+          iconCreateFunction: (cluster) => {
+            const children = cluster.getAllChildMarkers()
+            const allApprox = children.length > 0 && children.every(m => m.options.approximate)
+            const cls = allApprox ? 'cave-cluster cave-cluster-approx' : 'cave-cluster'
+            return L.divIcon({
+              html: `<div class="${cls}">${cluster.getChildCount()}</div>`,
+              className: 'cave-cluster-icon',
+              iconSize: [36, 36],
+            })
+          },
         })
       : null
 
     markers.forEach((m) => {
       if (m.lat == null || m.lon == null) return
-      const marker = L.marker([m.lat, m.lon], { icon: caveIcon })
+      const icon = m.approximate ? approxIcon : caveIcon
+      const marker = L.marker([m.lat, m.lon], { icon, approximate: !!m.approximate })
       if (m.label) {
         marker.bindPopup(
           `<div class="cave-popup">${m.label}</div>`,
