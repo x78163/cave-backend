@@ -1,24 +1,57 @@
 import { useState, useRef } from 'react'
 import { apiFetch } from '../hooks/useApi'
 
-const STEPS = ['Upload', 'Pin Entrance', 'Set Scale', 'Orient & Confirm']
+const CLASSIC_STEPS = ['Upload', 'Pin Entrance', 'Set Scale', 'Orient & Confirm']
+const TWOPOINT_STEPS = ['Upload', 'Pin Entrances', 'Confirm']
+
+// ── Geo utilities ──
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6_371_000
+  const toRad = d => d * Math.PI / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function gpsBearing(lat1, lon1, lat2, lon2) {
+  const toRad = d => d * Math.PI / 180
+  const dLon = toRad(lon2 - lon1)
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2))
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon)
+  return Math.atan2(y, x) // radians, CW from north
+}
 
 /**
  * Multi-step modal for adding a survey map to a cave.
  *
- * Flow:
+ * Classic flow (< 2 entrances):
  *   Step 0: Upload image + optional name
  *   Step 1: Click on cave entrance to pin anchor
  *   Step 2: Click two scale bar endpoints + enter distance
  *   Step 3: Rotate until north arrow points up, then confirm
  *
+ * Two-point flow (2+ entrances):
+ *   Step 0: Upload image + optional name
+ *   Step 1: Pin two known entrances on the image
+ *   Step 2: Confirm (auto-computed scale & heading, adjustable)
+ *
  * Props:
  *   caveId      UUID of the cave
+ *   entrances   Array of {label, lat, lon} — primary entrance + POI entrances
  *   onComplete  (survey) => void — called after confirm with saved survey object
  *   onClose     () => void — close without saving
  */
-export default function SurveyMapModal({ caveId, onComplete, onClose }) {
+export default function SurveyMapModal({ caveId, entrances = [], onComplete, onClose }) {
   const [step, setStep] = useState(0)
+  const twoPoint = entrances.length >= 2
+
+  const STEPS = twoPoint ? TWOPOINT_STEPS : CLASSIC_STEPS
+  // In two-point mode, the confirm step is 2; in classic it's 3
+  const CONFIRM_STEP = twoPoint ? 2 : 3
 
   // Step 0: Upload
   const [imageFile, setImageFile] = useState(null)
@@ -30,19 +63,24 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
   // Server response after upload
   const [survey, setSurvey] = useState(null)
 
-  // Step 1: Pin entrance
+  // Classic step 1: Pin single entrance
   const [anchor, setAnchor] = useState(null) // {x, y} fractional
 
-  // Step 2: Scale
+  // Two-point step 1: Pin two entrances
+  const [activeEntIdx, setActiveEntIdx] = useState(0) // which entrance is being pinned
+  const [pins, setPins] = useState([]) // array of {x, y} fractional, indexed by entrance
+
+  // Classic step 2: Scale
   const [scalePoints, setScalePoints] = useState([])
   const [scaleDist, setScaleDist] = useState('')
   const [scaleUnit, setScaleUnit] = useState('ft')
   const [computedScale, setComputedScale] = useState(0.1)
 
-  // Step 3: Orient
+  // Confirm step: Orient
   const [heading, setHeading] = useState(0)
   const [opacity, setOpacity] = useState(0.75)
   const [saving, setSaving] = useState(false)
+  const [autoCalibrated, setAutoCalibrated] = useState(false)
 
   // ── Step 0: Upload ──
   const handleUpload = async () => {
@@ -66,7 +104,7 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
     }
   }
 
-  // ── Step 2: Compute scale from two points + distance ──
+  // ── Classic step 2: Compute scale from two points + distance ──
   const applyScale = () => {
     const dist = parseFloat(scaleDist)
     if (!dist || dist <= 0 || scalePoints.length < 2 || !survey) return
@@ -76,11 +114,44 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
     const pixelDist = Math.sqrt(dx * dx + dy * dy)
     if (pixelDist > 0) {
       setComputedScale(realMeters / pixelDist)
-      setStep(3)
+      setStep(CONFIRM_STEP)
     }
   }
 
-  // ── Step 3: Confirm — save calibration to backend ──
+  // ── Two-point: auto-compute scale & heading from two pinned entrances ──
+  const applyTwoPoint = () => {
+    if (pins.length < 2 || !survey) return
+    const ent1 = entrances[0], ent2 = entrances[1]
+    const p1 = pins[0], p2 = pins[1]
+
+    // Pixel distance
+    const dx = (p2.x - p1.x) * survey.image_width
+    const dy = (p2.y - p1.y) * survey.image_height
+    const pixelDist = Math.sqrt(dx * dx + dy * dy)
+    if (pixelDist < 1) return
+
+    // GPS distance and bearing
+    const gpsDist = haversineMeters(ent1.lat, ent1.lon, ent2.lat, ent2.lon)
+    const bearing = gpsBearing(ent1.lat, ent1.lon, ent2.lat, ent2.lon)
+
+    // Image angle: atan2 with Y inverted (image Y increases downward)
+    const pixelAngle = Math.atan2(-dy, dx)
+
+    // Scale and heading
+    const scale = gpsDist / pixelDist
+    let hdg = (bearing - pixelAngle) * 180 / Math.PI
+    // Normalize to [-180, 180]
+    while (hdg > 180) hdg -= 360
+    while (hdg < -180) hdg += 360
+
+    setAnchor(p1) // Primary entrance pin = anchor
+    setComputedScale(scale)
+    setHeading(Math.round(hdg))
+    setAutoCalibrated(true)
+    setStep(CONFIRM_STEP)
+  }
+
+  // ── Confirm: save calibration to backend ──
   const handleConfirm = async () => {
     if (!survey) return
     setSaving(true)
@@ -106,6 +177,12 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
   }
 
   const overlayUrl = survey?.overlay_url
+
+  // Pin colors: first entrance = amber, second = green
+  const PIN_COLORS = [
+    { border: 'border-amber-400', bg: 'bg-amber-400/30', fill: '#f59e0b' },
+    { border: 'border-green-400', bg: 'bg-green-400/30', fill: '#4ade80' },
+  ]
 
   return (
     <div
@@ -193,8 +270,125 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
           </div>
         )}
 
-        {/* ── Step 1: Pin Entrance ── */}
-        {step === 1 && overlayUrl && (
+        {/* ── Step 1 (Two-Point): Pin Two Entrances ── */}
+        {step === 1 && twoPoint && overlayUrl && (
+          <div className="space-y-3">
+            <p className="text-xs text-[var(--cyber-text-dim)]">
+              Click each entrance location on the survey image. Scale and orientation will be computed automatically.
+            </p>
+
+            {/* Entrance selector chips */}
+            <div className="flex gap-2">
+              {entrances.slice(0, 2).map((ent, i) => {
+                const pinned = pins[i] != null
+                const active = activeEntIdx === i
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setActiveEntIdx(i)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-all flex items-center gap-1.5 ${
+                      active
+                        ? 'border-[var(--cyber-cyan)] bg-[var(--cyber-cyan)]/10 text-[var(--cyber-cyan)]'
+                        : pinned
+                          ? `border-[var(--cyber-border)] text-[var(--cyber-text)]`
+                          : 'border-[var(--cyber-border)] text-[var(--cyber-text-dim)]'
+                    }`}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full"
+                      style={{ background: pinned ? PIN_COLORS[i].fill : 'var(--cyber-surface-2)' }}
+                    />
+                    {ent.label || `Entrance ${i + 1}`}
+                    {pinned && <span className="text-[9px] opacity-60">pinned</span>}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Image with click-to-pin */}
+            <div
+              className="relative inline-block cursor-crosshair border border-[var(--cyber-border)] rounded-lg overflow-hidden"
+              style={{ maxWidth: '100%', maxHeight: '500px' }}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                const img = e.currentTarget.querySelector('img')
+                const x = (e.clientX - rect.left) / img.offsetWidth
+                const y = (e.clientY - rect.top) / img.offsetHeight
+                setPins(prev => {
+                  const next = [...prev]
+                  next[activeEntIdx] = { x, y }
+                  return next
+                })
+                // Auto-advance to next unpinned entrance
+                if (activeEntIdx === 0 && !pins[1]) {
+                  setActiveEntIdx(1)
+                }
+              }}
+            >
+              <img
+                src={overlayUrl}
+                alt="Click to pin entrances"
+                className="block"
+                style={{ maxHeight: '500px', background: '#111' }}
+              />
+              {/* SVG overlay for pins and connecting line */}
+              <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                {pins[0] && pins[1] && (
+                  <line
+                    x1={`${pins[0].x * 100}%`} y1={`${pins[0].y * 100}%`}
+                    x2={`${pins[1].x * 100}%`} y2={`${pins[1].y * 100}%`}
+                    stroke="#00e5ff" strokeWidth="1.5" strokeDasharray="6 3" opacity="0.5"
+                  />
+                )}
+              </svg>
+              {/* Pin markers */}
+              {pins.map((pin, i) => pin && (
+                <div
+                  key={i}
+                  className={`absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 ${PIN_COLORS[i].border} ${PIN_COLORS[i].bg}`}
+                  style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }}
+                >
+                  <span
+                    className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-medium whitespace-nowrap"
+                    style={{ color: PIN_COLORS[i].fill }}
+                  >
+                    {i + 1}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* GPS distance readout */}
+            {pins[0] && pins[1] && (
+              <div className="text-center text-[10px] text-[var(--cyber-text-dim)]">
+                GPS distance: <span className="text-[var(--cyber-cyan)] font-mono">
+                  {Math.round(haversineMeters(entrances[0].lat, entrances[0].lon, entrances[1].lat, entrances[1].lon))}m
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-between">
+              <button
+                onClick={() => { setStep(0); setPins([]); setActiveEntIdx(0) }}
+                className="px-4 py-2 rounded-lg text-xs text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:text-white transition-all"
+              >
+                Back
+              </button>
+              <button
+                onClick={applyTwoPoint}
+                disabled={!pins[0] || !pins[1]}
+                className="px-4 py-2 rounded-lg text-xs font-medium transition-all
+                  bg-[var(--cyber-cyan)]/20 text-[var(--cyber-cyan)] border border-cyan-700/50
+                  hover:bg-[var(--cyber-cyan)]/30 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 1 (Classic): Pin Single Entrance ── */}
+        {step === 1 && !twoPoint && overlayUrl && (
           <div className="space-y-3">
             <p className="text-xs text-[var(--cyber-text-dim)]">
               Click on the cave entrance. This point will align with the GPS coordinates.
@@ -243,8 +437,8 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
           </div>
         )}
 
-        {/* ── Step 2: Set Scale ── */}
-        {step === 2 && overlayUrl && (
+        {/* ── Step 2 (Classic only): Set Scale ── */}
+        {step === 2 && !twoPoint && overlayUrl && (
           <div className="space-y-3">
             <p className="text-xs text-[var(--cyber-text-dim)]">
               {scalePoints.length === 0
@@ -335,12 +529,22 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
           </div>
         )}
 
-        {/* ── Step 3: Orient & Confirm ── */}
-        {step === 3 && overlayUrl && (
+        {/* ── Confirm Step (both flows) ── */}
+        {step === CONFIRM_STEP && overlayUrl && (
           <div className="space-y-4">
             <p className="text-xs text-[var(--cyber-text-dim)]">
-              Rotate until the north arrow points up. Adjust opacity for visibility.
+              {autoCalibrated
+                ? 'Scale and rotation auto-computed from entrance positions. Fine-tune if needed.'
+                : 'Rotate until the north arrow points up. Adjust opacity for visibility.'}
             </p>
+
+            {autoCalibrated && (
+              <div className="text-center">
+                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30">
+                  auto-calibrated
+                </span>
+              </div>
+            )}
 
             {/* Rotated preview — auto-scales to keep image visible at any angle */}
             <div className="flex justify-center">
@@ -349,7 +553,6 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
                 style={{ width: '300px', height: '300px' }}
               >
                 {(() => {
-                  // Calculate scale so rotated image fits within 300x300 preview
                   const w = survey?.image_width || 300
                   const h = survey?.image_height || 300
                   const rad = Math.abs(heading) * Math.PI / 180
@@ -357,12 +560,9 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
                   const sinA = Math.abs(Math.sin(rad))
                   const rotW = w * cosA + h * sinA
                   const rotH = w * sinA + h * cosA
-                  // Base scale to fit unrotated image in 300px box
                   const baseScale = Math.min(300 / w, 300 / h)
-                  // Additional scale to fit rotated bounding box
                   const rotScale = Math.min(300 / (rotW * baseScale), 300 / (rotH * baseScale))
                   const finalScale = baseScale * rotScale
-                  // Position: center the anchor point in the preview
                   const ax = anchor?.x ?? 0.5
                   const ay = anchor?.y ?? 0.5
                   const imgLeft = 150 - ax * w * finalScale
@@ -437,7 +637,14 @@ export default function SurveyMapModal({ caveId, onComplete, onClose }) {
 
             <div className="flex justify-between">
               <button
-                onClick={() => setStep(2)}
+                onClick={() => {
+                  if (twoPoint) {
+                    setStep(1)
+                    setAutoCalibrated(false)
+                  } else {
+                    setStep(2)
+                  }
+                }}
                 className="px-4 py-2 rounded-lg text-xs text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:text-white transition-all"
               >
                 Back

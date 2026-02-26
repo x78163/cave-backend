@@ -7,7 +7,7 @@ import { matchSymbols, colorize, SYMBOLS } from '../utils/surveySymbols'
  * Renders survey centerlines, passage walls, and station labels on a Leaflet map.
  * Uses the same coordinate conversion as CaveMapOverlay (survey x/y → lat/lon).
  */
-export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, heading }) {
+export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, heading, converter: externalConverter = null }) {
   const groupRef = useRef(null)
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, h
     const group = L.layerGroup()
     groupRef.current = group
 
-    const toLL = (x, y) => slamToLatLng(x, y, anchorLat, anchorLon, heading || 0)
+    const toLL = externalConverter || ((x, y) => slamToLatLng(x, y, anchorLat, anchorLon, heading || 0))
 
     // Passage walls — continuous polygon outlines per branch.
     // Falls back to per-shot thick polylines for legacy render_data.

@@ -672,6 +672,7 @@ This project includes:
 - Coordinate-based duplicate detection (Haversine distance) with conflict resolution (keep/replace/rename)
 - Intra-CSV duplicate detection: name matching (O(n) grouping) + coordinate proximity (latitude-sorted banding), bidirectional flagging with match_type upgrade
 - Approximate coordinates: `coordinates_approximate` BooleanField on Cave, keyword detection in CSV imports ("approximate", "approx", "~", "estimated"), modified conflict logic (approx+approx skips proximity)
+- Multi-entrance CSV import: semicolon-separated coordinate pairs in lat/lon columns, first pair = primary entrance, subsequent pairs → entrance POIs (`PointOfInterest` with `poi_type='entrance'`)
 - Universal coordinate parser (decimal, DMS, UTM, MGRS, Google/Apple Maps URLs)
 - Google Maps short URL resolver (server-side redirect following)
 - Reverse geocode endpoint (Nominatim) — auto-fills city, state, country, zip from coordinates
@@ -716,8 +717,9 @@ This project includes:
     - Offscreen canvas compositing for uniform alpha passage wall fills
     - Combined bounding box calculation (`combineBounds`) for fitToView across both datasets
   - 3D cave explorer (Three.js point cloud viewer)
-  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
-  - Survey map overlay system: guided 4-step ingestion modal (upload → pin entrance → set scale → orient & confirm), show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
+  - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs)
+  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
+  - Survey map overlay system: adaptive ingestion modal — two-point auto-calibration (pin 2 known entrances → auto-compute scale + heading) when 2+ GPS entrances exist, falls back to classic 4-step flow (upload → pin entrance → set scale → orient & confirm); show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
   - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
   - CaveMapSection: unified toolbar with Survey toggle (amber), "On Map" button for Leaflet overlay, collapsible Routes & POIs panel (two-column grid, collapsed by default)
@@ -778,10 +780,11 @@ This project includes:
 | `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer + CaveDocumentSerializer + CaveVideoLinkSerializer |
 | `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD, user_media + user_media_update |
 | `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
-| `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes) |
-| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers (cyan/red approximate), clustering (red when all approx), parcel polygon, cave overlay, survey overlays, center button |
+| `frontend/src/utils/slamTransform.js` | Multi-point SLAM-to-GPS registration: similarity transform solver, converter factory, backward-compat `slamToLatLng` |
+| `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes), accepts external `converter` prop |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers (cyan/red approximate), clustering (red when all approx), entrance markers (green), parcel polygon, cave overlay, survey overlays, center button |
 | `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with lock/edit mode |
-| `frontend/src/components/SurveyMapModal.jsx` | 4-step guided survey map ingestion modal |
+| `frontend/src/components/SurveyMapModal.jsx` | Adaptive survey map ingestion: two-point auto-calibration (2+ entrances) or classic 4-step flow |
 | `frontend/src/components/DocumentUploadModal.jsx` | PDF upload dialog with drag-and-drop |
 | `frontend/src/components/DocumentViewer.jsx` | Full-screen PDF viewer (blob URL + iframe) |
 | `frontend/src/components/VideoLinkModal.jsx` | Add video URL dialog with platform auto-detect + preview |

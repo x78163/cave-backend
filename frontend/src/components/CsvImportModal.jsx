@@ -118,6 +118,7 @@ export default function CsvImportModal({ onClose, onComplete }) {
         return {
           name: row.name,
           cave_data: row.cave_data,
+          extra_entrances: row.extra_entrances || [],
           resolution: r.resolution,
           existing_cave_id: r.existing_cave_id || null,
           new_name: r.resolution === 'create' && r.new_name ? r.new_name : null,
@@ -378,6 +379,9 @@ export default function CsvImportModal({ onClose, onComplete }) {
                               {isApprox && (
                                 <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400">approx</span>
                               )}
+                              {row.extra_entrances?.length > 0 && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/20 text-green-400">+{row.extra_entrances.length} entrance{row.extra_entrances.length > 1 ? 's' : ''}</span>
+                              )}
                             </p>
                             <p className="text-[10px] text-[var(--cyber-text-dim)]">
                               {row.latitude?.toFixed(4)}, {row.longitude?.toFixed(4)}
@@ -507,6 +511,9 @@ export default function CsvImportModal({ onClose, onComplete }) {
                         <span className="text-sm text-[var(--cyber-text)]">{row.name}</span>
                         {row.cave_data?.coordinates_approximate && (
                           <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400">approx</span>
+                        )}
+                        {row.extra_entrances?.length > 0 && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/20 text-green-400">+{row.extra_entrances.length} entrance{row.extra_entrances.length > 1 ? 's' : ''}</span>
                         )}
                         <span className="text-[10px] text-[var(--cyber-text-dim)] ml-2">
                           {row.region}{row.region && row.country ? ', ' : ''}{row.country}

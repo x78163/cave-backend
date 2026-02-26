@@ -141,29 +141,69 @@ def parse_cave_row(row, defaults=None):
     lat_raw = lat_raw.lstrip('~').strip()
     lon_raw = lon_raw.lstrip('~').strip()
 
-    if coord_raw:
+    # For primary coordinate parsing, use only the first segment if semicolons present
+    coord_primary = coord_raw.split(';')[0].strip() if coord_raw else ''
+    lat_primary = lat_raw.split(';')[0].strip() if lat_raw else ''
+    lon_primary = lon_raw.split(';')[0].strip() if lon_raw else ''
+
+    if coord_primary:
         try:
-            lat, lon = parse_coordinates(coord_raw)
+            lat, lon = parse_coordinates(coord_primary)
         except ValueError as e:
             result['error'] = f'Coordinate error: {e}'
             return result
-    elif lat_raw and lon_raw:
-        combined = f'{lat_raw}, {lon_raw}'
+    elif lat_primary and lon_primary:
+        combined = f'{lat_primary}, {lon_primary}'
         try:
             lat, lon = parse_coordinates(combined)
         except ValueError:
             try:
-                lat = float(lat_raw.replace('°', '').strip())
-                lon = float(lon_raw.replace('°', '').strip())
+                lat = float(lat_primary.replace('°', '').strip())
+                lon = float(lon_primary.replace('°', '').strip())
             except ValueError as e:
                 result['error'] = f'Coordinate error: {e}'
                 return result
-    elif lat_raw or lon_raw:
+    elif lat_primary or lon_primary:
         result['error'] = 'Only one of lat/lon provided'
         return result
 
     result['latitude'] = lat
     result['longitude'] = lon
+
+    # Parse extra entrances from semicolon-separated values in coord columns
+    extra_entrances = []
+    if coord_raw and ';' in (row.get('coordinates') or ''):
+        # coordinates column: "35.5,-86.5; 35.6,-86.4; ..."
+        parts = APPROX_PATTERN.sub('', (row.get('coordinates') or '')).strip()
+        parts = parts.lstrip('~').strip()
+        segments = [s.strip().strip(',').strip() for s in parts.split(';') if s.strip()]
+        for seg in segments[1:]:  # skip first (already parsed as primary)
+            seg = seg.lstrip('~').strip()
+            if not seg:
+                continue
+            try:
+                elat, elon = parse_coordinates(seg)
+                extra_entrances.append({'latitude': elat, 'longitude': elon})
+            except ValueError:
+                pass  # skip unparseable extra entrances
+    elif lat_raw and ';' in (row.get('latitude') or ''):
+        # Separate lat/lon columns: "35.001; 35.003" and "-85.001; -85.003"
+        raw_lat_col = APPROX_PATTERN.sub('', (row.get('latitude') or '')).strip()
+        raw_lon_col = APPROX_PATTERN.sub('', (row.get('longitude') or '')).strip()
+        lat_parts = [s.strip().lstrip('~').strip() for s in raw_lat_col.split(';') if s.strip()]
+        lon_parts = [s.strip().lstrip('~').strip() for s in raw_lon_col.split(';') if s.strip()]
+        for i in range(1, min(len(lat_parts), len(lon_parts))):
+            try:
+                elat, elon = parse_coordinates(f'{lat_parts[i]}, {lon_parts[i]}')
+                extra_entrances.append({'latitude': elat, 'longitude': elon})
+            except ValueError:
+                try:
+                    elat = float(lat_parts[i].replace('°', '').strip())
+                    elon = float(lon_parts[i].replace('°', '').strip())
+                    extra_entrances.append({'latitude': elat, 'longitude': elon})
+                except ValueError:
+                    pass
+    result['extra_entrances'] = extra_entrances
 
     # Build description
     description = format_description(row)

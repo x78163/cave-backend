@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { MarkdownHooks as Markdown } from 'react-markdown'
 import RichTextEditor from '../components/RichTextEditor'
 import SurfaceMap from '../components/SurfaceMap'
@@ -17,6 +17,7 @@ import { PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
 import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
 import parseCoordinates from '../utils/parseCoordinates'
+import { computeSimilarityTransform, createSlamToLatLng } from '../utils/slamTransform'
 
 const MODE_LABELS = {
   quick: 'Quick', standard: 'Standard', detailed: 'Detailed',
@@ -67,6 +68,9 @@ export default function CaveDetail() {
   // Traditional survey data
   const [surveyRenderData, setSurveyRenderData] = useState(null)
   const [showSurveyOverlay, setShowSurveyOverlay] = useState(false)
+
+  // Entrance POIs (eagerly loaded for multi-point registration + entrance list)
+  const [entrancePois, setEntrancePois] = useState([])
 
   // Media tab + document/video state
   const [mediaTab, setMediaTab] = useState('photos')
@@ -138,6 +142,18 @@ export default function CaveDetail() {
   }, [user, cave?.owner, caveId])
 
   useEffect(() => { fetchCave(); fetchRatings() }, [caveId])
+
+  // Eagerly fetch entrance POIs for multi-point registration + entrance list
+  const fetchEntrancePois = useCallback(() => {
+    apiFetch(`/mapping/caves/${caveId}/pois/`)
+      .then(data => {
+        const pois = data?.pois || []
+        setEntrancePois(pois.filter(p => p.poi_type === 'entrance' && p.latitude != null && p.longitude != null))
+      })
+      .catch(() => {})
+  }, [caveId])
+
+  useEffect(() => { fetchEntrancePois() }, [fetchEntrancePois])
 
   // Fetch pending requests when cave owner is viewing
   useEffect(() => { fetchRequests() }, [fetchRequests])
@@ -358,6 +374,25 @@ export default function CaveDetail() {
     touchStartX.current = null
   }
 
+  // Multi-point registration: compute converter from entrance POIs with both SLAM + GPS coords
+  const hasLocation = cave?.latitude != null && cave?.longitude != null
+  const slamConverter = useMemo(() => {
+    if (!hasLocation) return null
+    const allPois = overlayPois.length > 0 ? overlayPois : entrancePois
+    const controlPoints = allPois
+      .filter(p => p.poi_type === 'entrance' && p.slam_x != null && p.slam_y != null && p.latitude != null && p.longitude != null)
+      .map(p => ({ slamX: p.slam_x, slamY: p.slam_y, lat: p.latitude, lon: p.longitude }))
+    if (controlPoints.length < 2) return null
+    const transform = computeSimilarityTransform(controlPoints, cave.latitude, cave.longitude, cave.slam_heading || 0)
+    return createSlamToLatLng(transform, cave.latitude, cave.longitude)
+  }, [hasLocation, cave?.latitude, cave?.longitude, cave?.slam_heading, overlayPois, entrancePois])
+
+  // Entrance markers for surface map
+  const entranceMarkers = useMemo(() =>
+    entrancePois.map(p => ({ lat: p.latitude, lon: p.longitude, label: p.label || 'Entrance' })),
+    [entrancePois]
+  )
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[var(--cyber-bg)]">
@@ -378,7 +413,6 @@ export default function CaveDetail() {
     )
   }
 
-  const hasLocation = cave.latitude != null && cave.longitude != null
   const currentPhoto = photos[carouselIndex]
 
   return (
@@ -427,6 +461,12 @@ export default function CaveDetail() {
             isCaveOwner={canManage}
             hasLocation={hasLocation}
             onUpdate={fetchCave}
+          />
+          <EntranceList
+            entrances={entrancePois}
+            caveId={caveId}
+            isCaveOwner={canManage}
+            onUpdate={fetchEntrancePois}
           />
 
           {/* Rating summary */}
@@ -724,6 +764,8 @@ export default function CaveDetail() {
                 caveId={caveId}
                 surveyRenderData={surveyRenderData}
                 showSurveyOverlay={showSurveyOverlay}
+                converter={slamConverter}
+                entranceMarkers={entranceMarkers}
               />
 
               {/* Floating layer panel — Google Earth style */}
@@ -1296,6 +1338,10 @@ export default function CaveDetail() {
       {showSurveyModal && (
         <SurveyMapModal
           caveId={caveId}
+          entrances={hasLocation ? [
+            { label: cave.name || 'Primary Entrance', lat: cave.latitude, lon: cave.longitude },
+            ...entrancePois.map(p => ({ label: p.label || 'Entrance', lat: p.latitude, lon: p.longitude })),
+          ] : []}
           onComplete={(newSurvey) => {
             setSurveyMaps(prev => [newSurvey, ...prev])
             setSurveyMapVisible(true)
@@ -1588,6 +1634,134 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
           className="text-[var(--cyber-cyan)] text-xs hover:underline">
           {hasLocation ? 'edit' : '+ Add coordinates'}
         </button>
+      )}
+    </div>
+  )
+}
+
+function EntranceList({ entrances, caveId, isCaveOwner, onUpdate }) {
+  const [adding, setAdding] = useState(false)
+  const [raw, setRaw] = useState('')
+  const [label, setLabel] = useState('')
+  const [parsed, setParsed] = useState(null)
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const tryParse = (value) => {
+    setRaw(value)
+    if (!value.trim()) { setParsed(null); setError(null); return }
+    try {
+      const result = parseCoordinates(value)
+      setParsed(result)
+      setError(null)
+    } catch (e) {
+      setParsed(null)
+      setError(e.message)
+    }
+  }
+
+  const saveEntrance = async () => {
+    if (!parsed) return
+    setSaving(true)
+    try {
+      await apiFetch(`/mapping/caves/${caveId}/pois/`, {
+        method: 'POST',
+        body: {
+          poi_type: 'entrance',
+          latitude: parsed.lat,
+          longitude: parsed.lon,
+          label: label.trim() || 'Entrance',
+          source: 'profile',
+        },
+      })
+      setAdding(false)
+      setRaw('')
+      setLabel('')
+      setParsed(null)
+      onUpdate()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteEntrance = async (poiId) => {
+    try {
+      await apiFetch(`/mapping/caves/${caveId}/pois/${poiId}/`, { method: 'DELETE' })
+      onUpdate()
+    } catch (err) {
+      console.error('Failed to delete entrance:', err)
+    }
+  }
+
+  if (entrances.length === 0 && !isCaveOwner) return null
+
+  return (
+    <div className="mt-1">
+      {entrances.length > 0 && (
+        <div className="space-y-0.5">
+          {entrances.map(e => (
+            <div key={e.id} className="flex items-center gap-2 text-xs">
+              <span className="text-[#4ade80]">{e.label || 'Entrance'}</span>
+              <span className="text-[#555570]">
+                {e.latitude.toFixed(4)}, {e.longitude.toFixed(4)}
+              </span>
+              {e.slam_x != null && (
+                <span className="px-1 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/20 text-emerald-400">linked</span>
+              )}
+              {isCaveOwner && (
+                <button onClick={() => deleteEntrance(e.id)}
+                  className="text-red-400/60 hover:text-red-400 text-[10px]">
+                  &times;
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {isCaveOwner && !adding && (
+        <button onClick={() => setAdding(true)}
+          className="text-[#4ade80] text-xs hover:underline mt-0.5">
+          + Add entrance
+        </button>
+      )}
+      {adding && (
+        <div className="mt-1 space-y-1.5">
+          <input
+            type="text"
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+            placeholder="Label (e.g. Upper Entrance)"
+            className="cyber-input w-full px-2 py-1 text-xs"
+          />
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              value={raw}
+              onChange={e => tryParse(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && parsed && saveEntrance()}
+              placeholder="Coordinates"
+              className="cyber-input flex-1 px-2 py-1 text-xs"
+              autoFocus
+            />
+            <button onClick={saveEntrance} disabled={!parsed || saving}
+              className={`px-2 py-1 rounded-full text-xs font-semibold transition-all
+                ${parsed ? 'bg-[#4ade80]/20 text-[#4ade80]' : 'bg-[var(--cyber-surface-2)] text-[#555570]'}`}>
+              {saving ? '...' : 'Add'}
+            </button>
+            <button onClick={() => { setAdding(false); setRaw(''); setLabel(''); setParsed(null); setError(null) }}
+              className="text-[var(--cyber-text-dim)] text-xs hover:text-white">
+              Cancel
+            </button>
+          </div>
+          {parsed && (
+            <span className="text-emerald-400 text-[10px]">
+              {parsed.lat.toFixed(6)}°, {parsed.lon.toFixed(6)}°
+            </span>
+          )}
+          {error && <span className="text-red-400 text-[10px]">{error}</span>}
+        </div>
       )}
     </div>
   )

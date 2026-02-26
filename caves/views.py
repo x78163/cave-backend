@@ -810,6 +810,7 @@ def cave_import_preview(request):
             'vertical_extent': result['data'].get('vertical_extent'),
             'description_preview': (result['data'].get('description') or '')[:200],
             'cave_data': result['data'],
+            'extra_entrances': result.get('extra_entrances', []),
         }
 
         if result['error']:
@@ -890,12 +891,26 @@ def cave_import_apply(request):
 
         # resolution == 'create'
         try:
-            Cave.objects.create(
+            cave = Cave.objects.create(
                 name=name,
                 owner=request.user,
                 **cave_data,
             )
             created_count += 1
+
+            # Create entrance POIs for extra entrances
+            extra_entrances = row.get('extra_entrances') or []
+            if extra_entrances:
+                from mapping.models import PointOfInterest
+                for idx, ent in enumerate(extra_entrances):
+                    PointOfInterest.objects.create(
+                        cave=cave,
+                        poi_type='entrance',
+                        latitude=ent['latitude'],
+                        longitude=ent['longitude'],
+                        label=f'Entrance {idx + 2}',
+                        source='imported',
+                    )
         except Exception as e:
             errors.append({'row_name': name, 'error': str(e)})
 

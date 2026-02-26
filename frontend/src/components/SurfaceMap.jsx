@@ -39,6 +39,20 @@ const approxIcon = L.divIcon({
   popupAnchor: [0, -40],
 })
 
+// Green marker SVG for additional cave entrances
+const entranceIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="32" viewBox="0 0 22 32">
+  <path d="M11 0C4.9 0 0 4.9 0 11c0 8.25 11 21 11 21s11-12.75 11-21C22 4.9 17.1 0 11 0z" fill="#4ade80" stroke="#0a0a12" stroke-width="1.5"/>
+  <circle cx="11" cy="11" r="4.5" fill="#0a0a12"/>
+</svg>`
+
+const entranceIcon = L.divIcon({
+  html: entranceIconSvg,
+  className: 'cave-marker',
+  iconSize: [22, 32],
+  iconAnchor: [11, 32],
+  popupAnchor: [0, -32],
+})
+
 /**
  * Reusable Leaflet map component for surface maps.
  *
@@ -87,6 +101,10 @@ export default function SurfaceMap({
   // Traditional survey overlay props
   surveyRenderData = null,
   showSurveyOverlay = false,
+  // Multi-point registration converter
+  converter = null,
+  // Additional entrance markers
+  entranceMarkers = [],
 }) {
   const [surveyDropdownOpen, setSurveyDropdownOpen] = useState(false)
   const [activeLayerId, setActiveLayerId] = useState(getStoredLayerId)
@@ -99,6 +117,7 @@ export default function SurfaceMap({
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const parcelLayerRef = useRef(null)
+  const entranceLayerRef = useRef(null)
 
   useEffect(() => {
     if (!containerRef.current || !center) return
@@ -216,6 +235,38 @@ export default function SurfaceMap({
       if (onMapReady) onMapReady(null)
     }
   }, [center?.[0], center?.[1], markers.length])
+
+  // Render entrance markers (reactive to entranceMarkers changes)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    // Remove old entrance layer
+    if (entranceLayerRef.current) {
+      map.removeLayer(entranceLayerRef.current)
+      entranceLayerRef.current = null
+    }
+    if (entranceMarkers.length === 0) return
+    const group = L.layerGroup()
+    entranceMarkers.forEach((m) => {
+      if (m.lat == null || m.lon == null) return
+      const marker = L.marker([m.lat, m.lon], { icon: entranceIcon })
+      if (m.label) {
+        marker.bindPopup(
+          `<div class="cave-popup">${m.label}</div>`,
+          { className: 'cave-popup-container' }
+        )
+        marker.bindTooltip(m.label, {
+          permanent: false,
+          direction: 'right',
+          offset: [10, -16],
+          className: 'cave-label',
+        })
+      }
+      marker.addTo(group)
+    })
+    group.addTo(map)
+    entranceLayerRef.current = group
+  }, [entranceMarkers])
 
   // Notify Leaflet when the container height changes + auto-fit survey overlays
   useEffect(() => {
@@ -531,7 +582,7 @@ export default function SurfaceMap({
               <button
                 onClick={() => {
                   if (!mapRef.current || !surveyRenderData?.bounds) return
-                  const toLL = (x, y) => slamToLatLng(x, y, anchor?.lat, anchor?.lon, caveHeading || 0)
+                  const toLL = converter || ((x, y) => slamToLatLng(x, y, anchor?.lat, anchor?.lon, caveHeading || 0))
                   const [minX, minY, maxX, maxY] = surveyRenderData.bounds
                   // Convert all four corners since rotation may skew the bounds
                   const corners = [
@@ -562,6 +613,7 @@ export default function SurfaceMap({
         selectedLevel={caveOverlayLevel}
         opacity={caveOverlayOpacity}
         visible={caveOverlayVisible}
+        converter={converter}
       />
       <HandDrawnMapOverlay
         map={mapRef.current}
@@ -584,6 +636,7 @@ export default function SurfaceMap({
           anchorLat={anchor?.lat}
           anchorLon={anchor?.lon}
           heading={caveHeading}
+          converter={converter}
         />
       )}
     </>

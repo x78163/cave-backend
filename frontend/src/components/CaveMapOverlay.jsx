@@ -1,24 +1,9 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
+import { slamToLatLng } from '../utils/slamTransform'
 
-/**
- * Convert SLAM coordinates (meters) to lat/lon using a flat-earth approximation.
- *
- * @param {number} slamX - X in SLAM frame (meters)
- * @param {number} slamY - Y in SLAM frame (meters)
- * @param {number} anchorLat - Cave entrance latitude
- * @param {number} anchorLon - Cave entrance longitude
- * @param {number} headingDeg - SLAM frame heading in degrees clockwise from north
- * @returns {[number, number]} [lat, lon]
- */
-export function slamToLatLng(slamX, slamY, anchorLat, anchorLon, headingDeg) {
-  const h = (headingDeg || 0) * Math.PI / 180
-  const eastM  =  slamX * Math.cos(h) + slamY * Math.sin(h)
-  const northM = -slamX * Math.sin(h) + slamY * Math.cos(h)
-  const lat = anchorLat + northM / 111320
-  const lon = anchorLon + eastM / (111320 * Math.cos(anchorLat * Math.PI / 180))
-  return [lat, lon]
-}
+// Re-export for backward compatibility (SurveyOverlay, SurfaceMap import from here)
+export { slamToLatLng }
 
 // POI colors matching CaveMapSection
 const POI_COLORS = {
@@ -69,6 +54,7 @@ export default function CaveMapOverlay({
   selectedLevel = 0,
   opacity = 0.6,
   visible = true,
+  converter: externalConverter = null,
 }) {
   const layerGroupRef = useRef(null)
 
@@ -92,7 +78,9 @@ export default function CaveMapOverlay({
     const offX = entrance ? entrance.slam_x : 0
     const offY = entrance ? entrance.slam_y : 0
 
-    const convert = (x, y) => slamToLatLng(x - offX, y - offY, anchorLat, anchorLon, heading)
+    // Use external multi-point converter if provided, otherwise fall back to single-point
+    const baseConvert = externalConverter || ((x, y) => slamToLatLng(x, y, anchorLat, anchorLon, heading))
+    const convert = (x, y) => baseConvert(x - offX, y - offY)
 
     const levels = mapData.levels || []
     const levelsToRender = selectedLevel === -1
