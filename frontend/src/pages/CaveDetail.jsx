@@ -514,6 +514,16 @@ export default function CaveDetail() {
                 : cave.visibility === 'unlisted' ? 'Unlisted'
                 : 'Private'}
             </span>
+
+            {cave.public_land_name && cave.public_land_name !== 'N/A' && (
+              <span
+                className="inline-flex items-center justify-center px-4 py-3 rounded-full text-sm font-medium
+                  bg-green-900/30 text-green-400 border border-green-800/30"
+                title={cave.public_land_name}
+              >
+                {cave.public_land_type || 'Public Land'}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1773,6 +1783,7 @@ function LandOwnerSection({ cave, caveId, user, onUpdate }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [lookingUp, setLookingUp] = useState(false)
+  const [lookingUpPadus, setLookingUpPadus] = useState(false)
   const [form, setForm] = useState({})
 
   // Contact request / submit state (server-backed via cave.user_pending_request)
@@ -1829,6 +1840,21 @@ function LandOwnerSection({ cave, caveId, user, onUpdate }) {
     }
   }
 
+  const runPadusLookup = async () => {
+    setLookingUpPadus(true)
+    try {
+      await apiFetch(`/caves/${caveId}/public-land-lookup/`, {
+        method: 'POST',
+        body: { save: true },
+      })
+      onUpdate()
+    } catch (err) {
+      console.error('PAD-US lookup failed:', err.response?.data || err.message)
+    } finally {
+      setLookingUpPadus(false)
+    }
+  }
+
   const gisVisible = landOwner?.gis_fields_visible !== false  // default true
   const hasContact = landOwner && (landOwner.owner_name || landOwner.organization)
   const hasParcel = landOwner && (landOwner.parcel_id || landOwner.parcel_address)
@@ -1857,6 +1883,15 @@ function LandOwnerSection({ cave, caveId, user, onUpdate }) {
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-white font-semibold">Property Owner</h3>
         <div className="flex gap-2">
+          {canLookup && !lookingUpPadus && (
+            <button onClick={runPadusLookup}
+              className="text-green-400 text-xs hover:underline">
+              Public Land
+            </button>
+          )}
+          {lookingUpPadus && (
+            <span className="text-[var(--cyber-text-dim)] text-xs">Checking PAD-US...</span>
+          )}
           {canLookup && !lookingUp && (
             <button onClick={runGisLookup}
               className="text-[var(--cyber-cyan)] text-xs hover:underline">
@@ -1955,6 +1990,16 @@ function LandOwnerSection({ cave, caveId, user, onUpdate }) {
         </div>
       ) : (
         <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-4 space-y-2">
+          {/* Public land info */}
+          {cave.public_land_name && cave.public_land_name !== 'N/A' && (
+            <div className="flex items-center gap-2">
+              <span className="text-green-400 text-sm font-medium">{cave.public_land_name}</span>
+              <span className="text-[var(--cyber-text-dim)] text-xs">
+                {cave.public_land_access && cave.public_land_access !== 'Unknown' ? `· ${cave.public_land_access}` : ''}
+              </span>
+            </div>
+          )}
+
           {/* Tier-2 fields: visible when gisVisible=true OR viewer is cave owner */}
           {(gisVisible || isCaveOwner) && (
             <>

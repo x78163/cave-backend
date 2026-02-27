@@ -135,6 +135,24 @@ class Cave(models.Model):
         help_text='Device that originally created/synced this cave'
     )
 
+    # Public land (PAD-US)
+    public_land_name = models.CharField(
+        max_length=300, blank=True, default='',
+        help_text='PAD-US unit name, e.g. "Great Smoky Mountains National Park"'
+    )
+    public_land_type = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text='Human-readable designation, e.g. "National Park", "National Forest"'
+    )
+    public_land_owner = models.CharField(
+        max_length=50, blank=True, default='',
+        help_text='Managing agency code, e.g. "NPS", "USFS", "BLM", "SPR"'
+    )
+    public_land_access = models.CharField(
+        max_length=30, blank=True, default='',
+        help_text='Access level: "Open Access", "Restricted Access", "Closed"'
+    )
+
     class Meta:
         ordering = ['-updated_at']
 

@@ -23,7 +23,7 @@ export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, h
 
     const toLL = externalConverter || ((x, y) => slamToLatLng(x, y, anchorLat, anchorLon, heading || 0))
 
-    // Passage walls — continuous polygon outlines per branch.
+    // Passage walls — smooth Bezier outlines per branch.
     // Falls back to per-shot thick polylines for legacy render_data.
     const outlines = renderData.passage_outlines || []
     const hasLevels = renderData.has_vertical_levels
@@ -35,7 +35,7 @@ export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, h
           color: '#ffa726', weight: 1, opacity: 0.5,
           dashArray: isLower ? '8 6' : null,
         }
-        // Fill quad (no stroke — walls drawn separately)
+        // Fill with smooth polygon (backend sends densified points)
         const latlngs = o.polygon.map(p => toLL(p[0], p[1]))
         if (latlngs.length < 3) continue
         L.polygon(latlngs, {
@@ -44,11 +44,11 @@ export default function SurveyOverlay({ map, renderData, anchorLat, anchorLon, h
           fillOpacity: isLower ? 0.10 : 0.18,
         }).addTo(group)
 
-        // Left wall segment
-        const leftLL = (o.left || []).map(p => toLL(p[0], p[1]))
+        // Left wall — use densified smooth points (match polygon boundary exactly)
+        const leftLL = (o.left_smooth || o.left || []).map(p => toLL(p[0], p[1]))
         if (leftLL.length >= 2) L.polyline(leftLL, wallStyle).addTo(group)
-        // Right wall segment
-        const rightLL = (o.right || []).map(p => toLL(p[0], p[1]))
+        // Right wall
+        const rightLL = (o.right_smooth || o.right || []).map(p => toLL(p[0], p[1]))
         if (rightLL.length >= 2) L.polyline(rightLL, wallStyle).addTo(group)
         // Flat caps at dead ends
         if (o.caps) {

@@ -113,26 +113,42 @@ export function drawSurveyPassageWalls(ctx, renderData, vp, canvas) {
     if (lowerOutlines.length > 0) drawQuadFills(lowerOutlines, 0.10)
     drawQuadFills(upperOutlines, 0.18)
 
+    // Deterministic pseudo-random for stable jitter across redraws
+    // (seeded by coordinate values so it doesn't shimmer on pan/zoom)
+    const seededRand = (x, y, i) => {
+      const h = Math.sin(x * 12.9898 + y * 78.233 + i * 43.758) * 43758.5453
+      return h - Math.floor(h) - 0.5  // range [-0.5, 0.5)
+    }
+
     // Wall outlines drawn in world coords (main canvas transform is active)
+    // Uses densified smooth points (Catmull-Rom → Bezier subdivisions from backend)
+    // with deterministic jitter for hand-drawn feel.
     const drawWallLines = (list, dashed) => {
-      ctx.strokeStyle = 'rgba(255,167,38,0.5)'
-      ctx.lineWidth = 1 / vp.scale
-      ctx.setLineDash(dashed ? [8 / vp.scale, 6 / vp.scale] : [])
+      const jitter = 0.06
+
+      const drawSmooth = (pts, seed) => {
+        if (pts.length < 2) return
+        ctx.beginPath()
+        ctx.moveTo(pts[0][0], pts[0][1])
+        for (let i = 1; i < pts.length; i++) {
+          const jx = seededRand(pts[i][0], pts[i][1], i + seed) * jitter
+          const jy = seededRand(pts[i][0], pts[i][1], i + seed + 1000) * jitter
+          ctx.lineTo(pts[i][0] + jx, pts[i][1] + jy)
+        }
+        ctx.stroke()
+      }
+
       for (const o of list) {
-        const lp = o.left || []
-        if (lp.length >= 2) {
-          ctx.beginPath()
-          ctx.moveTo(lp[0][0], lp[0][1])
-          ctx.lineTo(lp[1][0], lp[1][1])
-          ctx.stroke()
-        }
-        const rp = o.right || []
-        if (rp.length >= 2) {
-          ctx.beginPath()
-          ctx.moveTo(rp[0][0], rp[0][1])
-          ctx.lineTo(rp[1][0], rp[1][1])
-          ctx.stroke()
-        }
+        ctx.strokeStyle = 'rgba(255,167,38,0.5)'
+        ctx.lineWidth = 1 / vp.scale
+        ctx.setLineDash(dashed ? [8 / vp.scale, 6 / vp.scale] : [])
+
+        // Left wall — prefer smooth (Bezier-densified), fallback to raw
+        drawSmooth(o.left_smooth || o.left || [], 0)
+        // Right wall
+        drawSmooth(o.right_smooth || o.right || [], 500)
+
+        // Dead-end caps
         if (o.caps) {
           for (const cap of o.caps) {
             ctx.beginPath()
@@ -142,7 +158,6 @@ export function drawSurveyPassageWalls(ctx, renderData, vp, canvas) {
           }
         }
       }
-      ctx.setLineDash([])
     }
 
     if (lowerOutlines.length > 0) drawWallLines(lowerOutlines, true)

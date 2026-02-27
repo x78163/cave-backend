@@ -645,6 +645,10 @@ This project includes:
 - Full Cave CRUD with UUID primary keys, visibility levels (public/limited_public/unlisted/private), collaboration settings
 - Permission enforcement on edit/delete: owner or `is_staff` only (401/403 responses)
 - LandOwner model with TN GIS parcel integration (ArcGIS + TPAD API)
+- PAD-US public land lookup: 4 fields on Cave model (`public_land_name/type/owner/access`), auto-lookup on create, manual button, backfill command
+  - `caves/padus_lookup.py`: USGS PAD-US 4.1 ArcGIS FeatureServer, point-in-polygon, best-feature selection, retry with backoff
+  - `N/A` sentinel for caves confirmed not on public land (backfill skip logic)
+  - Green badge on CaveDetail + Explore cards, "Public Land" filter on Explore page
 - Three-tier GIS data visibility: always-visible (TPAD link, polygon, GIS Map), mutable (owner name, address, acreage), hidden (contact info)
 - `gis_fields_visible` toggle on LandOwner — cave entry creator controls tier-2 field visibility
 - CaveRequest model with accept/deny lifecycle for contact access requests and contact info submissions
@@ -700,7 +704,7 @@ This project includes:
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode
-- Explore page with searchable cave list + surface map + sort/filter (stars, mapped, unmapped, needs details, activity)
+- Explore page with searchable cave list + surface map + sort/filter (stars, mapped, unmapped, public land, needs details, activity)
   - Search by name, city, state, zip code, aliases
   - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, intra-CSV duplicate detection, conflict resolution UI, approx badges)
   - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons (red when all children are approximate)
@@ -774,6 +778,7 @@ This project includes:
 |------|---------|
 | `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection + intra-CSV dedup + approximate coordinate handling |
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
+| `caves/padus_lookup.py` | PAD-US public land lookup (USGS ArcGIS FeatureServer, point-in-polygon, best-feature selection) |
 | `caves/hand_drawn_map.py` | Survey map image processing (bg removal + recolor) |
 | `caves/models.py` | Cave (coordinates_approximate), LandOwner, CavePhoto (SET_NULL + uploaded_by), DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument (SET_NULL), CaveVideoLink (SET_NULL), MediaVisibility |
 | `caves/video_utils.py` | Video URL parser (platform detect, embed URL, thumbnail generation) |
@@ -824,6 +829,7 @@ This project includes:
 - 0013: Media ownership (SET_NULL on cave FK, uploaded_by, cave_name_cache, MediaVisibility on CavePhoto/CaveDocument/CaveVideoLink)
 - 0014: Data migration — backfill cave_name_cache on existing media
 - 0015: coordinates_approximate BooleanField on Cave
+- 0016: public_land_name, public_land_type, public_land_owner, public_land_access on Cave (PAD-US)
 
 ### Migrations (survey app)
 - 0001: CaveSurvey, SurveyStation, SurveyShot models

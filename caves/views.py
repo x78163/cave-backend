@@ -239,6 +239,23 @@ def cave_list(request):
                     edit_summary='Initial description',
                     revision_number=1,
                 )
+            # Auto-lookup public land status
+            if cave.has_location:
+                try:
+                    from .padus_lookup import lookup_public_land
+                    pl = lookup_public_land(cave.latitude, cave.longitude)
+                    if pl.get('found'):
+                        cave.public_land_name = pl.get('public_land_name', '')
+                        cave.public_land_type = pl.get('public_land_type', '')
+                        cave.public_land_owner = pl.get('public_land_owner', '')
+                        cave.public_land_access = pl.get('public_land_access', '')
+                        cave.save(update_fields=[
+                            'public_land_name', 'public_land_type',
+                            'public_land_owner', 'public_land_access',
+                        ])
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception('PAD-US auto-lookup failed')
             return Response(
                 CaveDetailSerializer(cave, context={'request': request}).data,
                 status=status.HTTP_201_CREATED,
@@ -293,6 +310,16 @@ def cave_detail(request, cave_id):
                     lo.save()
                 except LandOwner.DoesNotExist:
                     pass
+                # Also clear public land data
+                if cave.public_land_name:
+                    cave.public_land_name = ''
+                    cave.public_land_type = ''
+                    cave.public_land_owner = ''
+                    cave.public_land_access = ''
+                    cave.save(update_fields=[
+                        'public_land_name', 'public_land_type',
+                        'public_land_owner', 'public_land_access',
+                    ])
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -570,6 +597,44 @@ def cave_land_owner_gis_lookup(request, cave_id):
         lo.save()
         result['saved'] = True
         result['land_owner'] = LandOwnerSerializer(lo).data
+
+    return Response(result)
+
+
+@api_view(['POST'])
+def cave_public_land_lookup(request, cave_id):
+    """Look up PAD-US public land status using the cave's coordinates."""
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not cave.has_location:
+        return Response(
+            {'error': 'Cave has no coordinates set'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from .padus_lookup import lookup_public_land
+
+    result = lookup_public_land(cave.latitude, cave.longitude)
+
+    if request.data.get('save', True):
+        if result.get('found'):
+            cave.public_land_name = result.get('public_land_name', '')
+            cave.public_land_type = result.get('public_land_type', '')
+            cave.public_land_owner = result.get('public_land_owner', '')
+            cave.public_land_access = result.get('public_land_access', '')
+        else:
+            cave.public_land_name = ''
+            cave.public_land_type = ''
+            cave.public_land_owner = ''
+            cave.public_land_access = ''
+        cave.save(update_fields=[
+            'public_land_name', 'public_land_type',
+            'public_land_owner', 'public_land_access',
+        ])
+        result['saved'] = True
 
     return Response(result)
 

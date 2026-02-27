@@ -10,6 +10,9 @@ from collections import defaultdict, deque
 
 FEET_TO_METERS = 0.3048
 
+# Bezier curve subdivision for smooth passage walls
+BEZIER_SUBDIVISIONS = 6  # segments per Catmull-Rom span
+
 
 def polar_to_cartesian(distance, azimuth_deg, inclination_deg):
     """Convert a survey shot (distance, azimuth, inclination) to dx, dy, dz in meters.
@@ -285,6 +288,75 @@ def compute_passage_widths(shots, positions, declination=0.0, unit='feet', branc
     return strokes
 
 
+def _catmull_rom_to_bezier(points, subdivisions=BEZIER_SUBDIVISIONS):
+    """Convert a polyline to Catmull-Rom cubic Bezier curves.
+
+    Returns two lists:
+      smooth_pts: densified polyline for polygon fills (list of [x,y])
+      bezier_segs: list of [p0, cp1, cp2, p1] for Canvas/SVG bezierCurveTo
+
+    Uses the standard Catmull-Rom → cubic Bezier conversion:
+      For points P0,P1,P2,P3, the Bezier control points for segment P1→P2 are:
+        CP1 = P1 + (P2 - P0) / 6
+        CP2 = P2 - (P3 - P1) / 6
+    """
+    n = len(points)
+    if n < 2:
+        return points[:], []
+    if n == 2:
+        return points[:], []
+
+    bezier_segs = []
+    smooth_pts = [points[0]]
+
+    for i in range(n - 1):
+        p0 = points[max(i - 1, 0)]
+        p1 = points[i]
+        p2 = points[i + 1]
+        p3 = points[min(i + 2, n - 1)]
+
+        # Segment length — used to clamp tangents at sharp turns
+        seg_len = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+        max_tangent = seg_len * 0.33  # control points stay within 1/3 of segment
+
+        # Raw tangent vectors (standard Catmull-Rom)
+        t1x = (p2[0] - p0[0]) / 6
+        t1y = (p2[1] - p0[1]) / 6
+        t2x = (p3[0] - p1[0]) / 6
+        t2y = (p3[1] - p1[1]) / 6
+
+        # Clamp tangent magnitude to prevent overshoot at sharp bends
+        t1_len = math.sqrt(t1x * t1x + t1y * t1y)
+        if t1_len > max_tangent and t1_len > 1e-6:
+            s = max_tangent / t1_len
+            t1x *= s
+            t1y *= s
+        t2_len = math.sqrt(t2x * t2x + t2y * t2y)
+        if t2_len > max_tangent and t2_len > 1e-6:
+            s = max_tangent / t2_len
+            t2x *= s
+            t2y *= s
+
+        cp1 = [round(p1[0] + t1x, 4), round(p1[1] + t1y, 4)]
+        cp2 = [round(p2[0] - t2x, 4), round(p2[1] - t2y, 4)]
+
+        bezier_segs.append([p1, cp1, cp2, p2])
+
+        # Subdivide for polygon fill (de Casteljau)
+        for s in range(1, subdivisions + 1):
+            t = s / subdivisions
+            t2 = t * t
+            t3 = t2 * t
+            mt = 1 - t
+            mt2 = mt * mt
+            mt3 = mt2 * mt
+            x = mt3 * p1[0] + 3 * mt2 * t * cp1[0] + 3 * mt * t2 * cp2[0] + t3 * p2[0]
+            y = mt3 * p1[1] + 3 * mt2 * t * cp1[1] + 3 * mt * t2 * cp2[1] + t3 * p2[1]
+            smooth_pts.append([round(x, 4), round(y, 4)])
+
+    return smooth_pts, bezier_segs
+
+
 def compute_passage_outlines(shots, positions, unit='feet', branch_info=None, level_info=None):
     """Compute passage outline polygons using a hybrid strategy.
 
@@ -333,7 +405,12 @@ def compute_passage_outlines(shots, positions, unit='feet', branch_info=None, le
 
     # --- Strategy 1: Per-branch continuous polygons ---
     for branch in branch_info.get('branches', []):
-        stations = branch['stations']
+        stations = list(branch['stations'])
+        # Prepend the parent (junction) station so the connecting segment
+        # between the junction and the branch start gets wall geometry.
+        parent = branch.get('parent_station')
+        if parent and parent in positions and (not stations or stations[0] != parent):
+            stations.insert(0, parent)
         valid = [s for s in stations if s in positions]
         if len(valid) < 2:
             continue
@@ -396,12 +473,21 @@ def compute_passage_outlines(shots, positions, unit='feet', branch_info=None, le
             if len(left_pts) < 2:
                 continue
 
-            polygon = left_pts + list(reversed(right_pts))
+            # Compute Catmull-Rom splines for smooth walls
+            left_smooth, left_bezier = _catmull_rom_to_bezier(left_pts)
+            right_smooth, right_bezier = _catmull_rom_to_bezier(right_pts)
+
+            # Smooth polygon for fills (densified left + reversed densified right)
+            polygon = left_smooth + list(reversed(right_smooth))
 
             outline = {
                 'polygon': polygon,
                 'left': left_pts,
                 'right': right_pts,
+                'left_smooth': left_smooth,
+                'right_smooth': right_smooth,
+                'left_bezier': left_bezier,
+                'right_bezier': right_bezier,
                 'branch': branch['id'],
                 'is_lower': seg_lower,
             }

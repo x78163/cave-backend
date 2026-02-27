@@ -202,6 +202,7 @@ class CaveListSerializer(serializers.ModelSerializer):
             'slam_heading',
             'cover_photo', 'photo_count', 'comment_count',
             'average_rating', 'rating_count',
+            'public_land_name', 'public_land_type', 'public_land_owner', 'public_land_access',
             'visibility', 'collaboration_setting',
             'created_at', 'updated_at',
         ]
@@ -257,6 +258,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'land_owner',
             'pending_request_count', 'user_pending_request',
             'user_has_contact_access',
+            'public_land_name', 'public_land_type', 'public_land_owner', 'public_land_access',
             'visibility', 'collaboration_setting',
             'owner', 'origin_device',
             'created_at', 'updated_at',

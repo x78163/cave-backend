@@ -40,6 +40,10 @@ export default function Explore() {
       case 'unmapped':
         list = list.filter(c => !c.has_map)
         break
+      case 'public_land':
+        list = list.filter(c => c.public_land_name && c.public_land_name !== 'N/A')
+        list.sort((a, b) => a.name.localeCompare(b.name))
+        break
       case 'no_details':
         list = list.filter(c => !c.description && !c.total_length && !c.has_map && !(c.rating_count > 0))
         break
@@ -147,6 +151,7 @@ export default function Explore() {
           <option value="activity">Recent Activity</option>
           <option value="mapped">Mapped</option>
           <option value="unmapped">Unmapped</option>
+          <option value="public_land">Public Land</option>
           <option value="no_details">Needs Details</option>
         </select>
       </div>
@@ -229,6 +234,15 @@ export default function Explore() {
                     style={{ borderColor: '#fbbf24', color: '#fbbf24' }}
                   >
                     ★ {Number(cave.average_rating).toFixed(1)} ({cave.rating_count})
+                  </span>
+                )}
+                {cave.public_land_name && cave.public_land_name !== 'N/A' && (
+                  <span
+                    className="cyber-badge"
+                    style={{ borderColor: '#4ade80', color: '#4ade80' }}
+                    title={cave.public_land_name}
+                  >
+                    {cave.public_land_type || 'Public Land'}
                   </span>
                 )}
               </div>
