@@ -210,6 +210,80 @@ def proximity_check(request):
     return Response({'nearby': False, 'count': 0, 'caves': []})
 
 
+@api_view(['GET'])
+def cave_nearby(request, cave_id):
+    """Return caves within 300m of the given cave, visible to the current user."""
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if cave.latitude is None or cave.longitude is None:
+        return Response({'nearby_caves': []})
+
+    from .csv_import import haversine_distance_meters
+    from django.db.models import Exists, OuterRef
+    from survey.models import CaveSurvey
+
+    threshold = 300  # meters
+    degree_margin = (threshold / 111_000) * 1.5
+
+    candidates = Cave.objects.filter(
+        latitude__isnull=False,
+        longitude__isnull=False,
+        latitude__gte=cave.latitude - degree_margin,
+        latitude__lte=cave.latitude + degree_margin,
+        longitude__gte=cave.longitude - degree_margin,
+        longitude__lte=cave.longitude + degree_margin,
+    ).exclude(id=cave.id)
+
+    if request.user.is_authenticated:
+        candidates = candidates.filter(
+            Q(visibility__in=['public', 'limited_public']) |
+            Q(owner=request.user)
+        )
+    else:
+        candidates = candidates.filter(visibility__in=['public', 'limited_public'])
+
+    candidates = candidates.annotate(
+        has_computed_survey=Exists(
+            CaveSurvey.objects.filter(cave=OuterRef('pk'), render_data__isnull=False)
+        )
+    )
+
+    results = []
+    for c in candidates:
+        dist = haversine_distance_meters(
+            cave.latitude, cave.longitude, c.latitude, c.longitude
+        )
+        if dist > threshold:
+            continue
+
+        entry = {
+            'id': str(c.id),
+            'name': c.name,
+            'distance_m': round(dist, 1),
+            'coordinates_approximate': c.coordinates_approximate,
+            'has_survey': c.has_computed_survey,
+            'has_map': c.has_map,
+            'slam_heading': c.slam_heading,
+            'visibility': c.visibility,
+        }
+
+        # Limited public caves: protect coordinates
+        if c.visibility == 'limited_public':
+            entry['latitude'] = None
+            entry['longitude'] = None
+        else:
+            entry['latitude'] = c.latitude
+            entry['longitude'] = c.longitude
+
+        results.append(entry)
+
+    results.sort(key=lambda r: r['distance_m'])
+    return Response({'nearby_caves': results})
+
+
 @api_view(['GET', 'POST'])
 @parser_classes([JSONParser, MultiPartParser, FormParser])
 def cave_list(request):

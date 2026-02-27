@@ -9,6 +9,7 @@ urlpatterns = [
     path('import/apply/', views.cave_import_apply, name='cave_import_apply'),
     path('', views.cave_list, name='cave_list'),
     path('<uuid:cave_id>/', views.cave_detail, name='cave_detail'),
+    path('<uuid:cave_id>/nearby/', views.cave_nearby, name='cave_nearby'),
     path('<uuid:cave_id>/photos/', views.cave_photo_upload, name='cave_photo_upload'),
     path('<uuid:cave_id>/photos/<uuid:photo_id>/', views.cave_photo_detail, name='cave_photo_detail'),
     path('<uuid:cave_id>/comments/', views.cave_comment_add, name='cave_comment_add'),

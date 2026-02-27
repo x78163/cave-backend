@@ -53,6 +53,20 @@ const entranceIcon = L.divIcon({
   popupAnchor: [0, -32],
 })
 
+// Purple marker SVG for nearby caves (smaller than standard)
+const nearbyIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="26" viewBox="0 0 18 26">
+  <path d="M9 0C4 0 0 4 0 9c0 6.75 9 17 9 17s9-10.25 9-17C18 4 14 0 9 0z" fill="#a78bfa" stroke="#0a0a12" stroke-width="1.5"/>
+  <circle cx="9" cy="9" r="3.5" fill="#0a0a12"/>
+</svg>`
+
+const nearbyIcon = L.divIcon({
+  html: nearbyIconSvg,
+  className: 'cave-marker nearby-marker',
+  iconSize: [18, 26],
+  iconAnchor: [9, 26],
+  popupAnchor: [0, -26],
+})
+
 /**
  * Reusable Leaflet map component for surface maps.
  *
@@ -105,6 +119,10 @@ export default function SurfaceMap({
   converter = null,
   // Additional entrance markers
   entranceMarkers = [],
+  // Nearby cave markers + survey overlays
+  nearbyMarkers = [],
+  nearbySurveyOverlays = {},
+  onToggleNearbySurvey = null,
 }) {
   const [surveyDropdownOpen, setSurveyDropdownOpen] = useState(false)
   const [activeLayerId, setActiveLayerId] = useState(getStoredLayerId)
@@ -118,6 +136,7 @@ export default function SurfaceMap({
   const mapRef = useRef(null)
   const parcelLayerRef = useRef(null)
   const entranceLayerRef = useRef(null)
+  const nearbyLayerRef = useRef(null)
   const markerGroupRef = useRef(null)
 
   useEffect(() => {
@@ -268,6 +287,72 @@ export default function SurfaceMap({
     group.addTo(map)
     entranceLayerRef.current = group
   }, [entranceMarkers])
+
+  // Render nearby cave markers (reactive to nearbyMarkers changes)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (nearbyLayerRef.current) {
+      map.removeLayer(nearbyLayerRef.current)
+      nearbyLayerRef.current = null
+    }
+
+    if (nearbyMarkers.length === 0) return
+
+    const group = L.layerGroup()
+    nearbyMarkers.forEach((m) => {
+      if (m.lat == null || m.lon == null) return
+      const marker = L.marker([m.lat, m.lon], { icon: nearbyIcon })
+
+      const surveyBtn = m.hasSurvey
+        ? `<button class="nearby-survey-btn" data-cave-id="${m.id}"
+             style="color:#a78bfa;text-decoration:underline;cursor:pointer;background:none;border:none;font-size:11px;padding:0;margin-top:4px;display:block;width:100%">
+             Toggle Survey
+           </button>`
+        : ''
+
+      marker.bindPopup(
+        `<div class="cave-popup" style="text-align:center">
+           <a href="/caves/${m.id}" style="color:#a78bfa;font-weight:600;text-decoration:none">${m.label}</a>
+           <div style="font-size:10px;color:#888;margin-top:2px">${m.distance_m}m away</div>
+           ${surveyBtn}
+         </div>`,
+        { className: 'cave-popup-container' }
+      )
+
+      marker.bindTooltip(m.label, {
+        permanent: false,
+        direction: 'right',
+        offset: [8, -13],
+        className: 'cave-label nearby-cave-label',
+      })
+
+      marker.addTo(group)
+    })
+
+    group.addTo(map)
+    nearbyLayerRef.current = group
+
+    // Leaflet popups stop click propagation, so attach handlers via popupopen
+    const onPopupOpen = (e) => {
+      const el = e.popup.getElement()
+      if (!el) return
+      const btn = el.querySelector('.nearby-survey-btn')
+      if (btn && onToggleNearbySurvey) {
+        btn.addEventListener('click', () => {
+          const caveId = btn.dataset.caveId
+          const m = nearbyMarkers.find(mk => mk.id === caveId)
+          if (m) onToggleNearbySurvey(m)
+        })
+      }
+    }
+    map.on('popupopen', onPopupOpen)
+
+    return () => {
+      map.off('popupopen', onPopupOpen)
+    }
+  }, [nearbyMarkers, onToggleNearbySurvey])
 
   // Notify Leaflet when the container height changes + auto-fit survey overlays
   useEffect(() => {
@@ -640,6 +725,18 @@ export default function SurfaceMap({
           converter={converter}
         />
       )}
+      {/* Nearby cave survey overlays (muted gray styling) */}
+      {Object.entries(nearbySurveyOverlays).map(([caveId, overlay]) => (
+        <SurveyOverlay
+          key={`nearby-${caveId}`}
+          map={mapRef.current}
+          renderData={overlay.renderData}
+          anchorLat={overlay.anchorLat}
+          anchorLon={overlay.anchorLon}
+          heading={overlay.heading}
+          muted
+        />
+      ))}
     </>
   )
 }

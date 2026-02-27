@@ -209,6 +209,7 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/caves/{id}/share/` - Generate share link/QR
 - `POST /api/caves/reverse-geocode/` - Reverse geocode lat/lon to city/state/country/zip (Nominatim)
 - `POST /api/caves/proximity-check/` - Check for existing caves within ~50m of coordinates
+- `GET /api/caves/{id}/nearby/` - Find caves within 300m (visibility-filtered, includes distance + has_survey)
 
 ### Sync Endpoints
 - `POST /api/sync/start/` - Initiate sync session
@@ -636,7 +637,7 @@ This project includes:
 
 ## Current Session Context
 
-**Date**: 2026-02-26
+**Date**: 2026-02-27
 **Status**: Active development — core features operational
 
 ### What's Built
@@ -681,6 +682,7 @@ This project includes:
 - Google Maps short URL resolver (server-side redirect following)
 - Reverse geocode endpoint (Nominatim) — auto-fills city, state, country, zip from coordinates
 - Proximity check endpoint — warns about existing caves within ~50m at creation time
+- Nearby caves endpoint (`GET /api/caves/{id}/nearby/`) — 300m proximity search with Haversine distance, visibility filtering, `has_survey` annotation
 - Visibility-filtered `cave_list` API — unlisted/private caves hidden from non-owners
 - Title case auto-normalization for cave names and aliases on save
 - `is_staff` exposed via UserProfileSerializer for frontend admin gating
@@ -721,7 +723,8 @@ This project includes:
     - Combined bounding box calculation (`combineBounds`) for fitToView across both datasets
   - 3D cave explorer (Three.js point cloud viewer)
   - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs), coordinate change cascades delta to all entrance POIs
-  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
+  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), nearby cave markers (purple), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
+  - Nearby caves on surface map: purple markers (300m radius), popup with distance + link + "Toggle Survey" button, lazy-loaded muted purple survey overlays from neighboring caves
   - Survey map overlay system: adaptive ingestion modal — two-point auto-calibration (pin 2 known entrances → auto-compute scale + heading) when 2+ GPS entrances exist, falls back to classic 4-step flow (upload → pin entrance → set scale → orient & confirm); show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
   - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
@@ -782,12 +785,12 @@ This project includes:
 | `caves/models.py` | Cave (coordinates_approximate), LandOwner, CavePhoto (SET_NULL + uploaded_by), DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument (SET_NULL), CaveVideoLink (SET_NULL), MediaVisibility |
 | `caves/video_utils.py` | Video URL parser (platform detect, embed URL, thumbnail generation) |
 | `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer + CaveDocumentSerializer + CaveVideoLinkSerializer |
-| `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD, user_media + user_media_update |
+| `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, nearby caves, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD, user_media + user_media_update |
 | `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
 | `frontend/src/utils/slamTransform.js` | Multi-point SLAM-to-GPS registration: similarity transform solver, converter factory, backward-compat `slamToLatLng` |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes), accepts external `converter` prop |
 | `frontend/src/components/FineTuneMapModal.jsx` | Click-to-pick Leaflet modal for coordinate refinement (satellite + 3DEP hillshade, layer switcher) |
-| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with reactive markers (cyan/red approximate), clustering (red when all approx), entrance markers (green), parcel polygon, cave overlay, survey overlays, center button |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with reactive markers (cyan/red approximate), clustering (red when all approx), entrance markers (green), nearby cave markers (purple) with survey overlay toggle, parcel polygon, cave overlay, survey overlays, center button |
 | `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with lock/edit mode |
 | `frontend/src/components/SurveyMapModal.jsx` | Adaptive survey map ingestion: two-point auto-calibration (2+ entrances) or classic 4-step flow |
 | `frontend/src/components/DocumentUploadModal.jsx` | PDF upload dialog with drag-and-drop |
@@ -805,7 +808,7 @@ This project includes:
 | `survey/ocr.py` | GOT-OCR 2.0 model loading, inference, table parsing, LaTeX stripping |
 | `frontend/src/components/SurveyManager.jsx` | Survey list + spreadsheet shot entry table + OCR scan button |
 | `frontend/src/components/SurveyOCRModal.jsx` | Two-step OCR modal: upload image → review/edit/shift parsed shots |
-| `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + passage outline polygons + dashed underpass + symbol icons on surface map |
+| `frontend/src/components/SurveyOverlay.jsx` | Leaflet layer for survey centerline + passage outline polygons + dashed underpass + symbol icons on surface map; `muted` prop for purple nearby cave overlays |
 | `frontend/src/utils/surveyCanvasRenderers.js` | Survey drawing functions for CaveMapCanvas (grid, walls, centerline, stations, symbols, legends, north arrow, scale bar) |
 | `frontend/src/utils/surveyColors.js` | Shared branch color palette used by CaveMapCanvas, SurveyOverlay, SurveyManager, topology graph |
 | `frontend/src/utils/surveySymbols.js` | 62 NSS cave cartography SVG symbols, keyword matching, colorize/dataURL helpers |

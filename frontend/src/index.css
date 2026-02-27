@@ -421,6 +421,17 @@ body {
 .cave-label::before {
   border-right-color: rgba(10, 10, 18, 0.8) !important;
 }
+.nearby-marker {
+  opacity: 0.85;
+  transition: opacity 0.2s;
+}
+.nearby-marker:hover {
+  opacity: 1;
+}
+.nearby-cave-label {
+  font-size: 10px !important;
+  opacity: 0.7;
+}
 
 /* ── Cave Map Canvas ── */
 

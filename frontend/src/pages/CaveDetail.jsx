@@ -104,6 +104,11 @@ export default function CaveDetail() {
   const [reviewText, setReviewText] = useState('')
   const [submittingRating, setSubmittingRating] = useState(false)
 
+  // Nearby caves
+  const [nearbyCaves, setNearbyCaves] = useState([])
+  const [showNearbyCaves, setShowNearbyCaves] = useState(false)
+  const [nearbySurveyOverlays, setNearbySurveyOverlays] = useState({})
+
   // Pending requests (cave owner view)
   const [pendingRequests, setPendingRequests] = useState([])
 
@@ -155,6 +160,14 @@ export default function CaveDetail() {
   }, [caveId])
 
   useEffect(() => { fetchEntrancePois() }, [fetchEntrancePois])
+
+  // Fetch nearby caves for surface map
+  useEffect(() => {
+    if (!cave?.latitude || !cave?.longitude) return
+    apiFetch(`/caves/${caveId}/nearby/`)
+      .then(data => setNearbyCaves(data?.nearby_caves || []))
+      .catch(() => {})
+  }, [caveId, cave?.latitude, cave?.longitude])
 
   // Fetch pending requests when cave owner is viewing
   useEffect(() => { fetchRequests() }, [fetchRequests])
@@ -393,6 +406,54 @@ export default function CaveDetail() {
     entrancePois.map(p => ({ lat: p.latitude, lon: p.longitude, label: p.label || 'Entrance' })),
     [entrancePois]
   )
+
+  // Nearby cave markers (only computed when toggle is on)
+  const nearbyMarkers = useMemo(() =>
+    showNearbyCaves
+      ? nearbyCaves
+          .filter(c => c.latitude != null && c.longitude != null)
+          .map(c => ({
+            lat: c.latitude,
+            lon: c.longitude,
+            label: c.name,
+            id: c.id,
+            hasSurvey: c.has_survey,
+            distance_m: c.distance_m,
+          }))
+      : [],
+    [nearbyCaves, showNearbyCaves]
+  )
+
+  // Toggle survey overlay for a nearby cave (lazy-loads render data)
+  const toggleNearbySurvey = useCallback(async (nearbyCave) => {
+    const id = nearbyCave.id
+    if (nearbySurveyOverlays[id]) {
+      setNearbySurveyOverlays(prev => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      return
+    }
+    try {
+      const surveys = await apiFetch(`/caves/${id}/surveys/`)
+      const withRender = (surveys || []).find(s => s.render_data)
+      if (!withRender) return
+      const nc = nearbyCaves.find(c => c.id === id)
+      setNearbySurveyOverlays(prev => ({
+        ...prev,
+        [id]: {
+          renderData: withRender.render_data,
+          anchorLat: nc?.latitude,
+          anchorLon: nc?.longitude,
+          heading: nc?.slam_heading || 0,
+          name: nc?.name,
+        }
+      }))
+    } catch (err) {
+      console.error('Failed to load nearby survey:', err)
+    }
+  }, [nearbySurveyOverlays, nearbyCaves])
 
   if (loading) {
     return (
@@ -778,6 +839,12 @@ export default function CaveDetail() {
                 showSurveyOverlay={showSurveyOverlay}
                 converter={slamConverter}
                 entranceMarkers={entranceMarkers}
+                nearbyMarkers={nearbyMarkers}
+                nearbySurveyOverlays={nearbySurveyOverlays}
+                onToggleNearbySurvey={(m) => {
+                  const nc = nearbyCaves.find(c => c.id === m.id)
+                  if (nc) toggleNearbySurvey(nc)
+                }}
               />
 
               {/* Floating layer panel — Google Earth style */}
@@ -860,6 +927,21 @@ export default function CaveDetail() {
                       )}
                     </div>
                   )}
+                </div>
+              )}
+              {/* Nearby caves toggle — bottom-right of surface map */}
+              {nearbyCaves.length > 0 && (
+                <div className="absolute bottom-3 right-3 z-[1100]">
+                  <button
+                    onClick={() => setShowNearbyCaves(v => !v)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all shadow-lg
+                      ${showNearbyCaves
+                        ? 'bg-purple-900/80 text-purple-400 border border-purple-700/50 backdrop-blur-sm'
+                        : 'bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] backdrop-blur-sm hover:text-purple-400 hover:border-purple-700/50'
+                      }`}
+                  >
+                    {showNearbyCaves ? 'Hide Nearby' : `Nearby (${nearbyCaves.length})`}
+                  </button>
                 </div>
               )}
             </div>
