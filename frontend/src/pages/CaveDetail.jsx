@@ -13,6 +13,7 @@ import DocumentViewer from '../components/DocumentViewer'
 import VideoLinkModal from '../components/VideoLinkModal'
 import VideoEmbed from '../components/VideoEmbed'
 import SurveyManager from '../components/SurveyManager'
+import FineTuneMapModal from '../components/FineTuneMapModal'
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
 import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
@@ -460,7 +461,7 @@ export default function CaveDetail() {
             caveId={caveId}
             isCaveOwner={canManage}
             hasLocation={hasLocation}
-            onUpdate={fetchCave}
+            onUpdate={() => { fetchCave(); fetchEntrancePois() }}
           />
           <EntranceList
             entrances={entrancePois}
@@ -734,10 +735,11 @@ export default function CaveDetail() {
           <div className="px-4 py-3">
             <div className="relative">
               <SurfaceMap
+                key={`${cave.latitude}-${cave.longitude}`}
                 center={[cave.latitude, cave.longitude]}
                 markers={[{ lat: cave.latitude, lon: cave.longitude, label: cave.name, approximate: cave.coordinates_approximate }]}
                 zoom={14}
-                height={surveyMapVisible ? '28rem' : showOverlay ? '20rem' : '12rem'}
+                height={surveyMapVisible ? '28rem' : showOverlay ? '20rem' : '20rem'}
                 className="border border-[var(--cyber-border)]"
                 showCenterButton
                 caveMapData={overlayMapData}
@@ -1512,6 +1514,7 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
   const [saving, setSaving] = useState(false)
   const [resolving, setResolving] = useState(false)
   const [approximate, setApproximate] = useState(false)
+  const [showFineTune, setShowFineTune] = useState(false)
 
   const startEdit = () => {
     setRaw(hasLocation ? `${cave.latitude}, ${cave.longitude}` : '')
@@ -1599,6 +1602,12 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
                 : 'bg-[var(--cyber-surface-2)] text-[#555570]'}`}>
             {saving ? '...' : 'Save'}
           </button>
+          <button onClick={() => setShowFineTune(true)}
+            className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all
+              bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)]
+              hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 border border-[var(--cyber-border)]">
+            Fine Tune
+          </button>
           <button onClick={() => setEditing(false)}
             className="text-[var(--cyber-text-dim)] text-xs hover:text-white">
             Cancel
@@ -1625,6 +1634,18 @@ function InlineCoordinateEditor({ cave, caveId, isCaveOwner, hasLocation, onUpda
             <span className={approximate ? 'text-red-400' : ''}>Approximate</span>
           </label>
         </div>
+        {showFineTune && (
+          <FineTuneMapModal
+            initialLat={parsed?.lat ?? cave.latitude}
+            initialLon={parsed?.lon ?? cave.longitude}
+            onConfirm={({ lat, lon }) => {
+              setParsed({ lat, lon })
+              setRaw(`${lat.toFixed(6)}, ${lon.toFixed(6)}`)
+              setShowFineTune(false)
+            }}
+            onClose={() => setShowFineTune(false)}
+          />
+        )}
       </div>
     )
   }

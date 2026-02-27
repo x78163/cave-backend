@@ -118,6 +118,7 @@ export default function SurfaceMap({
   const mapRef = useRef(null)
   const parcelLayerRef = useRef(null)
   const entranceLayerRef = useRef(null)
+  const markerGroupRef = useRef(null)
 
   useEffect(() => {
     if (!containerRef.current || !center) return
@@ -166,9 +167,33 @@ export default function SurfaceMap({
       })
     }
 
-    // Add markers — use clustering when many markers, direct when few
+    mapRef.current = map
+    if (onMapReady) onMapReady(map)
+
+    return () => {
+      map.remove()
+      mapRef.current = null
+      markerGroupRef.current = null
+      parcelLayerRef.current = null
+      if (onMapReady) onMapReady(null)
+    }
+  }, [center?.[0], center?.[1]])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reactively manage cave markers without destroying the map
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    // Remove old marker layer
+    if (markerGroupRef.current) {
+      map.removeLayer(markerGroupRef.current)
+      markerGroupRef.current = null
+    }
+
+    if (markers.length === 0) return
+
     const useClustering = markers.length > 20
-    const clusterGroup = useClustering
+    const group = useClustering
       ? L.markerClusterGroup({
           maxClusterRadius: 50,
           spiderfyOnMaxZoom: true,
@@ -184,7 +209,7 @@ export default function SurfaceMap({
             })
           },
         })
-      : null
+      : L.layerGroup()
 
     markers.forEach((m) => {
       if (m.lat == null || m.lon == null) return
@@ -205,36 +230,12 @@ export default function SurfaceMap({
       if (onMarkerClick) {
         marker.on('click', () => onMarkerClick(m))
       }
-      if (clusterGroup) {
-        clusterGroup.addLayer(marker)
-      } else {
-        marker.addTo(map)
-      }
+      group.addLayer(marker)
     })
 
-    if (clusterGroup) {
-      map.addLayer(clusterGroup)
-    }
-
-    // Fit bounds if multiple markers (skip if restoring a saved view)
-    if (!initialView && markers.length > 1) {
-      const validMarkers = markers.filter(m => m.lat != null && m.lon != null)
-      if (validMarkers.length > 1) {
-        const bounds = L.latLngBounds(validMarkers.map(m => [m.lat, m.lon]))
-        map.fitBounds(bounds, { padding: [30, 30] })
-      }
-    }
-
-    mapRef.current = map
-    if (onMapReady) onMapReady(map)
-
-    return () => {
-      map.remove()
-      mapRef.current = null
-      parcelLayerRef.current = null
-      if (onMapReady) onMapReady(null)
-    }
-  }, [center?.[0], center?.[1], markers.length])
+    group.addTo(map)
+    markerGroupRef.current = group
+  }, [markers])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Render entrance markers (reactive to entranceMarkers changes)
   useEffect(() => {

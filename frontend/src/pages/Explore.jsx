@@ -72,39 +72,24 @@ export default function Explore() {
     return US_CENTER
   }, [markers])
 
-  // Persist map view in sessionStorage so back-navigation restores it
-  const STORAGE_KEY = 'explore_map_view'
-  const savedView = useMemo(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY)
-      return raw ? JSON.parse(raw) : null
-    } catch { return null }
-  }, [])
-
-  const handleViewChange = useCallback((view) => {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(view)) }
-    catch { /* ignore */ }
-  }, [])
+  const handleViewChange = useCallback(() => {}, [])
 
   const mapRef = useRef(null)
 
-  // Fit map bounds to filtered markers only when search/sort actively changes
-  const prevSearchRef = useRef(search)
-  const prevSortRef = useRef(sortBy)
+  // Fit map to search results (skip if markers span continents — e.g. NZ + US)
   useEffect(() => {
     const map = mapRef.current
-    if (!map || markers.length === 0) return
-    // Skip on initial mount — let savedView (sessionStorage) take priority
-    if (prevSearchRef.current === search && prevSortRef.current === sortBy) return
-    prevSearchRef.current = search
-    prevSortRef.current = sortBy
-    if (markers.length === 1) {
-      map.setView([markers[0].lat, markers[0].lon], 13, { animate: true })
-    } else {
-      const bounds = L.latLngBounds(markers.map(m => [m.lat, m.lon]))
-      map.fitBounds(bounds, { padding: [30, 30], animate: true })
-    }
-  }, [markers, search, sortBy])
+    if (!map || markers.length <= 1) return  // single marker handled by mapCenter
+    const timer = setTimeout(() => {
+      if (!mapRef.current) return
+      const lats = markers.map(mk => mk.lat)
+      const latSpan = Math.max(...lats) - Math.min(...lats)
+      if (latSpan > 50) return  // intercontinental spread, keep current view
+      const bounds = L.latLngBounds(markers.map(mk => [mk.lat, mk.lon]))
+      mapRef.current.fitBounds(bounds, { padding: [30, 30], animate: true })
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [markers])
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -162,11 +147,10 @@ export default function Explore() {
           <SurfaceMap
             center={mapCenter}
             markers={markers}
-            zoom={markers.length === 1 ? 13 : 10}
+            zoom={markers.length === 1 ? 13 : 5}
             height="16rem"
             onMarkerClick={(m) => navigate(`/caves/${m.id}`)}
             className="border border-[var(--cyber-border)]"
-            initialView={savedView}
             onViewChange={handleViewChange}
             onMapReady={(map) => { mapRef.current = map }}
           />

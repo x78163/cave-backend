@@ -4,6 +4,7 @@ import RichTextEditor from '../components/RichTextEditor'
 import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
 import parseCoordinates from '../utils/parseCoordinates'
+import FineTuneMapModal from '../components/FineTuneMapModal'
 
 const emptyForm = {
   name: '',
@@ -320,6 +321,7 @@ function CoordinateInput({ latitude, longitude, onChange }) {
   const [parsed, setParsed] = useState(
     hasCoords ? { lat: Number(latitude), lon: Number(longitude) } : null
   )
+  const [showFineTune, setShowFineTune] = useState(false)
 
   // Sync from external form state when loading existing cave
   useEffect(() => {
@@ -384,21 +386,42 @@ function CoordinateInput({ latitude, longitude, onChange }) {
         placeholder="35.658, -85.588 · DMS · UTM · MGRS · Google Maps link"
         className="cyber-input w-full px-4 py-2.5 text-sm"
       />
-      <div className="mt-1.5 min-h-[1.25rem]">
-        {resolving && (
-          <span className="text-[var(--cyber-cyan)] text-xs animate-pulse">
-            Resolving map link...
-          </span>
-        )}
-        {!resolving && parsed && (
-          <span className="text-emerald-400 text-xs">
-            {parsed.lat.toFixed(6)}°, {parsed.lon.toFixed(6)}°
-          </span>
-        )}
-        {!resolving && error && (
-          <span className="text-red-400 text-xs">{error}</span>
+      <div className="mt-1.5 min-h-[1.25rem] flex items-center gap-3">
+        <div className="flex-1">
+          {resolving && (
+            <span className="text-[var(--cyber-cyan)] text-xs animate-pulse">
+              Resolving map link...
+            </span>
+          )}
+          {!resolving && parsed && (
+            <span className="text-emerald-400 text-xs">
+              {parsed.lat.toFixed(6)}°, {parsed.lon.toFixed(6)}°
+            </span>
+          )}
+          {!resolving && error && (
+            <span className="text-red-400 text-xs">{error}</span>
+          )}
+        </div>
+        {!resolving && (
+          <button onClick={() => setShowFineTune(true)}
+            className="text-[var(--cyber-text-dim)] text-xs hover:text-[var(--cyber-cyan)] transition-colors">
+            {parsed ? 'Fine Tune on Map' : 'Pick on Map'}
+          </button>
         )}
       </div>
+      {showFineTune && (
+        <FineTuneMapModal
+          initialLat={parsed?.lat ?? null}
+          initialLon={parsed?.lon ?? null}
+          onConfirm={({ lat, lon }) => {
+            setParsed({ lat, lon })
+            setRaw(`${lat.toFixed(6)}, ${lon.toFixed(6)}`)
+            setShowFineTune(false)
+            onChange(String(lat), String(lon))
+          }}
+          onClose={() => setShowFineTune(false)}
+        />
+      )}
     </div>
   )
 }

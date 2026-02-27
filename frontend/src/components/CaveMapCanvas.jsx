@@ -802,7 +802,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   }, [scheduleRender])
 
   return (
-    <div ref={containerRef} className={`w-full ${compact ? 'h-[300px]' : 'flex-1'} relative`}>
+    <div ref={containerRef} className={`w-full ${compact ? 'h-[450px]' : 'flex-1'} relative`}>
       <canvas
         ref={canvasRef}
         className={`cave-map-canvas w-full h-full ${crosshairMode ? 'crosshair-mode' : ''}`}

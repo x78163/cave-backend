@@ -708,9 +708,8 @@ This project includes:
   - Search by name, city, state, zip code, aliases
   - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, intra-CSV duplicate detection, conflict resolution UI, approx badges)
   - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons (red when all children are approximate)
-  - Map auto-pans/zooms to fit filtered search results
-  - Map view persistence via sessionStorage (restored on back-navigation)
-  - Default US center with fitBounds auto-zoom to markers
+  - Reactive marker updates (no map destruction on search) with smart fitBounds (skips when lat span > 50° to avoid intercontinental zoom-out from 5 international caves)
+  - Default US center [39.8, -98.6] with zoom 5; single search result auto-centers via mapCenter
   - Cave cards show aliases in parentheses after name
 - Cave detail page with:
   - Unified cave detail canvas (CaveMapCanvas): shows SLAM LiDAR scans and/or traditional survey data as toggleable layers in a single canvas
@@ -721,7 +720,7 @@ This project includes:
     - Offscreen canvas compositing for uniform alpha passage wall fills
     - Combined bounding box calculation (`combineBounds`) for fitToView across both datasets
   - 3D cave explorer (Three.js point cloud viewer)
-  - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs)
+  - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs), coordinate change cascades delta to all entrance POIs
   - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
   - Survey map overlay system: adaptive ingestion modal — two-point auto-calibration (pin 2 known entrances → auto-compute scale + heading) when 2+ GPS entrances exist, falls back to classic 4-step flow (upload → pin entrance → set scale → orient & confirm); show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
@@ -735,7 +734,7 @@ This project includes:
   - Star ratings and reviews
   - Property owner section with GIS lookup, visibility toggle, contact info tiers
   - CaveRequest system: request contact access, submit contact info, pending requests with accept/deny for cave owners
-  - Inline coordinate editor (accepts any format, approximate checkbox)
+  - Inline coordinate editor (accepts any format, approximate checkbox, Fine Tune click-on-map modal with satellite + 3DEP hillshade)
   - Inline alias editor for cave owners/admins
   - Edit and Delete buttons in topbar (owner or admin only)
   - Delete confirmation modal with permanent deletion warning
@@ -747,7 +746,7 @@ This project includes:
   - Survey OCR: "Scan Sheet" button opens SurveyOCRModal — photograph handwritten survey form, GOT-OCR 2.0 extracts shots, editable review table with ◀▶ cell shift buttons for fixing column alignment, row count hint dropdown
   - "Generate from Map" button (magenta) in SurveyManager: appears when cave has SLAM map data and no SLAM-generated survey exists; generates traditional survey from SLAM data via API, SLAM badge on generated surveys
   - Page layout order: Cave Map → Surveys → Equipment → Description → Surface Map → Media → Ratings → Comments
-- Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), approximate checkbox with softer warning, aliases, unlisted visibility option
+- Create Cave page with smart coordinate input, reverse geocode auto-fill (city/state/country/zip), proximity duplicate warning (~50m), approximate checkbox with softer warning, aliases, unlisted visibility option, Fine Tune / Pick on Map modal
 - User profile page with avatar presets, saved routes, media gallery
   - Media tab with sub-tabs: Photos (grid), Documents (list), Videos (grid)
   - Aggregates cave photos + wall post images into unified photo gallery
@@ -787,7 +786,8 @@ This project includes:
 | `frontend/src/pages/CaveDetail.jsx` | Main cave profile page (~1800 lines) |
 | `frontend/src/utils/slamTransform.js` | Multi-point SLAM-to-GPS registration: similarity transform solver, converter factory, backward-compat `slamToLatLng` |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes), accepts external `converter` prop |
-| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with markers (cyan/red approximate), clustering (red when all approx), entrance markers (green), parcel polygon, cave overlay, survey overlays, center button |
+| `frontend/src/components/FineTuneMapModal.jsx` | Click-to-pick Leaflet modal for coordinate refinement (satellite + 3DEP hillshade, layer switcher) |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with reactive markers (cyan/red approximate), clustering (red when all approx), entrance markers (green), parcel polygon, cave overlay, survey overlays, center button |
 | `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with lock/edit mode |
 | `frontend/src/components/SurveyMapModal.jsx` | Adaptive survey map ingestion: two-point auto-calibration (2+ entrances) or classic 4-step flow |
 | `frontend/src/components/DocumentUploadModal.jsx` | PDF upload dialog with drag-and-drop |

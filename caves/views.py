@@ -320,6 +320,23 @@ def cave_detail(request, cave_id):
                         'public_land_name', 'public_land_type',
                         'public_land_owner', 'public_land_access',
                     ])
+                # Cascade coordinate shift to entrance POIs
+                if old_lat is not None and old_lon is not None:
+                    delta_lat = cave.latitude - old_lat
+                    delta_lon = cave.longitude - old_lon
+                    if abs(delta_lat) > 1e-9 or abs(delta_lon) > 1e-9:
+                        from mapping.models import PointOfInterest
+                        entrance_pois = list(PointOfInterest.objects.filter(
+                            cave=cave, poi_type='entrance',
+                            latitude__isnull=False, longitude__isnull=False,
+                        ))
+                        for poi in entrance_pois:
+                            poi.latitude += delta_lat
+                            poi.longitude += delta_lon
+                        if entrance_pois:
+                            PointOfInterest.objects.bulk_update(
+                                entrance_pois, ['latitude', 'longitude'],
+                            )
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
