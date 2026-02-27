@@ -377,7 +377,23 @@ def compute_passage_outlines(shots, positions, unit='feet', branch_info=None, le
 
     unit_scale = FEET_TO_METERS if unit == 'feet' else 1.0
 
-    # Build per-station left/right lookup
+    # Build per-shot left/right lookup (direction-aware for junction stations)
+    # shot_lr[(fn, tn)] stores the LRUD measured at fn looking toward tn
+    shot_lr = {}
+    for shot in shots:
+        fn = shot['from_station']
+        tn = shot['to_station']
+        lr = {
+            'left': (shot.get('left') or 0) * unit_scale,
+            'right': (shot.get('right') or 0) * unit_scale,
+        }
+        shot_lr[(fn, tn)] = lr
+        # Also store reverse so to_station inherits from_station LRUD
+        if (tn, fn) not in shot_lr:
+            shot_lr[(tn, fn)] = lr
+
+    # Fallback per-station lookup (first occurrence) for stations without
+    # a matching shot pair (e.g., loop closures, orphaned stations)
     station_lr = {}
     for shot in shots:
         fn = shot['from_station']
@@ -466,7 +482,17 @@ def compute_passage_outlines(shots, positions, unit='feet', branch_info=None, le
                     az = bearings[0]
 
                 lx, ly = -math.cos(az), math.sin(az)
-                lr = station_lr.get(name, {'left': 0, 'right': 0})
+                # Direction-aware LRUD: prefer shot connecting this station
+                # to its neighbor in this branch segment
+                lr = None
+                if i < len(seg_stations) - 1:
+                    key = (name, seg_stations[i + 1])
+                    lr = shot_lr.get(key)
+                if lr is None and i > 0:
+                    key = (name, seg_stations[i - 1])
+                    lr = shot_lr.get(key)
+                if lr is None:
+                    lr = station_lr.get(name, {'left': 0, 'right': 0})
                 left_pts.append([round(x + lx * lr['left'], 4), round(y + ly * lr['left'], 4)])
                 right_pts.append([round(x - lx * lr['right'], 4), round(y - ly * lr['right'], 4)])
 
