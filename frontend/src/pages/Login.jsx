@@ -27,11 +27,9 @@ export default function Login() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="text-4xl mb-2">
-            <span style={{ color: 'var(--cyber-cyan)' }}>&#9672;</span>
-          </div>
+          <img src="/cave-dragon-logo.png" alt="Cave Dragon" className="w-48 h-48 mx-auto mb-2" />
           <h1 className="text-2xl font-bold" style={{ color: 'var(--cyber-cyan)' }}>
-            Cave Mapper
+            Cave Dragon
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--cyber-text-dim)' }}>
             Sign in to continue

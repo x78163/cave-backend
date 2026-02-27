@@ -22,7 +22,7 @@ body {
   min-height: 100dvh;
   background-color: var(--cyber-bg);
   color: var(--cyber-text);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Ubuntu', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 

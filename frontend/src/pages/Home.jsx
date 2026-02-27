@@ -32,7 +32,7 @@ export default function Home() {
             className="text-2xl font-bold"
             style={{ color: 'var(--cyber-cyan)' }}
           >
-            Cave Backend
+            Cave Dragon
           </h1>
           <p className="text-sm text-[var(--cyber-text-dim)]">
             Your caving community feed

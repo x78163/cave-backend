@@ -23,8 +23,9 @@ export default function TopBar() {
   return (
     <header className="cyber-topbar sticky top-0 z-50 px-6 py-3 flex items-center justify-between">
       <Link to="/" className="flex items-center gap-2 no-underline">
+        <img src="/cave-dragon-logo.png" alt="" className="h-[3.25rem] w-[3.25rem]" />
         <span className="text-lg font-bold" style={{ color: 'var(--cyber-cyan)' }}>
-          Cave Backend
+          Cave Dragon
         </span>
       </Link>
 

@@ -703,7 +703,7 @@ This project includes:
   - API: `POST /api/caves/{id}/generate-slam-survey/` — level='all' (default) merges all levels, level=0/1/... for single level; auto-computes render_data after creation
 
 **Frontend (React/Vite)**:
-- Cyberpunk-themed UI with dark mode
+- Cyberpunk-themed UI with dark mode, "Cave Dragon" branding, Ubuntu font (Google Fonts), cyan dragon logo
 - Explore page with searchable cave list + surface map + sort/filter (stars, mapped, unmapped, public land, needs details, activity)
   - Search by name, city, state, zip code, aliases
   - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, intra-CSV duplicate detection, conflict resolution UI, approx badges)
