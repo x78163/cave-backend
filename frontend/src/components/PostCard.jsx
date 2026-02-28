@@ -2,6 +2,19 @@ import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../hooks/useApi'
 
+const EVENT_TYPE_COLORS = {
+  expedition: '#00e5ff', survey: '#fbbf24', training: '#4ade80',
+  education: '#a78bfa', outreach: '#fb923c', conservation: '#34d399',
+  social: '#f472b6', other: '#94a3b8',
+}
+
+function formatEventDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
 function timeAgo(iso) {
   if (!iso) return ''
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
@@ -93,6 +106,44 @@ export default function PostCard({ post, currentUserId, onReact, onDelete }) {
       {/* Body */}
       {post.is_deleted ? (
         <p className="mt-3 text-sm italic text-[var(--cyber-text-dim)]">[Deleted by author]</p>
+      ) : (post.event || post.event_name_cache) ? (
+        <p className="mt-3 text-sm text-[var(--cyber-text)] flex flex-wrap items-center gap-1.5">
+          <span>{post.text}</span>
+          {(() => {
+            const color = EVENT_TYPE_COLORS[post.event_type] || EVENT_TYPE_COLORS.other
+            const name = post.event_name || post.event_name_cache
+            const dateStr = formatEventDate(post.event_start_date)
+            const pill = (
+              <span
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium"
+                style={{ background: `${color}18`, border: `1.5px solid ${color}`, color }}
+              >
+                <span>{name}</span>
+                {dateStr && (
+                  <>
+                    <span style={{ opacity: 0.5 }}>|</span>
+                    <span style={{ opacity: 0.85, fontSize: '10px' }}>{dateStr}</span>
+                  </>
+                )}
+              </span>
+            )
+            return post.event ? (
+              <Link to={`/events/${post.event}`} className="no-underline">{pill}</Link>
+            ) : pill
+          })()}
+          {post.cave_status === 'active' && post.cave && (
+            <>
+              <span>at</span>
+              <Link
+                to={`/caves/${post.cave}`}
+                className="cyber-badge text-xs no-underline"
+                style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
+              >
+                {post.cave_name || 'View cave'}
+              </Link>
+            </>
+          )}
+        </p>
       ) : (
         <p className="mt-3 text-sm text-[var(--cyber-text)] whitespace-pre-line">{post.text}</p>
       )}
@@ -106,31 +157,35 @@ export default function PostCard({ post, currentUserId, onReact, onDelete }) {
         />
       )}
 
-      {/* Cave link / status */}
-      {post.cave_status === 'active' && post.cave && (
-        <Link
-          to={`/caves/${post.cave}`}
-          className="inline-block mt-3 cyber-badge text-xs no-underline"
-          style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
-        >
-          {post.cave_name || 'View cave'}
-        </Link>
-      )}
-      {post.cave_status === 'unlisted' && (
-        <span
-          className="inline-block mt-3 cyber-badge text-xs"
-          style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
-        >
-          Cave unlisted
-        </span>
-      )}
-      {post.cave_status === 'deleted' && (
-        <span
-          className="inline-block mt-3 cyber-badge text-xs"
-          style={{ borderColor: '#ef4444', color: '#ef4444' }}
-        >
-          {post.cave_name || 'Cave'} (Deleted)
-        </span>
+      {/* Cave link / status (non-event posts only) */}
+      {!(post.event || post.event_name_cache) && (
+        <>
+          {post.cave_status === 'active' && post.cave && (
+            <Link
+              to={`/caves/${post.cave}`}
+              className="inline-block mt-3 cyber-badge text-xs no-underline"
+              style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
+            >
+              {post.cave_name || 'View cave'}
+            </Link>
+          )}
+          {post.cave_status === 'unlisted' && (
+            <span
+              className="inline-block mt-3 cyber-badge text-xs"
+              style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
+            >
+              Cave unlisted
+            </span>
+          )}
+          {post.cave_status === 'deleted' && (
+            <span
+              className="inline-block mt-3 cyber-badge text-xs"
+              style={{ borderColor: '#ef4444', color: '#ef4444' }}
+            >
+              {post.cave_name || 'Cave'} (Deleted)
+            </span>
+          )}
+        </>
       )}
 
       {/* Reaction bar — hidden for soft-deleted posts */}

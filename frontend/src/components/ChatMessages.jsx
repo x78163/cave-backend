@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router-dom'
 import useChatStore from '../stores/chatStore'
 import chatSocket from '../services/chatSocket'
 import { apiFetch } from '../hooks/useApi'
@@ -8,6 +9,7 @@ import ChannelSettingsPanel from './ChannelSettingsPanel'
 import MentionAutocomplete from './MentionAutocomplete'
 import UserPreviewPopover from './UserPreviewPopover'
 import { parseVideoUrl, PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
+import { TYPE_COLORS } from './EventCalendar'
 
 function scrollToMessage(messageId) {
   const el = document.getElementById(`msg-${messageId}`)
@@ -98,13 +100,29 @@ function getVideoPreview(msg) {
   return null
 }
 
-// Render message content with @mention highlighting
+// Render message content with @mention highlighting and event link pills
 function renderMessageContent(content, mentions) {
-  if (!mentions || mentions.length === 0) return content
-  const mentionUsernames = new Set(mentions.map(m => m.username))
-  const parts = content.split(/(@\w+)/g)
+  // Split on @mentions and event link tokens [event:/events/{id}|{name}]
+  const parts = content.split(/(@\w+|\[event:\/events\/[a-f0-9-]+\|[^\]]+\])/g)
+  const mentionUsernames = mentions?.length ? new Set(mentions.map(m => m.username)) : null
   return parts.map((part, i) => {
-    if (part.startsWith('@') && mentionUsernames.has(part.slice(1))) {
+    // Event link pill: [event:/events/{id}|{name}]
+    const eventMatch = part.match(/^\[event:(\/events\/[a-f0-9-]+)\|(.+)\]$/)
+    if (eventMatch) {
+      return (
+        <Link
+          key={i}
+          to={eventMatch[1]}
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full font-medium no-underline transition-all hover:brightness-125"
+          style={{ background: `${TYPE_COLORS.expedition}20`, color: TYPE_COLORS.expedition, border: `1px solid ${TYPE_COLORS.expedition}40` }}
+        >
+          {eventMatch[2]}
+        </Link>
+      )
+    }
+    // @mention
+    if (part.startsWith('@') && mentionUsernames?.has(part.slice(1))) {
       return (
         <span key={i} className="text-[var(--cyber-cyan)] font-medium cursor-pointer hover:underline">
           {part}

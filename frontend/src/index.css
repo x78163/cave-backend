@@ -541,3 +541,110 @@ em-emoji-picker {
 .measure-label::before {
   display: none !important;
 }
+
+/* ── FullCalendar cyberpunk theme ── */
+
+.fc {
+  --fc-border-color: var(--cyber-border);
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: var(--cyber-surface);
+  --fc-list-event-hover-bg-color: var(--cyber-surface-2);
+  --fc-today-bg-color: rgba(0, 229, 255, 0.04);
+  --fc-event-border-color: transparent;
+  --fc-small-font-size: 0.75rem;
+  font-family: 'Ubuntu', system-ui, sans-serif;
+}
+.fc .fc-toolbar-title {
+  color: var(--cyber-text);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.fc .fc-button {
+  background: var(--cyber-surface-2) !important;
+  border: 1px solid var(--cyber-border) !important;
+  color: var(--cyber-text) !important;
+  border-radius: 9999px !important;
+  font-size: 0.8rem !important;
+  padding: 0.25rem 0.75rem !important;
+  text-transform: capitalize !important;
+  box-shadow: none !important;
+}
+.fc .fc-button:hover {
+  border-color: var(--cyber-cyan) !important;
+  color: var(--cyber-cyan) !important;
+}
+.fc .fc-button-active {
+  background: var(--cyber-cyan) !important;
+  color: var(--cyber-bg) !important;
+  border-color: var(--cyber-cyan) !important;
+}
+.fc .fc-col-header-cell {
+  color: var(--cyber-text-dim);
+  font-weight: 500;
+  font-size: 0.8rem;
+  padding: 0.5rem 0;
+}
+.fc .fc-col-header-cell-cushion {
+  color: var(--cyber-text-dim);
+  text-decoration: none;
+}
+.fc .fc-daygrid-day-number {
+  color: var(--cyber-text-dim);
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+.fc .fc-day-today .fc-daygrid-day-number {
+  color: var(--cyber-cyan);
+  font-weight: 700;
+}
+.fc .fc-event {
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  border: none;
+}
+.fc .fc-daygrid-event-dot {
+  display: none;
+}
+.fc .fc-list-event:hover td {
+  background: var(--cyber-surface-2) !important;
+}
+.fc .fc-list-day-cushion {
+  background: var(--cyber-surface) !important;
+  color: var(--cyber-text) !important;
+}
+.fc .fc-list-event-time,
+.fc .fc-list-event-title {
+  color: var(--cyber-text) !important;
+}
+.fc td, .fc th {
+  border-color: var(--cyber-border) !important;
+}
+.fc .fc-scrollgrid {
+  border-color: var(--cyber-border) !important;
+}
+.fc .fc-daygrid-day.fc-day-other .fc-daygrid-day-number {
+  opacity: 0.3;
+}
+.fc .fc-popover {
+  background: var(--cyber-surface) !important;
+  border-color: var(--cyber-border) !important;
+}
+.fc .fc-popover-header {
+  background: var(--cyber-surface-2) !important;
+  color: var(--cyber-text) !important;
+}
+.fc .fc-more-link {
+  color: var(--cyber-cyan) !important;
+  font-size: 0.7rem;
+}
+
+/* ── Date/time input icon contrast fix ── */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+.event-time-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.7) sepia(1) saturate(5) hue-rotate(155deg);
+  cursor: pointer;
+}

@@ -11,6 +11,9 @@ const ACTION_ICONS = {
   expedition_joined: '🤝',
   user_followed: '👤',
   reconstruction_completed: '🧊',
+  event_created: '📅',
+  event_rsvp: '✋',
+  event_commented: '💬',
 }
 
 export default function Feed() {

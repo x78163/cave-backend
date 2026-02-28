@@ -192,50 +192,77 @@ function RoutesTab({ userId }) {
   )
 }
 
-// ── Expeditions Tab ──────────────────────────────────────────
+// ── Events Tab ──────────────────────────────────────────────
 
-function ExpeditionsTab({ userId }) {
-  const { data, loading } = useApi('/social/expeditions/')
-  const expeditions = (Array.isArray(data) ? data : data?.results ?? [])
-    .filter(e => e.organizer === userId)
+const EVENT_TYPE_COLORS = {
+  expedition: '#00e5ff', survey: '#fbbf24', training: '#4ade80',
+  education: '#a78bfa', outreach: '#fb923c', conservation: '#34d399',
+  social: '#f472b6', other: '#94a3b8',
+}
+
+function EventsTab({ userId }) {
+  const { data, loading } = useApi(userId ? `/events/user/${userId}/` : null)
+  const events = Array.isArray(data) ? data : []
 
   if (loading) {
-    return <p className="text-center text-[var(--cyber-text-dim)] py-12">Loading expeditions...</p>
+    return <p className="text-center text-[var(--cyber-text-dim)] py-12">Loading events...</p>
   }
 
-  if (expeditions.length === 0) {
-    return <p className="text-center text-[var(--cyber-text-dim)] py-12">No expeditions yet</p>
+  if (events.length === 0) {
+    return <p className="text-center text-[var(--cyber-text-dim)] py-12">No events yet</p>
   }
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {expeditions.map(exp => (
-        <div key={exp.id} className="cyber-card p-5">
-          <h3 className="font-semibold text-[var(--cyber-text)] truncate">{exp.name}</h3>
-          <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
-            {formatDate(exp.planned_date)}
-          </p>
-          <div className="flex flex-wrap gap-2 mt-3">
-            <span
-              className="cyber-badge"
-              style={{
-                borderColor: exp.status === 'completed' ? '#22c55e' : 'var(--cyber-cyan)',
-                color: exp.status === 'completed' ? '#22c55e' : 'var(--cyber-cyan)',
-              }}
-            >
-              {exp.status}
-            </span>
-            <span className="cyber-badge" style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}>
-              {exp.confirmed_count ?? 0}/{exp.max_members ?? '?'} members
-            </span>
-          </div>
-          {exp.description && (
-            <p className="text-xs text-[var(--cyber-text-dim)] mt-3 line-clamp-2">
-              {exp.description}
+      {events.map(ev => {
+        const color = EVENT_TYPE_COLORS[ev.event_type] || EVENT_TYPE_COLORS.other
+        const startDate = ev.start_date ? new Date(ev.start_date) : null
+        const dateStr = startDate
+          ? startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+          : ''
+        const timeStr = startDate && !ev.all_day
+          ? startDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+          : ''
+        return (
+          <Link to={`/events/${ev.id}`} key={ev.id} className="cyber-card p-5 block no-underline hover:border-[var(--cyber-cyan)] transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-medium uppercase"
+                style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}
+              >
+                {ev.event_type}
+              </span>
+              {ev.status === 'cancelled' && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium text-red-400 border border-red-400/40">
+                  Cancelled
+                </span>
+              )}
+            </div>
+            <h3 className="font-semibold text-[var(--cyber-text)] truncate">{ev.name}</h3>
+            <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
+              {dateStr}{timeStr && ` at ${timeStr}`}
             </p>
-          )}
-        </div>
-      ))}
+            {ev.cave_name && (
+              <p className="text-xs text-[var(--cyber-cyan)] mt-1 truncate">{ev.cave_name}</p>
+            )}
+            <div className="flex flex-wrap gap-2 mt-3">
+              {ev.going_count > 0 && (
+                <span className="cyber-badge text-[10px]" style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}>
+                  {ev.going_count} going
+                </span>
+              )}
+              {ev.user_rsvp === 'going' && (
+                <span
+                  className="cyber-badge text-[10px]"
+                  style={{ borderColor: '#22c55e', color: '#22c55e' }}
+                >
+                  Going
+                </span>
+              )}
+            </div>
+          </Link>
+        )
+      })}
     </div>
   )
 }
@@ -664,7 +691,7 @@ const TABS = [
   { key: 'wall', label: 'Wall' },
   { key: 'media', label: 'Media' },
   { key: 'routes', label: 'Routes' },
-  { key: 'expeditions', label: 'Expeditions' },
+  { key: 'events', label: 'My Events' },
   { key: 'ratings', label: 'Ratings' },
 ]
 
@@ -769,7 +796,7 @@ export default function Profile() {
       {activeTab === 'wall' && userId && <WallTab userId={userId} />}
       {activeTab === 'media' && userId && <MediaTab userId={userId} />}
       {activeTab === 'routes' && userId && <RoutesTab userId={userId} />}
-      {activeTab === 'expeditions' && userId && <ExpeditionsTab userId={userId} />}
+      {activeTab === 'events' && userId && <EventsTab userId={userId} />}
       {activeTab === 'ratings' && userId && <RatingsTab userId={userId} />}
     </div>
   )

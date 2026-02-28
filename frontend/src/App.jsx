@@ -4,7 +4,7 @@ import TopBar from './components/TopBar'
 import OnboardingModal from './components/OnboardingModal'
 import Home from './pages/Home'
 import Explore from './pages/Explore'
-import Expeditions from './pages/Expeditions'
+import Events from './pages/Events'
 import Feed from './pages/Feed'
 import Groups from './pages/Groups'
 import Login from './pages/Login'
@@ -17,6 +17,7 @@ const CreateCave = lazy(() => import('./pages/CreateCave'))
 const Profile = lazy(() => import('./pages/Profile'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const UserProfilePage = lazy(() => import('./pages/UserProfilePage'))
+const EventDetail = lazy(() => import('./pages/EventDetail'))
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -126,7 +127,9 @@ function AppContent() {
                 <Route path="/caves/new" element={<CreateCave />} />
                 <Route path="/caves/:caveId" element={<CaveDetail />} />
                 <Route path="/caves/:caveId/edit" element={<CreateCave />} />
-                <Route path="/expeditions" element={<Expeditions />} />
+                <Route path="/events" element={<Events />} />
+                <Route path="/events/:eventId" element={<EventDetail />} />
+                <Route path="/expeditions" element={<Navigate to="/events" replace />} />
                 <Route path="/feed" element={<Feed />} />
                 <Route path="/groups" element={<Groups />} />
                 <Route path="/groups/:grottoId" element={<Groups />} />

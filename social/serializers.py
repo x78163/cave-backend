@@ -88,6 +88,9 @@ class PostSerializer(serializers.ModelSerializer):
     author_username = serializers.CharField(source='author.username', read_only=True)
     cave_name = serializers.CharField(source='cave.name', read_only=True, default=None)
     grotto_name = serializers.CharField(source='grotto.name', read_only=True, default=None)
+    event_name = serializers.CharField(source='event.name', read_only=True, default=None)
+    event_start_date = serializers.DateTimeField(source='event.start_date', read_only=True, default=None)
+    event_type = serializers.CharField(source='event.event_type', read_only=True, default=None)
     like_count = serializers.SerializerMethodField()
     dislike_count = serializers.SerializerMethodField()
     comment_count = serializers.SerializerMethodField()
@@ -100,6 +103,7 @@ class PostSerializer(serializers.ModelSerializer):
             'id', 'author', 'author_username', 'text', 'image',
             'cave', 'cave_name', 'cave_name_cache', 'cave_status',
             'grotto', 'grotto_name', 'visibility',
+            'event', 'event_name', 'event_name_cache', 'event_start_date', 'event_type',
             'is_deleted', 'deleted_at',
             'like_count', 'dislike_count', 'comment_count', 'user_reaction',
             'created_at', 'updated_at',
@@ -107,6 +111,7 @@ class PostSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'author_username', 'cave_name', 'cave_name_cache', 'cave_status',
             'grotto_name',
+            'event_name', 'event_name_cache', 'event_start_date', 'event_type',
             'is_deleted', 'deleted_at',
             'like_count', 'dislike_count', 'comment_count', 'user_reaction',
             'created_at', 'updated_at',
@@ -159,4 +164,7 @@ class PostSerializer(serializers.ModelSerializer):
             data['cave_name'] = instance.cave_name_cache
         else:
             data['cave_status'] = None
+        # Event: if event FK is null but cache exists, use cache
+        if not instance.event and instance.event_name_cache:
+            data['event_name'] = instance.event_name_cache
         return data

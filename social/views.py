@@ -284,7 +284,7 @@ def post_list(request):
         user_id = request.query_params.get('user')
         grotto_id = request.query_params.get('grotto')
 
-        posts = Post.objects.select_related('author', 'cave', 'grotto')
+        posts = Post.objects.select_related('author', 'cave', 'grotto', 'event')
 
         # Determine current user for feed + reaction context
         current_user_id = None

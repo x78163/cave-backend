@@ -189,6 +189,12 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `SurveyStation` - Computed station positions (x/y/z), optional fixed GPS coordinates
 - `SurveyShot` - Station-to-station measurements (azimuth, distance, inclination, LRUD)
 
+#### Events
+- `Event` - Community event (UUID PK, name, event_type, description, start_date, end_date, all_day, cave FK, lat/lon, address, google_maps_link, created_by, point_of_contact, grotto FK, required_equipment, max_participants, visibility: public/all_grotto/grotto_only/unlisted/private, status: draft/published/cancelled/completed, cover_image)
+- `EventRSVP` - RSVP to event (event FK, user FK, status: going/maybe/not_going, unique_together)
+- `EventInvitation` - Invitation to private event (event FK, invited_user XOR invited_grotto, invited_by, status: pending/accepted/declined)
+- `EventComment` - Comment on event (event FK, author FK, text)
+
 #### Sync Management
 - `SyncSession` - Track sync sessions
 - `SyncLog` - Detailed sync logs
@@ -294,6 +300,24 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/chat/notifications/{id}/read/` - Mark single notification read
 - `POST /api/chat/notifications/read-all/` - Bulk mark all read
 - `WS /ws/chat/?token=<jwt>` - WebSocket (multiplexed, handles chat.message, chat.mark_read, chat.join_channel, chat.typing, chat.react + broadcasts message_edit, message_delete, message_pin, notification)
+
+### Events
+- `GET /api/events/` - List events (visibility-filtered, `?type=`, `?start=`, `?end=`, `?grotto=`, `?cave=`, `?mine=true`)
+- `POST /api/events/` - Create event
+- `GET /api/events/{id}/` - Event detail (RSVP counts, user's RSVP, comments)
+- `PATCH /api/events/{id}/` - Update event (creator/admin)
+- `DELETE /api/events/{id}/` - Delete event (creator/admin)
+- `POST /api/events/{id}/rsvp/` - RSVP (`{status: 'going'/'not_going'}`) with capacity check (409 when full)
+- `DELETE /api/events/{id}/rsvp/` - Cancel RSVP
+- `GET /api/events/{id}/rsvps/` - List RSVPs (with avatar, avatar_preset)
+- `POST /api/events/{id}/invitations/` - Send invitation (`{user_id}` or `{grotto_id}`)
+- `PATCH /api/events/invitations/{id}/` - Accept/decline invitation
+- `GET /api/events/{id}/comments/` - List comments
+- `POST /api/events/{id}/comments/` - Add comment
+- `DELETE /api/events/{id}/comments/{cid}/` - Delete comment (author/admin)
+- `GET /api/events/calendar/` - Lightweight calendar data (`?start=&end=`)
+- `GET /api/events/my-events/` - Events user created or RSVPed to
+- `GET /api/events/user/{user_id}/` - Events a user is attending, invited to, or created
 
 ### 3D Processing (Post-MVP)
 - `POST /api/caves/{id}/generate-mesh/` - Trigger 3D generation
@@ -762,6 +786,18 @@ This project includes:
   - Message search: `content__icontains` across user's channels, optional channel filter, limit 50
   - 20+ REST endpoints + user search + cursor-paginated message history
   - User search endpoint: `GET /api/users/search/?q=<query>` (min 1 char, excludes self)
+- Events system (Phase 1 + Phase 2 integrations — calendar-driven community events)
+  - `events/` Django app: Event, EventRSVP, EventInvitation, EventComment models
+  - 8 event types (expedition, survey, training, education, outreach, conservation, social, other)
+  - 5 visibility levels (public, all_grotto, grotto_only, unlisted, private)
+  - Location: optional cave FK + lat/lon + address + Google Maps link + meetup_instructions
+  - RSVP with capacity check (409 when full), going/not_going (maybe removed from UI)
+  - Capacity UX: Going button replaced with "Full" badge when at capacity, re-enables when spots open
+  - Invitations target user XOR grotto (CheckConstraint), pending/accepted/declined lifecycle
+  - Visibility filtering via `_get_visible_events()` helper with grotto membership + invitation Q objects
+  - Chat integration: auto-creates channel on event creation ("{name} (event)"), auto-joins on RSVP going, first message with event link pill, event deletion cascades to chat channel
+  - Wall post integration: `event` FK + `event_name_cache` on Post model, inline event pill + cave pill rendering ("Created event [pill] at [cave pill]")
+  - 16 REST endpoints at `/api/events/` including user-events endpoint
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode, "Cave Dragon" branding, Ubuntu font (Google Fonts), cyan dragon logo
@@ -847,6 +883,19 @@ This project includes:
 - Public user profile page (`/users/:userId`): avatar, bio, stats (caves/mapped/expeditions), specialties, tabs (wall/media/ratings), Send DM button (respects allow_dms), redirects to `/profile` for self
 - UserPreviewPopover: portaled card on username click in chat, View Profile + Send DM buttons
 - Profile page: added allow_dms toggle (switch UI in edit panel)
+- Events page (FullCalendar React + event cards + type filters)
+  - FullCalendar month view + list view with cyberpunk CSS overrides, color-coded by event type
+  - Type filter pill buttons filter both calendar and event cards
+  - Event cards sorted soonest first with type badge, date, location, RSVP count, capacity-aware Going button
+  - EventCreateModal: cave search picker, grotto checkbox, RichTextEditor description, date pickers, visibility dropdown, meetup instructions
+  - EventDetail page: dark CartoDB map with zoom/center controls, RSVP buttons (going/not going), attendee list with AvatarDisplay + profile links, chat channel link, meetup instructions, description, equipment, comments, invite button
+  - EventInviteModal: user search + grotto tabs for private event invitations
+  - EventComments: comment list + composer
+  - Route `/events` (replaces `/expeditions`), `/events/:eventId` (lazy-loaded)
+  - TopBar nav: "Expeditions" renamed to "Events"
+  - Profile.jsx: "My Events" tab; UserProfilePage.jsx: "Events" tab
+  - PostCard.jsx: inline event pill rendering with color-coded capsule + cave pill ("Created event [pill] at [cave]")
+  - ChatMessages.jsx: `[event:/events/{id}|{name}]` token rendered as clickable event pills
 
 **GIS Integration (Tennessee)**:
 - Statewide COMPTROLLER_OLG_LANDUSE ArcGIS service (86/95 counties)
@@ -930,6 +979,17 @@ This project includes:
 | `frontend/src/pages/UserProfilePage.jsx` | Public user profile page (`/users/:userId`) with stats, tabs, DM button |
 | `frontend/src/components/NewDMModal.jsx` | User search + DM creation |
 | `frontend/src/components/NewChannelModal.jsx` | Channel creation form |
+| `events/models.py` | Event (meetup_instructions, chat_channel FK), EventRSVP, EventInvitation, EventComment models |
+| `events/views.py` | Event CRUD, RSVP with capacity check, invitations, comments, calendar, visibility filtering, user-events endpoint |
+| `events/serializers.py` | EventSerializer (RSVP counts, user_rsvp, chat_channel), EventCalendarSerializer, RSVP (with avatar_preset), Invitation, Comment serializers |
+| `events/urls.py` | 11 URL patterns for events API |
+| `frontend/src/pages/Events.jsx` | Main events page with FullCalendar + type filters (filter both calendar + cards) + event cards |
+| `frontend/src/pages/EventDetail.jsx` | Event detail with dark CartoDB map, RSVP (capacity-aware), attendees with avatars + profile links, chat link, meetup instructions |
+| `frontend/src/components/EventCalendar.jsx` | FullCalendar wrapper with cyberpunk theme, color-coded by event type |
+| `frontend/src/components/EventCard.jsx` | Event card with type badge, date, location, capacity-aware Going button / Full badge |
+| `frontend/src/components/EventCreateModal.jsx` | Create/edit event modal with cave picker, grotto checkbox, RichTextEditor, meetup instructions |
+| `frontend/src/components/EventComments.jsx` | Comment list + composer for events |
+| `frontend/src/components/EventInviteModal.jsx` | User/grotto invite modal for private events |
 
 ### Migrations (caves app)
 - 0001: Initial Cave model
@@ -963,6 +1023,7 @@ This project includes:
 - 0001: Initial social models
 - 0002: Post soft delete fields (is_deleted, deleted_at, cave_name_cache)
 - 0003: Data migration — backfill cave_name_cache on existing posts
+- 0005: event FK (SET_NULL) + event_name_cache on Post model
 
 ### Migrations (chat app)
 - 0001: Channel, ChannelMembership, Message models
@@ -972,6 +1033,11 @@ This project includes:
 
 ### Migrations (users app)
 - 0003: allow_dms BooleanField on UserProfile
+
+### Migrations (events app)
+- 0001: Event, EventRSVP, EventInvitation, EventComment models with indexes and CheckConstraint
+- 0002: meetup_instructions TextField on Event
+- 0003: chat_channel FK on Event (to chat.Channel)
 
 ### Future Features (To Be Developed)
 

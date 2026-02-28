@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch, useApi } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
 import AvatarDisplay from '../components/AvatarDisplay'
@@ -133,17 +133,22 @@ export default function UserProfilePage() {
 
       {/* Tabs */}
       <div className="flex gap-4 mb-4 border-b border-[var(--cyber-border)]">
-        {['wall', 'media', 'ratings'].map(tab => (
+        {[
+          { key: 'wall', label: 'Wall' },
+          { key: 'media', label: 'Media' },
+          { key: 'events', label: 'Events' },
+          { key: 'ratings', label: 'Ratings' },
+        ].map(tab => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`pb-2 text-sm capitalize transition-colors border-b-2 ${
-              activeTab === tab
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`pb-2 text-sm transition-colors border-b-2 ${
+              activeTab === tab.key
                 ? 'text-[var(--cyber-cyan)] border-[var(--cyber-cyan)]'
                 : 'text-[var(--cyber-text-dim)] border-transparent hover:text-[var(--cyber-text)]'
             }`}
           >
-            {tab}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -157,6 +162,7 @@ export default function UserProfilePage() {
 function UserProfileTabContent({ tab, userId }) {
   if (tab === 'wall') return <UserWallTab userId={userId} />
   if (tab === 'media') return <UserMediaTab userId={userId} />
+  if (tab === 'events') return <UserEventsTab userId={userId} />
   if (tab === 'ratings') return <UserRatingsTab userId={userId} />
   return null
 }
@@ -179,6 +185,69 @@ function UserWallTab({ userId }) {
           </p>
         </div>
       ))}
+    </div>
+  )
+}
+
+const EVENT_TYPE_COLORS = {
+  expedition: '#00e5ff', survey: '#fbbf24', training: '#4ade80',
+  education: '#a78bfa', outreach: '#fb923c', conservation: '#34d399',
+  social: '#f472b6', other: '#94a3b8',
+}
+
+function UserEventsTab({ userId }) {
+  const { data, loading } = useApi(`/events/user/${userId}/`)
+  const events = Array.isArray(data) ? data : []
+
+  if (loading) return <div className="text-center text-xs text-[var(--cyber-text-dim)] py-4">Loading...</div>
+  if (events.length === 0) return <div className="text-center text-xs text-[var(--cyber-text-dim)] py-8">No events yet</div>
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {events.map(ev => {
+        const color = EVENT_TYPE_COLORS[ev.event_type] || EVENT_TYPE_COLORS.other
+        const startDate = ev.start_date ? new Date(ev.start_date) : null
+        const dateStr = startDate
+          ? startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+          : ''
+        const timeStr = startDate && !ev.all_day
+          ? startDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+          : ''
+        return (
+          <Link to={`/events/${ev.id}`} key={ev.id} className="cyber-card p-4 block no-underline hover:border-[var(--cyber-cyan)] transition-colors">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-medium uppercase"
+                style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}
+              >
+                {ev.event_type}
+              </span>
+            </div>
+            <h3 className="font-semibold text-sm text-[var(--cyber-text)] truncate">{ev.name}</h3>
+            <p className="text-xs text-[var(--cyber-text-dim)] mt-0.5">
+              {dateStr}{timeStr && ` at ${timeStr}`}
+            </p>
+            {ev.cave_name && (
+              <p className="text-xs text-[var(--cyber-cyan)] mt-0.5 truncate">{ev.cave_name}</p>
+            )}
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {ev.going_count > 0 && (
+                <span className="cyber-badge text-[10px]" style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}>
+                  {ev.going_count} going
+                </span>
+              )}
+              {ev.user_rsvp === 'going' && (
+                <span
+                  className="cyber-badge text-[10px]"
+                  style={{ borderColor: '#22c55e', color: '#22c55e' }}
+                >
+                  Going
+                </span>
+              )}
+            </div>
+          </Link>
+        )
+      })}
     </div>
   )
 }

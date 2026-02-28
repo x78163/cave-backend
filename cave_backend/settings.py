@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'routing',
     'survey',
     'chat',
+    'events',
 ]
 
 ASGI_APPLICATION = 'cave_backend.asgi.application'

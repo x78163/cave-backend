@@ -74,6 +74,9 @@ class Activity(models.Model):
         POST_CREATED = 'post_created', 'Created a post'
         POST_REACTED = 'post_reacted', 'Reacted to a post'
         POST_COMMENTED = 'post_commented', 'Commented on a post'
+        EVENT_CREATED = 'event_created', 'Created an event'
+        EVENT_RSVP = 'event_rsvp', 'RSVPed to an event'
+        EVENT_COMMENTED = 'event_commented', 'Commented on an event'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     actor = models.ForeignKey(
@@ -188,6 +191,10 @@ class Post(models.Model):
         'users.Grotto', on_delete=models.CASCADE,
         null=True, blank=True, related_name='posts'
     )
+    event = models.ForeignKey(
+        'events.Event', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='posts'
+    )
     visibility = models.CharField(
         max_length=20, choices=Visibility.choices, default=Visibility.PUBLIC
     )
@@ -196,6 +203,7 @@ class Post(models.Model):
     deleted_at = models.DateTimeField(null=True, blank=True)
     # Cache cave name so it survives cave deletion
     cave_name_cache = models.CharField(max_length=200, blank=True, default='')
+    event_name_cache = models.CharField(max_length=300, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

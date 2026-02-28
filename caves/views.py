@@ -297,8 +297,28 @@ def cave_list(request):
             )
         else:
             caves = Cave.objects.filter(visibility__in=['public', 'limited_public'])
+
+        # Search filter (name, aliases, city, region, zip)
+        search = request.query_params.get('search', '').strip()
+        if search:
+            caves = caves.filter(
+                Q(name__icontains=search) |
+                Q(aliases__icontains=search) |
+                Q(city__icontains=search) |
+                Q(region__icontains=search) |
+                Q(zip_code__icontains=search)
+            )
+
+        # Optional limit
+        limit = request.query_params.get('limit')
+        if limit:
+            try:
+                caves = caves[:int(limit)]
+            except (ValueError, TypeError):
+                pass
+
         serializer = CaveListSerializer(caves, many=True)
-        return Response({'caves': serializer.data, 'count': caves.count()})
+        return Response({'caves': serializer.data, 'count': len(serializer.data)})
 
     elif request.method == 'POST':
         serializer = CaveDetailSerializer(data=request.data)
