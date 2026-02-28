@@ -911,20 +911,13 @@ def cave_request_delete(request, cave_id, request_id):
 @parser_classes([MultiPartParser, FormParser])
 def cave_import_preview(request):
     """
-    Phase 1 of CSV import: parse the file and detect coordinate-proximity duplicates.
-    Admin-only (is_staff or is_superuser).
+    Phase 1 of bulk import: parse the file and detect coordinate-proximity duplicates.
+    Accepts CSV, Excel (.xlsx), KML, and KMZ files. Admin-only (is_staff or is_superuser).
     """
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     if not (request.user.is_staff or request.user.is_superuser):
         return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
-
-    csv_file = request.FILES.get('csv_file')
-    if not csv_file:
-        return Response({'error': 'No CSV file provided'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if csv_file.size > 5 * 1024 * 1024:
-        return Response({'error': 'CSV file too large (max 5MB)'}, status=status.HTTP_400_BAD_REQUEST)
 
     from .csv_import import normalize_csv_rows, parse_cave_row, find_proximity_duplicates, find_intra_csv_duplicates
 
@@ -935,18 +928,60 @@ def cave_import_preview(request):
         'visibility': request.data.get('visibility', 'public'),
     }
 
-    raw_bytes = csv_file.read()
+    # Check for URL-based import (Google Maps list)
+    import_url = request.data.get('import_url', '').strip()
+    import_file = request.FILES.get('import_file') or request.FILES.get('csv_file')
+
+    if not import_file and not import_url:
+        return Response({'error': 'No file or URL provided'}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
-        content = raw_bytes.decode('utf-8-sig')
-    except UnicodeDecodeError:
-        try:
-            content = raw_bytes.decode('windows-1252')
-        except UnicodeDecodeError:
-            return Response(
-                {'error': 'Unable to decode CSV file. Please save as UTF-8.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-    rows = normalize_csv_rows(content)
+        if import_url:
+            from .kml_import import fetch_google_maps_list, kml_to_normalized_rows
+            placemarks, list_name = fetch_google_maps_list(import_url)
+            if not placemarks:
+                return Response({'error': 'No places found in the shared list'}, status=status.HTTP_400_BAD_REQUEST)
+            rows = kml_to_normalized_rows(placemarks)
+        else:
+            if import_file.size > 10 * 1024 * 1024:
+                return Response({'error': 'File too large (max 10MB)'}, status=status.HTTP_400_BAD_REQUEST)
+            raw_bytes = import_file.read()
+            filename = (import_file.name or '').lower()
+
+            if filename.endswith('.xlsx'):
+                from .excel_import import parse_excel_file
+                rows = parse_excel_file(raw_bytes)
+            elif filename.endswith('.kmz'):
+                from .kml_import import parse_kmz_file, kml_to_normalized_rows
+                placemarks = parse_kmz_file(raw_bytes)
+                rows = kml_to_normalized_rows(placemarks)
+            elif filename.endswith('.kml'):
+                from .kml_import import parse_kml_content, kml_to_normalized_rows
+                try:
+                    content = raw_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    content = raw_bytes.decode('utf-8-sig')
+                placemarks = parse_kml_content(content)
+                rows = kml_to_normalized_rows(placemarks)
+            elif filename.endswith('.csv'):
+                try:
+                    content = raw_bytes.decode('utf-8-sig')
+                except UnicodeDecodeError:
+                    try:
+                        content = raw_bytes.decode('windows-1252')
+                    except UnicodeDecodeError:
+                        return Response(
+                            {'error': 'Unable to decode CSV file. Please save as UTF-8.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                rows = normalize_csv_rows(content)
+            else:
+                return Response(
+                    {'error': 'Unsupported file type. Accepted formats: CSV, Excel (.xlsx), KML, KMZ'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+    except (ValueError, Exception) as e:
+        return Response({'error': f'Error parsing: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
     parsed = []
     summary = {'valid': 0, 'errors': 0, 'with_duplicates': 0, 'without_coordinates': 0}

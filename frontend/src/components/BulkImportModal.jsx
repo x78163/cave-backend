@@ -1,11 +1,15 @@
 import { useState, useRef } from 'react'
 import { apiFetch } from '../hooks/useApi'
 
-export default function CsvImportModal({ onClose, onComplete }) {
+const ACCEPTED_EXTENSIONS = ['csv', 'xlsx', 'kml', 'kmz']
+
+export default function BulkImportModal({ onClose, onComplete }) {
   const [step, setStep] = useState(0) // 0=Upload, 1=Preview, 2=Results
 
   // Upload state
-  const [csvFile, setCsvFile] = useState(null)
+  const [importMode, setImportMode] = useState('file') // 'file' or 'url'
+  const [importFile, setImportFile] = useState(null)
+  const [importUrl, setImportUrl] = useState('')
   const [threshold, setThreshold] = useState(100)
   const [defaultRegion, setDefaultRegion] = useState('')
   const [defaultCountry, setDefaultCountry] = useState('')
@@ -26,11 +30,16 @@ export default function CsvImportModal({ onClose, onComplete }) {
   // ── Upload ──
 
   const handlePreview = async () => {
-    if (!csvFile) return
+    if (importMode === 'file' && !importFile) return
+    if (importMode === 'url' && !importUrl.trim()) return
     setUploading(true)
     setUploadError(null)
     const formData = new FormData()
-    formData.append('csv_file', csvFile)
+    if (importMode === 'url') {
+      formData.append('import_url', importUrl.trim())
+    } else {
+      formData.append('import_file', importFile)
+    }
     formData.append('threshold_meters', threshold)
     if (defaultRegion) formData.append('region', defaultRegion)
     if (defaultCountry) formData.append('country', defaultCountry)
@@ -158,7 +167,7 @@ export default function CsvImportModal({ onClose, onComplete }) {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[var(--cyber-text)]">
-            {step === 0 ? 'Import Caves from CSV' : step === 1 ? 'Review Import' : 'Import Complete'}
+            {step === 0 ? 'Bulk Import Caves' : step === 1 ? 'Review Import' : 'Import Complete'}
           </h2>
           <button
             onClick={onClose}
@@ -197,41 +206,96 @@ export default function CsvImportModal({ onClose, onComplete }) {
         {/* ── Step 0: Upload ── */}
         {step === 0 && (
           <div className="flex-1 overflow-y-auto space-y-4">
-            {/* File input */}
-            <div
-              className="border-2 border-dashed border-[var(--cyber-border)] rounded-xl p-8 text-center cursor-pointer hover:border-[var(--cyber-cyan)] transition-colors"
-              onClick={() => fileRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
-              onDrop={e => {
-                e.preventDefault()
-                e.stopPropagation()
-                const f = e.dataTransfer.files[0]
-                if (f && (f.name.endsWith('.csv') || f.type === 'text/csv')) {
-                  setCsvFile(f)
-                }
-              }}
-            >
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={e => setCsvFile(e.target.files[0] || null)}
-              />
-              {csvFile ? (
-                <div>
-                  <p className="text-[var(--cyber-cyan)] font-semibold">{csvFile.name}</p>
-                  <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
-                    {(csvFile.size / 1024).toFixed(1)} KB
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-[var(--cyber-text-dim)]">Drop CSV file here or click to browse</p>
-                  <p className="text-xs text-[var(--cyber-text-dim)] mt-1">Max 5MB</p>
-                </div>
-              )}
+            {/* Mode tabs */}
+            <div className="flex gap-1 p-1 rounded-lg bg-[var(--cyber-bg)]">
+              <button
+                onClick={() => setImportMode('file')}
+                className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  importMode === 'file'
+                    ? 'bg-[var(--cyber-surface)] text-[var(--cyber-cyan)] shadow-sm'
+                    : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-text)]'
+                }`}
+              >
+                Upload File
+              </button>
+              <button
+                onClick={() => setImportMode('url')}
+                className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  importMode === 'url'
+                    ? 'bg-[var(--cyber-surface)] text-[var(--cyber-cyan)] shadow-sm'
+                    : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-text)]'
+                }`}
+              >
+                Paste URL
+              </button>
             </div>
+
+            {importMode === 'file' ? (
+              /* File input */
+              <div
+                className="border-2 border-dashed border-[var(--cyber-border)] rounded-xl p-8 text-center cursor-pointer hover:border-[var(--cyber-cyan)] transition-colors"
+                onClick={() => fileRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+                onDrop={e => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  const f = e.dataTransfer.files[0]
+                  if (f) {
+                    const ext = f.name.toLowerCase().split('.').pop()
+                    if (ACCEPTED_EXTENSIONS.includes(ext)) setImportFile(f)
+                  }
+                }}
+              >
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".csv,.xlsx,.kml,.kmz"
+                  className="hidden"
+                  onChange={e => setImportFile(e.target.files[0] || null)}
+                />
+                {importFile ? (
+                  <div>
+                    <p className="text-[var(--cyber-cyan)] font-semibold">{importFile.name}</p>
+                    <div className="flex items-center justify-center gap-2 mt-1">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                        importFile.name.toLowerCase().endsWith('.csv') ? 'bg-green-500/20 text-green-400'
+                        : importFile.name.toLowerCase().endsWith('.xlsx') ? 'bg-blue-500/20 text-blue-400'
+                        : 'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {importFile.name.split('.').pop().toUpperCase()}
+                      </span>
+                      <span className="text-xs text-[var(--cyber-text-dim)]">
+                        {(importFile.size / 1024).toFixed(1)} KB
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-[var(--cyber-text-dim)]">Drop file here or click to browse</p>
+                    <p className="text-xs text-[var(--cyber-text-dim)] mt-1">CSV, Excel, KML, or KMZ (max 10MB)</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* URL input */
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-[var(--cyber-text-dim)] block mb-1">Google Maps List URL</label>
+                  <input
+                    type="url"
+                    value={importUrl}
+                    onChange={e => setImportUrl(e.target.value)}
+                    placeholder="https://maps.app.goo.gl/..."
+                    className="cyber-input w-full px-3 py-2.5 text-sm"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[10px] text-[var(--cyber-text-dim)] leading-relaxed">
+                  Paste a shared Google Maps list link. The list must be publicly shared.
+                  Open the list in Google Maps, tap the share button, and copy the link.
+                </p>
+              </div>
+            )}
 
             {/* Advanced options toggle */}
             <button
@@ -306,14 +370,14 @@ export default function CsvImportModal({ onClose, onComplete }) {
             <div className="pt-2">
               <button
                 onClick={handlePreview}
-                disabled={!csvFile || uploading}
+                disabled={(importMode === 'file' ? !importFile : !importUrl.trim()) || uploading}
                 className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold
                   bg-gradient-to-r from-cyan-600 to-cyan-700 text-white
                   shadow-[0_0_12px_rgba(0,229,255,0.2)]
                   disabled:opacity-40 disabled:cursor-not-allowed
                   active:scale-[0.98] transition-all"
               >
-                {uploading ? 'Parsing...' : 'Preview Import'}
+                {uploading ? (importMode === 'url' ? 'Fetching list...' : 'Parsing...') : 'Preview Import'}
               </button>
             </div>
           </div>
@@ -332,7 +396,7 @@ export default function CsvImportModal({ onClose, onComplete }) {
                 <span className="text-amber-400">{previewData.summary.with_duplicates} DB duplicates</span>
               )}
               {previewData.summary.intra_csv_duplicates > 0 && (
-                <span className="text-purple-400">{previewData.summary.intra_csv_duplicates} CSV-internal duplicates</span>
+                <span className="text-purple-400">{previewData.summary.intra_csv_duplicates} internal duplicates</span>
               )}
               {previewData.parsed_rows.filter(r => r.cave_data?.coordinates_approximate).length > 0 && (
                 <span className="text-red-400">
@@ -412,7 +476,7 @@ export default function CsvImportModal({ onClose, onComplete }) {
                         {/* Intra-CSV duplicate matches */}
                         {hasIntraDupes && intraDupes.map(dup => (
                           <div key={dup.row_number} className="flex items-center gap-2 text-xs flex-wrap">
-                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[10px] font-semibold">CSV</span>
+                            <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[10px] font-semibold">FILE</span>
                             <span className="text-[var(--cyber-text-dim)]">
                               Matches row {dup.row_number}: <span className="text-[var(--cyber-text)]">{dup.name}</span>
                             </span>

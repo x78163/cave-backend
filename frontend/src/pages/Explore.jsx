@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
 import SurfaceMap from '../components/SurfaceMap'
-import CsvImportModal from '../components/CsvImportModal'
+import BulkImportModal from '../components/BulkImportModal'
 
 const EXPLORE_VIEW_KEY = 'explore-map-view'
 const EXPLORE_CAVES_KEY = 'explore-caves-cache'
@@ -149,7 +149,7 @@ export default function Explore() {
                 border border-[var(--cyber-cyan)] text-[var(--cyber-cyan)]
                 hover:bg-[rgba(0,255,255,0.08)] transition-all"
             >
-              Import CSV
+              Bulk Import
             </button>
           )}
           <Link to="/caves/new"
@@ -283,7 +283,7 @@ export default function Explore() {
         </div>
       )}
       {showImport && (
-        <CsvImportModal
+        <BulkImportModal
           onClose={() => setShowImport(false)}
           onComplete={() => refetch()}
         />

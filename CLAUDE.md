@@ -707,7 +707,11 @@ This project includes:
 - Video URL parser (`caves/video_utils.py`) — regex-based platform detection, video ID extraction, embed/thumbnail URL generation
 - Cave routing system with A* pathfinding
 - Device management and sync infrastructure
-- CSV import: CLI management command + admin-only web UI with two-phase flow (preview + apply), Windows-1252 encoding fallback
+- Bulk import: CLI management command + admin-only web UI with two-phase flow (preview + apply)
+  - File formats: CSV (UTF-8/Windows-1252), Excel (.xlsx via openpyxl), KML, KMZ (Google Earth)
+  - URL import: paste a Google Maps shared list link, auto-fetches places via internal API
+  - `caves/kml_import.py`: KML/KMZ parsing (stdlib xml.etree + zipfile), Google Maps list fetcher
+  - `caves/excel_import.py`: Excel parsing with openpyxl (read_only + data_only)
 - Coordinate-based duplicate detection (Haversine distance) with conflict resolution (keep/replace/rename)
 - Intra-CSV duplicate detection: name matching (O(n) grouping) + coordinate proximity (latitude-sorted banding), bidirectional flagging with match_type upgrade
 - Approximate coordinates: `coordinates_approximate` BooleanField on Cave, keyword detection in CSV imports ("approximate", "approx", "~", "estimated"), modified conflict logic (approx+approx skips proximity)
@@ -761,7 +765,7 @@ This project includes:
 - Cyberpunk-themed UI with dark mode, "Cave Dragon" branding, Ubuntu font (Google Fonts), cyan dragon logo
 - Explore page with searchable cave list + surface map + sort/filter (stars, mapped, unmapped, public land, needs details, activity)
   - Search by name, city, state, zip code, aliases
-  - Admin-only CSV bulk import modal (drag/drop, proximity duplicate detection, intra-CSV duplicate detection, conflict resolution UI, approx badges)
+  - Admin-only bulk import modal (CSV/Excel/KML/KMZ file upload + Google Maps URL paste, proximity duplicate detection, intra-file duplicate detection, conflict resolution UI, approx badges)
   - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons (red when all children are approximate)
   - Reactive marker updates (no map destruction on search) with smart fitBounds (skips when lat span > 50° to avoid intercontinental zoom-out from 5 international caves)
   - Default US center [39.8, -98.6] with zoom 5; single search result auto-centers via mapCenter
@@ -858,6 +862,8 @@ This project includes:
 | File | Purpose |
 |------|---------|
 | `caves/csv_import.py` | Shared CSV parsing + Haversine duplicate detection + intra-CSV dedup + approximate coordinate handling |
+| `caves/kml_import.py` | KML/KMZ parsing (xml.etree + zipfile) + Google Maps list URL fetcher |
+| `caves/excel_import.py` | Excel (.xlsx) parsing with openpyxl |
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
 | `caves/padus_lookup.py` | PAD-US public land lookup (USGS ArcGIS FeatureServer, point-in-polygon, best-feature selection) |
 | `caves/hand_drawn_map.py` | Survey map image processing (bg removal + recolor) |
@@ -877,7 +883,7 @@ This project includes:
 | `frontend/src/components/VideoLinkModal.jsx` | Add video URL dialog with platform auto-detect + preview |
 | `frontend/src/components/VideoEmbed.jsx` | Full-screen video embed with platform-specific iframe |
 | `frontend/src/utils/videoUtils.js` | Client-side video URL parser (mirrors backend) |
-| `frontend/src/components/CsvImportModal.jsx` | Three-step admin CSV import modal (upload → preview/resolve → results) |
+| `frontend/src/components/BulkImportModal.jsx` | Three-step admin bulk import modal (file upload or URL paste → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
 | `survey/slam_survey.py` | SLAM-to-survey conversion: station selection, 2D raycasting for LRUD, lead detection, multi-level merging |
