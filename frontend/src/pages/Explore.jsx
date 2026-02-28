@@ -6,6 +6,9 @@ import useAuthStore from '../stores/authStore'
 import SurfaceMap from '../components/SurfaceMap'
 import CsvImportModal from '../components/CsvImportModal'
 
+const EXPLORE_VIEW_KEY = 'explore-map-view'
+const EXPLORE_CAVES_KEY = 'explore-caves-cache'
+
 export default function Explore() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
@@ -14,7 +17,38 @@ export default function Explore() {
   const [hoveredCaveId, setHoveredCaveId] = useState(null)
   const [sortBy, setSortBy] = useState('name')
   const { data, loading, refetch } = useApi('/caves/')
-  const caves = data?.caves ?? data?.results ?? data ?? []
+
+  // Restore saved map view from sessionStorage (persists within tab)
+  const savedView = useMemo(() => {
+    try {
+      const raw = sessionStorage.getItem(EXPLORE_VIEW_KEY)
+      if (raw) return JSON.parse(raw)
+    } catch { /* ignore */ }
+    return null
+  }, [])
+
+  const initialLoadRef = useRef(true)
+
+  // Use cached caves for instant markers, then swap in fresh data when API responds
+  const cachedCaves = useMemo(() => {
+    try {
+      const raw = sessionStorage.getItem(EXPLORE_CAVES_KEY)
+      if (raw) return JSON.parse(raw)
+    } catch { /* ignore */ }
+    return null
+  }, [])
+
+  const freshCaves = data?.caves ?? data?.results ?? data ?? []
+  const caves = freshCaves.length > 0 ? freshCaves : (cachedCaves ?? [])
+
+  // Cache caves whenever fresh data arrives
+  useEffect(() => {
+    if (freshCaves.length > 0) {
+      try {
+        sessionStorage.setItem(EXPLORE_CAVES_KEY, JSON.stringify(freshCaves))
+      } catch { /* quota exceeded — ignore */ }
+    }
+  }, [freshCaves])
 
   const filtered = useMemo(() => {
     let list = search
@@ -72,14 +106,23 @@ export default function Explore() {
     return US_CENTER
   }, [markers])
 
-  const handleViewChange = useCallback(() => {}, [])
+  const handleViewChange = useCallback((view) => {
+    if (view?.center && view?.zoom != null) {
+      sessionStorage.setItem(EXPLORE_VIEW_KEY, JSON.stringify(view))
+    }
+  }, [])
 
   const mapRef = useRef(null)
 
   // Fit map to search results (skip if markers span continents — e.g. NZ + US)
+  // On initial mount with a saved view, skip fitBounds so the restored position is preserved
   useEffect(() => {
     const map = mapRef.current
     if (!map || markers.length <= 1) return  // single marker handled by mapCenter
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false
+      if (savedView) return  // skip fitBounds on restore — user's saved position wins
+    }
     const timer = setTimeout(() => {
       if (!mapRef.current) return
       const lats = markers.map(mk => mk.lat)
@@ -142,7 +185,7 @@ export default function Explore() {
       </div>
 
       {/* Overview map */}
-      {mapCenter && !loading && (
+      {mapCenter && (
         <div className="mb-6">
           <SurfaceMap
             center={mapCenter}
@@ -153,6 +196,7 @@ export default function Explore() {
             className="border border-[var(--cyber-border)]"
             onViewChange={handleViewChange}
             onMapReady={(map) => { mapRef.current = map }}
+            initialView={savedView}
           />
         </div>
       )}

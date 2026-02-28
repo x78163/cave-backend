@@ -765,6 +765,9 @@ This project includes:
   - Marker clustering (leaflet.markercluster) with cyberpunk-themed cluster icons (red when all children are approximate)
   - Reactive marker updates (no map destruction on search) with smart fitBounds (skips when lat span > 50° to avoid intercontinental zoom-out from 5 international caves)
   - Default US center [39.8, -98.6] with zoom 5; single search result auto-centers via mapCenter
+  - sessionStorage persistence: map position (center/zoom) + cave data cached for instant restore on back-navigation
+  - Instant map load: tiles render immediately (no loading gate), cached markers show instantly, fresh API data replaces in background
+  - Smart fitBounds: skips on initial mount when restoring saved view, runs on search/filter changes
   - Cave cards show aliases in parentheses after name
 - Cave detail page with:
   - Unified cave detail canvas (CaveMapCanvas): shows SLAM LiDAR scans and/or traditional survey data as toggleable layers in a single canvas
