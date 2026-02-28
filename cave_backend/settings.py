@@ -19,6 +19,7 @@ ALLOWED_HOSTS = [
 ]
 
 INSTALLED_APPS = [
+    'daphne',  # ASGI server — must be first for dev server replacement
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -29,6 +30,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt.token_blacklist',
+    'channels',
     # Local apps
     'caves',
     'mapping',
@@ -40,7 +42,19 @@ INSTALLED_APPS = [
     'reconstruction',
     'routing',
     'survey',
+    'chat',
 ]
+
+ASGI_APPLICATION = 'cave_backend.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [('127.0.0.1', 6379)],
+        },
+    },
+}
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',

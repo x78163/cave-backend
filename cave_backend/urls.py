@@ -59,6 +59,7 @@ urlpatterns = [
     path('api/social/', include('social.urls')),
     path('api/', include('routing.urls')),
     path('api/caves/', include('survey.urls')),
+    path('api/chat/', include('chat.urls')),
 ]
 
 if settings.DEBUG:

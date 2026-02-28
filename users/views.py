@@ -198,3 +198,26 @@ def grotto_member_update(request, grotto_id, membership_id):
     membership.save(update_fields=['status'])
     serializer = GrottoMembershipSerializer(membership)
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_search(request):
+    """Search users by username for DM targeting."""
+    q = request.query_params.get('q', '').strip()
+    if len(q) < 1:
+        return Response([])
+    users = (
+        UserProfile.objects
+        .filter(username__icontains=q)
+        .exclude(id=request.user.id)
+        [:20]
+    )
+    return Response([
+        {
+            'id': u.id,
+            'username': u.username,
+            'avatar_preset': getattr(u, 'avatar_preset', '') or '',
+        }
+        for u in users
+    ])

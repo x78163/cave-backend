@@ -176,6 +176,11 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `UserFollow` - Follow relationships
 - `Activity` - Activity feed entries
 
+#### Real-Time Chat
+- `Channel` - Chat channels (UUID PK, name, channel_type dm/channel, description, created_by FK, grotto FK nullable)
+- `ChannelMembership` - User↔Channel membership (role owner/member, last_read_message_id for unread tracking)
+- `Message` - Chat messages (UUID PK, channel FK, author FK, content, created_at)
+
 #### Traditional Survey
 - `CaveSurvey` - Survey metadata (name, date, surveyors, unit, declination, computed totals, source: manual/slam)
 - `SurveyStation` - Computed station positions (x/y/z), optional fixed GPS coordinates
@@ -258,6 +263,19 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `PATCH/DELETE /api/caves/{id}/documents/{doc_id}/` - Edit/delete document
 - `POST /api/caves/{id}/video-links/` - Add video link (auto-detects platform)
 - `PATCH/DELETE /api/caves/{id}/video-links/{video_id}/` - Edit/delete video link
+
+### Chat Endpoints
+- `GET /api/chat/channels/` - List user's channels (with last_message, unread_count, other_user for DMs)
+- `POST /api/chat/channels/` - Create named channel
+- `GET /api/chat/channels/{id}/` - Channel detail with members
+- `GET /api/chat/channels/{id}/messages/` - Cursor-paginated history (?before=uuid&limit=50)
+- `POST /api/chat/channels/{id}/mark-read/` - Update read cursor
+- `POST /api/chat/channels/{id}/members/` - Add member to channel
+- `DELETE /api/chat/channels/{id}/leave/` - Leave channel
+- `POST /api/chat/dm/` - Get-or-create DM with {user_id}
+- `GET /api/chat/unread-count/` - Total unread for nav badge
+- `GET /api/users/search/?q=<query>` - User search for DM targeting
+- `WS /ws/chat/?token=<jwt>` - WebSocket (multiplexed, handles chat.message, chat.mark_read, chat.join_channel)
 
 ### 3D Processing (Post-MVP)
 - `POST /api/caves/{id}/generate-mesh/` - Trigger 3D generation
@@ -703,6 +721,15 @@ This project includes:
   - `generate_merged_slam_survey()`: multi-level merged survey with level-prefixed stations (L1-S1, L2-S1) and transition connecting shots
   - `source` field on CaveSurvey (manual/slam) distinguishes hand-entered from generated surveys
   - API: `POST /api/caves/{id}/generate-slam-survey/` — level='all' (default) merges all levels, level=0/1/... for single level; auto-computes render_data after creation
+- Real-time chat system (Phase 1 — Discord-style DMs + channels)
+  - Django Channels 4.x + Redis channel layer + Daphne ASGI server
+  - Single WebSocket per user multiplexed across all channels via Redis groups
+  - `ChatConsumer(AsyncJsonWebsocketConsumer)` handles chat.message, chat.mark_read, chat.join_channel
+  - JWT WebSocket auth via `?token=` query string (`chat/middleware.py`)
+  - Unified channel model: DMs are channels with `channel_type='dm'` and exactly 2 members
+  - Read cursors: `last_read_message_id` on ChannelMembership for unread tracking
+  - 9 REST endpoints + user search + cursor-paginated message history
+  - User search endpoint: `GET /api/users/search/?q=<query>` (min 1 char, excludes self)
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode, "Cave Dragon" branding, Ubuntu font (Google Fonts), cyan dragon logo
@@ -760,6 +787,16 @@ This project includes:
   - Post soft delete: "[Deleted by author]" placeholder preserves comment threads
   - Cave status badges on posts: active (link), unlisted (dim), deleted (red with cached name)
   - Reaction bar hidden on deleted posts; comment toggle preserved if comments exist
+- Chat page (Discord-style real-time messaging)
+  - ChatPage: full-height 3-panel layout (sidebar + messages + header), mobile responsive (sidebar OR messages)
+  - ChatSidebar: grouped Channels/DMs sections, unread badges (magenta), last message preview, time ago
+  - ChatMessages: REST-fetched history, infinite scroll up for older messages, auto-scroll to bottom, message grouping by author (5min window), date separators, mark-read on view
+  - ChatComposer: auto-resize textarea, Enter to send, Shift+Enter newline
+  - NewDMModal: user search (1+ chars) → create DM
+  - NewChannelModal: name + description form → create channel
+  - WebSocket singleton (chatSocket.js): auto-reconnect with exponential backoff (1s→30s), close code 4001 = auth failure (no reconnect)
+  - Zustand chatStore: channels, messages cache, unread counts, incoming message handling
+  - TopBar: Chat nav with magenta unread badge, 60s polling via fetchUnreadCount when not on chat page
 
 **GIS Integration (Tennessee)**:
 - Statewide COMPTROLLER_OLG_LANDUSE ArcGIS service (86/95 counties)
@@ -814,7 +851,20 @@ This project includes:
 | `frontend/src/utils/surveySymbols.js` | 62 NSS cave cartography SVG symbols, keyword matching, colorize/dataURL helpers |
 | `frontend/src/utils/mapLayers.js` | Tile layer configs (6 base layers + 3DEP hillshade), per-layer CSS filters, localStorage persistence, custom TileLayer for ArcGIS ImageServer |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
-| `users/views.py` | Auth, profile, avatar presets |
+| `users/views.py` | Auth, profile, avatar presets, user search |
+| `chat/models.py` | Channel, ChannelMembership, Message |
+| `chat/consumers.py` | ChatConsumer (AsyncJsonWebsocketConsumer) — WebSocket message/read/join handling |
+| `chat/middleware.py` | JWTAuthMiddleware — WebSocket JWT auth via query string |
+| `chat/views.py` | 9 REST endpoints: channels, messages, DMs, unread count, members |
+| `chat/routing.py` | WebSocket URL routing (`ws/chat/`) |
+| `cave_backend/asgi.py` | ProtocolTypeRouter — HTTP + WebSocket routing with JWT middleware |
+| `frontend/src/services/chatSocket.js` | WebSocket singleton with auto-reconnect, pub/sub |
+| `frontend/src/stores/chatStore.js` | Zustand chat state (channels, messages, unread) |
+| `frontend/src/pages/ChatPage.jsx` | Main chat page — 3-panel layout, WebSocket lifecycle |
+| `frontend/src/components/ChatSidebar.jsx` | Channel/DM list with unread badges |
+| `frontend/src/components/ChatMessages.jsx` | Message list + composer with infinite scroll |
+| `frontend/src/components/NewDMModal.jsx` | User search + DM creation |
+| `frontend/src/components/NewChannelModal.jsx` | Channel creation form |
 
 ### Migrations (caves app)
 - 0001: Initial Cave model
@@ -843,6 +893,9 @@ This project includes:
 - 0001: Initial social models
 - 0002: Post soft delete fields (is_deleted, deleted_at, cave_name_cache)
 - 0003: Data migration — backfill cave_name_cache on existing posts
+
+### Migrations (chat app)
+- 0001: Channel, ChannelMembership, Message models
 
 ### Future Features (To Be Developed)
 

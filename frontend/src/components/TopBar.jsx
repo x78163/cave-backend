@@ -1,5 +1,7 @@
+import { useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import useAuthStore from '../stores/authStore'
+import useChatStore from '../stores/chatStore'
 import AvatarDisplay from './AvatarDisplay'
 
 const navItems = [
@@ -7,6 +9,7 @@ const navItems = [
   { path: '/explore', label: 'Explore' },
   { path: '/groups', label: 'Groups' },
   { path: '/expeditions', label: 'Expeditions' },
+  { path: '/chat', label: 'Chat' },
   { path: '/profile', label: 'Profile' },
 ]
 
@@ -14,6 +17,21 @@ export default function TopBar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+  const { totalUnread, fetchUnreadCount } = useChatStore()
+  const pollRef = useRef(null)
+
+  // Poll unread count when NOT on chat page (WebSocket handles it when on chat)
+  useEffect(() => {
+    const onChat = location.pathname.startsWith('/chat')
+    if (onChat) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+      return
+    }
+    fetchUnreadCount()
+    pollRef.current = setInterval(fetchUnreadCount, 60000)
+    return () => clearInterval(pollRef.current)
+  }, [location.pathname, fetchUnreadCount])
 
   const handleLogout = () => {
     logout()
@@ -31,18 +49,25 @@ export default function TopBar() {
 
       <nav className="flex items-center gap-1">
         {navItems.map(item => {
-          const active = location.pathname === item.path
+          const active = item.path === '/chat'
+            ? location.pathname.startsWith('/chat')
+            : location.pathname === item.path
           return (
             <Link
               key={item.path}
               to={item.path}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium no-underline transition-colors ${
+              className={`relative px-3 py-1.5 rounded-full text-sm font-medium no-underline transition-colors ${
                 active
                   ? 'text-[var(--cyber-bg)] bg-[var(--cyber-cyan)]'
                   : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)]'
               }`}
             >
               {item.label}
+              {item.path === '/chat' && totalUnread > 0 && (
+                <span className="absolute -top-1 -right-1 chat-unread-badge">
+                  {totalUnread > 99 ? '99+' : totalUnread}
+                </span>
+              )}
             </Link>
           )
         })}

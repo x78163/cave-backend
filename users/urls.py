@@ -12,6 +12,9 @@ urlpatterns = [
     path('auth/refresh/', TokenRefreshView.as_view(), name='auth_refresh'),
     path('auth/verify/', TokenVerifyView.as_view(), name='auth_verify'),
 
+    # Search
+    path('search/', views.user_search, name='user_search'),
+
     # Profile
     path('me/', views.me_view, name='user_me'),
     path('profile/<int:user_id>/', views.user_profile_detail, name='user_profile_detail'),

@@ -15,6 +15,7 @@ import useAuthStore from './stores/authStore'
 const CaveDetail = lazy(() => import('./pages/CaveDetail'))
 const CreateCave = lazy(() => import('./pages/CreateCave'))
 const Profile = lazy(() => import('./pages/Profile'))
+const ChatPage = lazy(() => import('./pages/ChatPage'))
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -128,6 +129,8 @@ function AppContent() {
                 <Route path="/feed" element={<Feed />} />
                 <Route path="/groups" element={<Groups />} />
                 <Route path="/groups/:grottoId" element={<Groups />} />
+                <Route path="/chat" element={<ChatPage />} />
+                <Route path="/chat/:channelId" element={<ChatPage />} />
                 <Route path="/profile" element={<Profile />} />
               </Routes>
             </Suspense>
