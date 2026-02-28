@@ -266,6 +266,8 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `PATCH/DELETE /api/caves/{id}/documents/{doc_id}/` - Edit/delete document
 - `POST /api/caves/{id}/video-links/` - Add video link (auto-detects platform)
 - `PATCH/DELETE /api/caves/{id}/video-links/{video_id}/` - Edit/delete video link
+- `GET/POST /api/caves/{id}/annotations/` - List/create surface annotations (polygons)
+- `PATCH/DELETE /api/caves/{id}/annotations/{annotation_id}/` - Update/delete annotation
 
 ### Chat Endpoints
 - `GET /api/chat/channels/` - List user's channels (with last_message, unread_count, other_user for DMs)
@@ -783,12 +785,14 @@ This project includes:
     - Combined bounding box calculation (`combineBounds`) for fitToView across both datasets
   - 3D cave explorer (Three.js point cloud viewer)
   - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs), coordinate change cascades delta to all entrance POIs
-  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), nearby cave markers (purple), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay)
+  - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), nearby cave markers (purple), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay, map tools toolbar, coordinate readout)
+  - Surface map tools (MapToolbar): Measure (click-two-points distance/bearing with copy), Waypoint (click-to-place POIs), Polygon (draw/label/area), Elevation Profile (3DEP terrain cross-section with canvas chart). Tier 1 (Measure + CoordReadout) on both Explore + CaveDetail maps; Tier 2 (Waypoint/Polygon/Elevation) on CaveDetail only
+  - Unified SurveyLayerPanel on surface map: collapsible "Surveys (N)" button lists both computed survey overlays and scanned survey images with independent per-layer toggles, replaces old separate buttons
   - Nearby caves on surface map: purple markers (300m radius), popup with distance + link + "Toggle Survey" button, lazy-loaded muted purple survey overlays from neighboring caves
-  - Survey map overlay system: adaptive ingestion modal — two-point auto-calibration (pin 2 known entrances → auto-compute scale + heading) when 2+ GPS entrances exist, falls back to classic 4-step flow (upload → pin entrance → set scale → orient & confirm); show/hide toggle, multi-survey selector dropdown, edit/delete, rotation-aware auto-fit
+  - Survey map overlay system: adaptive ingestion modal — two-point auto-calibration (pin 2 known entrances → auto-compute scale + heading) when 2+ GPS entrances exist, falls back to classic 4-step flow (upload → pin entrance → set scale → orient & confirm); per-image toggle via SurveyLayerPanel, edit/delete, rotation-aware auto-fit
   - Google Earth-style floating collapsible panel on surface map with mode selector, level selector, opacity control
   - CaveMapOverlay supports all 7 modes: walls (quick/standard/detailed/raw_slice), edges (amber), heatmap (inferno colormap image), points (density circles)
-  - CaveMapSection: unified toolbar with Survey toggle (amber), "On Map" button for Leaflet overlay, collapsible Routes & POIs panel (two-column grid, collapsed by default)
+  - CaveMapSection: unified toolbar with Survey toggle (amber), collapsible Routes & POIs panel (two-column grid, collapsed by default)
   - Tabbed Media section (Photos / Documents / Videos) replacing standalone photo gallery
   - Photo tab: gallery with carousel, upload dialog, camera capture
   - Documents tab: PDF upload with drag-and-drop, in-app PDF viewer (blob URL + iframe), delete
@@ -867,7 +871,7 @@ This project includes:
 | `caves/gis_lookup.py` | TN GIS parcel lookup (ArcGIS + TPAD) |
 | `caves/padus_lookup.py` | PAD-US public land lookup (USGS ArcGIS FeatureServer, point-in-polygon, best-feature selection) |
 | `caves/hand_drawn_map.py` | Survey map image processing (bg removal + recolor) |
-| `caves/models.py` | Cave (coordinates_approximate), LandOwner, CavePhoto (SET_NULL + uploaded_by), DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument (SET_NULL), CaveVideoLink (SET_NULL), MediaVisibility |
+| `caves/models.py` | Cave (coordinates_approximate), LandOwner, CavePhoto (SET_NULL + uploaded_by), DescriptionRevision, CavePermission, CaveShareLink, CaveRequest, SurveyMap, CaveDocument (SET_NULL), CaveVideoLink (SET_NULL), MediaVisibility, SurfaceAnnotation (polygon overlays) |
 | `caves/video_utils.py` | Video URL parser (platform detect, embed URL, thumbnail generation) |
 | `caves/serializers.py` | Full/Public/Muted serializers with tier-based redaction + CaveRequestSerializer + SurveyMapSerializer + CaveDocumentSerializer + CaveVideoLinkSerializer |
 | `caves/views.py` | Cave CRUD (owner/admin perms), GIS lookup, reverse geocode, proximity check, nearby caves, map data, photo upload, request lifecycle, CSV import, survey map CRUD, document upload, video link CRUD, user_media + user_media_update |
@@ -875,8 +879,17 @@ This project includes:
 | `frontend/src/utils/slamTransform.js` | Multi-point SLAM-to-GPS registration: similarity transform solver, converter factory, backward-compat `slamToLatLng` |
 | `frontend/src/components/CaveMapOverlay.jsx` | SLAM-to-LatLng overlay on Leaflet (all 7 modes), accepts external `converter` prop |
 | `frontend/src/components/FineTuneMapModal.jsx` | Click-to-pick Leaflet modal for coordinate refinement (satellite + 3DEP hillshade, layer switcher) |
-| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with reactive markers (cyan/red approximate), clustering (red when all approx), entrance markers (green), nearby cave markers (purple) with survey overlay toggle, parcel polygon, cave overlay, survey overlays, center button |
-| `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with lock/edit mode |
+| `frontend/src/components/SurfaceMap.jsx` | Leaflet map with reactive markers (cyan/red approximate), clustering (red when all approx), entrance markers (green), nearby cave markers (purple), parcel polygon, cave overlay, survey overlays, center button, SurveyLayerPanel, MapToolbar |
+| `frontend/src/components/HandDrawnMapOverlay.jsx` | Multi-survey Leaflet image overlays with per-image visibility (visibleImageIds Set), lock/edit mode |
+| `frontend/src/components/SurveyLayerPanel.jsx` | Unified survey layer selector — lists computed surveys + scanned images with independent toggles |
+| `frontend/src/components/maptools/MapToolbar.jsx` | Map tool toolbar — Measure, Waypoint, Polygon, Elevation tools with active-tool state |
+| `frontend/src/components/maptools/MeasureTool.jsx` | Click-two-points distance/bearing measurement with copy |
+| `frontend/src/components/maptools/CoordReadout.jsx` | Cursor lat/lon display at bottom-center of map |
+| `frontend/src/components/maptools/WaypointTool.jsx` | Click-to-place surface waypoints (POI API) |
+| `frontend/src/components/maptools/PolygonTool.jsx` | Draw labeled polygons with color + area calculation |
+| `frontend/src/components/maptools/ElevationProfile.jsx` | Two-point terrain cross-section (USGS 3DEP, canvas chart) |
+| `frontend/src/utils/geoUtils.js` | Shared haversine, bearing, polygon area, distance formatting, point interpolation |
+| `frontend/src/utils/elevationApi.js` | USGS 3DEP getSamples API wrapper for elevation queries |
 | `frontend/src/components/SurveyMapModal.jsx` | Adaptive survey map ingestion: two-point auto-calibration (2+ entrances) or classic 4-step flow |
 | `frontend/src/components/DocumentUploadModal.jsx` | PDF upload dialog with drag-and-drop |
 | `frontend/src/components/DocumentViewer.jsx` | Full-screen PDF viewer (blob URL + iframe) |
@@ -935,6 +948,11 @@ This project includes:
 - 0014: Data migration — backfill cave_name_cache on existing media
 - 0015: coordinates_approximate BooleanField on Cave
 - 0016: public_land_name, public_land_type, public_land_owner, public_land_access on Cave (PAD-US)
+- 0017: SurfaceAnnotation model (polygon overlays on surface map)
+
+### Migrations (mapping app)
+- 0001: Initial PointOfInterest model
+- 0002: Add WAYPOINT to PoiType choices
 
 ### Migrations (survey app)
 - 0001: CaveSurvey, SurveyStation, SurveyShot models

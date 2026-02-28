@@ -197,6 +197,7 @@ export default function Explore() {
             onViewChange={handleViewChange}
             onMapReady={(map) => { mapRef.current = map }}
             initialView={savedView}
+            enableMapTools
           />
         </div>
       )}

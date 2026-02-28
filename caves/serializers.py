@@ -3,7 +3,7 @@ from rest_framework import serializers
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
-    SurveyMap, CaveDocument, CaveVideoLink,
+    SurveyMap, CaveDocument, CaveVideoLink, SurfaceAnnotation,
 )
 
 
@@ -106,6 +106,24 @@ class CaveVideoLinkSerializer(serializers.ModelSerializer):
             'added_by', 'added_by_username', 'added_at',
             'cave_name_cache',
         ]
+
+
+class SurfaceAnnotationSerializer(serializers.ModelSerializer):
+    area_acres = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SurfaceAnnotation
+        fields = [
+            'id', 'label', 'description', 'color', 'opacity',
+            'vertices', 'area_sqm', 'area_acres',
+            'created_by', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'area_sqm']
+
+    def get_area_acres(self, obj):
+        if obj.area_sqm is not None:
+            return round(obj.area_sqm / 4046.8564224, 3)
+        return None
 
 
 class CaveCommentSerializer(serializers.ModelSerializer):

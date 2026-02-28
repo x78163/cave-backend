@@ -20,6 +20,7 @@ class PointOfInterest(models.Model):
         SURVEY_STATION = 'survey_station', 'Survey Station'
         TRANSITION = 'transition', 'Level Transition'
         MARKER = 'marker', 'Marker'
+        WAYPOINT = 'waypoint', 'Waypoint'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     cave = models.ForeignKey(

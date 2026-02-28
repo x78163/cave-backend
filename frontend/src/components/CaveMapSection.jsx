@@ -41,7 +41,7 @@ const ONE_METER_SCALE = 80
 
 export default function CaveMapSection({
   caveId, preloadedRoute, hasMap = true,
-  surveyRenderData = null, showSurveyOverlay = false, onSurveyOverlayToggle,
+  surveyRenderData = null,
 }) {
   const [mapData, setMapData] = useState(null)
   const [pois, setPois] = useState([])
@@ -354,19 +354,6 @@ export default function CaveMapSection({
                   }`}
               >
                 Survey
-              </button>
-            )}
-            {/* Show on Surface Map toggle */}
-            {surveyRenderData && onSurveyOverlayToggle && (
-              <button
-                onClick={onSurveyOverlayToggle}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all
-                  ${showSurveyOverlay
-                    ? 'border-[var(--cyber-cyan)] text-[var(--cyber-cyan)] border'
-                    : 'bg-[var(--cyber-surface-2)] text-[var(--cyber-text-dim)] border border-[var(--cyber-border)] hover:border-[var(--cyber-cyan)] hover:text-[var(--cyber-cyan)]'
-                  }`}
-              >
-                On Map
               </button>
             )}
             {crosshairMode && (

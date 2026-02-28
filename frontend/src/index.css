@@ -525,3 +525,19 @@ em-emoji-picker {
 .cave-map-canvas.crosshair-mode:active {
   cursor: crosshair;
 }
+
+/* Map measurement tool tooltip */
+.measure-label {
+  background: rgba(10, 10, 18, 0.92) !important;
+  border: 1px solid var(--cyber-cyan) !important;
+  color: var(--cyber-text) !important;
+  font-family: 'Ubuntu', system-ui !important;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+  border-radius: 6px !important;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.2) !important;
+  white-space: pre-line !important;
+}
+.measure-label::before {
+  display: none !important;
+}

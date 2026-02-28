@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
-    SurveyMap, CaveDocument, CaveVideoLink,
+    SurveyMap, CaveDocument, CaveVideoLink, SurfaceAnnotation,
 )
 from .serializers import (
     CaveListSerializer, CaveDetailSerializer,
@@ -28,6 +28,7 @@ from .serializers import (
     CavePermissionSerializer, CaveShareLinkSerializer,
     LandOwnerSerializer, CaveRequestSerializer,
     SurveyMapSerializer, CaveDocumentSerializer, CaveVideoLinkSerializer,
+    SurfaceAnnotationSerializer,
 )
 
 
@@ -1454,3 +1455,82 @@ def user_media_update(request, media_type, media_id):
     item.visibility = visibility
     item.save(update_fields=['visibility'])
     return Response({'id': str(item.id), 'visibility': visibility})
+
+
+# ── Surface Annotations ──
+
+def _polygon_area_sqm(vertices):
+    """Spherical polygon area in square meters."""
+    import math
+    if not vertices or len(vertices) < 3:
+        return 0
+    R = 6_371_000
+    total = 0
+    n = len(vertices)
+    for i in range(n):
+        j = (i + 1) % n
+        lat1 = math.radians(vertices[i][0])
+        lon1 = math.radians(vertices[i][1])
+        lat2 = math.radians(vertices[j][0])
+        lon2 = math.radians(vertices[j][1])
+        total += (lon2 - lon1) * (2 + math.sin(lat1) + math.sin(lat2))
+    return abs(total * R * R / 2)
+
+
+@api_view(['GET', 'POST'])
+def annotation_list_create(request, cave_id):
+    """List or create surface annotations for a cave."""
+    try:
+        cave = Cave.objects.get(pk=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        annotations = SurfaceAnnotation.objects.filter(cave=cave)
+        serializer = SurfaceAnnotationSerializer(annotations, many=True)
+        return Response(serializer.data)
+
+    # POST — create
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    serializer = SurfaceAnnotationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    vertices = serializer.validated_data.get('vertices', [])
+    area = _polygon_area_sqm(vertices) if len(vertices) >= 3 else None
+
+    annotation = serializer.save(
+        cave=cave,
+        created_by=request.user,
+        area_sqm=area,
+    )
+    return Response(SurfaceAnnotationSerializer(annotation).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH', 'DELETE'])
+def annotation_detail(request, cave_id, annotation_id):
+    """Update or delete a surface annotation."""
+    try:
+        annotation = SurfaceAnnotation.objects.get(pk=annotation_id, cave_id=cave_id)
+    except SurfaceAnnotation.DoesNotExist:
+        return Response({'error': 'Annotation not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if request.method == 'DELETE':
+        annotation.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH
+    serializer = SurfaceAnnotationSerializer(annotation, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    vertices = serializer.validated_data.get('vertices', annotation.vertices)
+    area = _polygon_area_sqm(vertices) if len(vertices) >= 3 else annotation.area_sqm
+
+    serializer.save(area_sqm=area)
+    return Response(SurfaceAnnotationSerializer(annotation).data)

@@ -589,3 +589,29 @@ class CaveVideoLink(models.Model):
     def __str__(self):
         cave_name = self.cave.name if self.cave else self.cave_name_cache or 'Deleted Cave'
         return f'{self.title or self.url} — {cave_name}'
+
+
+class SurfaceAnnotation(models.Model):
+    """A labeled polygon drawn on a cave's surface map."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cave = models.ForeignKey(
+        'Cave', on_delete=models.CASCADE, related_name='surface_annotations'
+    )
+    label = models.CharField(max_length=200, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    color = models.CharField(max_length=20, default='#00e5ff')
+    opacity = models.FloatField(default=0.3)
+    vertices = models.JSONField(default=list, help_text='Array of [lat, lon] pairs')
+    area_sqm = models.FloatField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='surface_annotations',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.label or "Polygon"} — {self.cave.name}'

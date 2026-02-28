@@ -12,8 +12,7 @@ import { apiFetch } from '../hooks/useApi'
  * Props:
  *   map               Leaflet map instance
  *   surveys           Array of SurveyMap objects from API
- *   activeSurveyId    UUID of the currently displayed survey (null = show all)
- *   visible           Master visibility toggle
+ *   visibleImageIds   Set of survey map IDs to display (replaces visible + activeSurveyId)
  *   anchorLat         Cave entrance latitude
  *   anchorLon         Cave entrance longitude
  *   editingSurveyId   UUID of survey being edited (null = all locked)
@@ -25,8 +24,7 @@ import { apiFetch } from '../hooks/useApi'
 export default function HandDrawnMapOverlay({
   map,
   surveys = [],
-  activeSurveyId = null,
-  visible = true,
+  visibleImageIds = new Set(),
   anchorLat,
   anchorLon,
   editingSurveyId = null,
@@ -57,12 +55,11 @@ export default function HandDrawnMapOverlay({
     }
   }, [editingSurveyId])
 
-  // Which surveys to render
-  const visibleSurveys = visible
-    ? (activeSurveyId
-        ? surveys.filter(s => s.id === activeSurveyId)
-        : surveys)
-    : []
+  // Which surveys to render — show surveys whose IDs are in visibleImageIds,
+  // plus always show the one being edited
+  const visibleSurveys = surveys.filter(s =>
+    visibleImageIds.has(s.id) || s.id === editingSurveyId
+  )
 
   // Main effect: create/update/remove Leaflet image overlays
   useEffect(() => {
@@ -153,7 +150,7 @@ export default function HandDrawnMapOverlay({
       layersRef.current.forEach(layer => layer.remove())
       layersRef.current.clear()
     }
-  }, [map, anchorLat, anchorLon, visibleSurveys.length, activeSurveyId,
+  }, [map, anchorLat, anchorLon, visibleSurveys.length,
       editingSurveyId, editHeading, editOpacity,
       // Re-render when survey calibration changes
       ...surveys.map(s => `${s.id}-${s.heading}-${s.scale}-${s.opacity}-${s.anchor_x}-${s.anchor_y}`)])
@@ -180,8 +177,8 @@ export default function HandDrawnMapOverlay({
     }
   }
 
-  // Don't render controls if nothing visible or not editing
-  if (!visible || surveys.length === 0) return null
+  // Don't render controls if not editing
+  if (surveys.length === 0) return null
   if (!editingSurveyId) return null
 
   const editingSurvey = surveys.find(s => s.id === editingSurveyId)
