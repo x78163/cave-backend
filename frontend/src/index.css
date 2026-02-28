@@ -484,6 +484,24 @@ body {
   padding: 0.75rem 1rem;
 }
 
+/* ── Emoji Picker dark theme overrides ── */
+em-emoji-picker {
+  --em-rgb-background: 20, 27, 38;
+  --em-rgb-input: 30, 40, 55;
+  --em-rgb-color: 180, 190, 210;
+  --em-rgb-accent: 0, 210, 211;
+  border: 1px solid var(--cyber-border) !important;
+  border-radius: 0.75rem !important;
+}
+
+/* Hover reaction button visibility */
+.chat-hover-react {
+  pointer-events: none;
+}
+.group\/msg:hover .chat-hover-react {
+  pointer-events: auto;
+}
+
 /* ── Cave Map Canvas ── */
 
 .cave-map-canvas {

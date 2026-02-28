@@ -9,14 +9,34 @@ class MessageSerializer(serializers.ModelSerializer):
     author_avatar_preset = serializers.CharField(
         source='author.avatar_preset', read_only=True, default='',
     )
+    author_avatar = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+    reactions = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
         fields = [
             'id', 'channel', 'author', 'author_username',
-            'author_avatar_preset', 'content', 'created_at',
+            'author_avatar_preset', 'author_avatar', 'content',
+            'image_url', 'file_url', 'file_name', 'file_size',
+            'video_preview', 'reactions',
+            'created_at',
         ]
         read_only_fields = fields
+
+    def get_author_avatar(self, obj):
+        return obj.author.avatar.url if obj.author and obj.author.avatar else None
+
+    def get_image_url(self, obj):
+        return obj.image.url if obj.image else None
+
+    def get_file_url(self, obj):
+        return obj.file.url if obj.file else None
+
+    def get_reactions(self, obj):
+        # Injected by view — avoids N+1
+        return getattr(obj, '_reaction_summary', [])
 
 
 class MemberSerializer(serializers.Serializer):
@@ -33,7 +53,7 @@ class ChannelSerializer(serializers.ModelSerializer):
         model = Channel
         fields = [
             'id', 'name', 'channel_type', 'description',
-            'member_count', 'created_at', 'updated_at',
+            'is_private', 'member_count', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 

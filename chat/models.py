@@ -22,6 +22,7 @@ class Channel(models.Model):
         'users.Grotto', on_delete=models.CASCADE,
         null=True, blank=True, related_name='channels',
     )
+    is_private = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -75,7 +76,12 @@ class Message(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
         related_name='chat_messages',
     )
-    content = models.TextField()
+    content = models.TextField(blank=True, default='')
+    image = models.ImageField(upload_to='chat/images/', null=True, blank=True)
+    file = models.FileField(upload_to='chat/files/', null=True, blank=True)
+    file_name = models.CharField(max_length=255, blank=True, default='')
+    file_size = models.IntegerField(default=0)
+    video_preview = models.JSONField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -87,3 +93,25 @@ class Message(models.Model):
 
     def __str__(self):
         return f'{self.author}: {self.content[:50]}'
+
+
+class MessageReaction(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name='reactions',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='chat_reactions',
+    )
+    emoji = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['message', 'user', 'emoji']
+        indexes = [
+            models.Index(fields=['message', 'emoji']),
+        ]
+
+    def __str__(self):
+        return f'{self.user} reacted {self.emoji} on {self.message_id}'

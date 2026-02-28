@@ -13,8 +13,9 @@ function timeAgo(dateStr) {
   return `${days}d`
 }
 
-export default function ChatSidebar({ activeChannelId, currentUserId, onSelect, onNewDM, onNewChannel }) {
-  const { channels, loadingChannels } = useChatStore()
+export default function ChatSidebar({ activeChannelId, currentUserId, onSelect, onNewDM, onNewChannel, onBrowse }) {
+  const channels = useChatStore(state => state.channels)
+  const loadingChannels = useChatStore(state => state.loadingChannels)
 
   const dmChannels = channels.filter(ch => ch.channel_type === 'dm')
   const groupChannels = channels.filter(ch => ch.channel_type === 'channel')
@@ -42,6 +43,15 @@ export default function ChatSidebar({ activeChannelId, currentUserId, onSelect, 
             title="New Channel"
           >
             + Channel
+          </button>
+          <button
+            onClick={onBrowse}
+            className="px-2 py-1 text-[10px] rounded-full text-[var(--cyber-text-dim)]
+              border border-[var(--cyber-border)] hover:text-[var(--cyber-cyan)]
+              hover:border-cyan-700/50 transition-colors"
+            title="Browse Public Channels"
+          >
+            Browse
           </button>
         </div>
       </div>
@@ -105,7 +115,9 @@ function ChannelItem({ channel, active, onClick }) {
       onClick={onClick}
       className={`chat-channel-item w-full text-left flex items-center gap-3 ${active ? 'active' : ''}`}
     >
-      <span className="text-[var(--cyber-cyan)] text-sm font-medium">#</span>
+      <span className="text-[var(--cyber-cyan)] text-sm font-medium" title={channel.is_private ? 'Private' : 'Public'}>
+        {channel.is_private ? '\u{1F512}' : '#'}
+      </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <span className={`text-sm truncate ${active ? 'text-[var(--cyber-text)]' : 'text-[var(--cyber-text-dim)]'}`}>

@@ -17,7 +17,8 @@ export default function TopBar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
-  const { totalUnread, fetchUnreadCount } = useChatStore()
+  const totalUnread = useChatStore(state => state.totalUnread)
+  const fetchUnreadCount = useChatStore(state => state.fetchUnreadCount)
   const pollRef = useRef(null)
 
   // Poll unread count when NOT on chat page (WebSocket handles it when on chat)

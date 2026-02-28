@@ -67,9 +67,53 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 await self.channel_layer.group_add(group_name, self.channel_name)
                 self.channel_groups.add(group_name)
 
+        elif msg_type == 'chat.react':
+            channel_id = content.get('channel_id')
+            message_id = content.get('message_id')
+            emoji = (content.get('emoji') or '').strip()
+            if channel_id and message_id and emoji and await self._is_member(channel_id):
+                result = await self._toggle_reaction(channel_id, message_id, emoji)
+                if result:
+                    await self.channel_layer.group_send(
+                        f'chat_{channel_id}',
+                        {
+                            'type': 'chat_reaction',
+                            'data': result,
+                        },
+                    )
+
+        elif msg_type == 'chat.typing':
+            channel_id = content.get('channel_id')
+            if channel_id and await self._is_member(channel_id):
+                await self.channel_layer.group_send(
+                    f'chat_{channel_id}',
+                    {
+                        'type': 'chat_typing',
+                        'data': {
+                            'type': 'typing',
+                            'channel_id': str(channel_id),
+                            'user_id': self.user.id,
+                            'username': self.user.username,
+                        },
+                    },
+                )
+
     async def chat_message(self, event):
         """Handler for group_send broadcasts — forward to this connection."""
         await self.send_json(event['message'])
+
+    async def chat_typing(self, event):
+        """Forward typing indicator — skip sender."""
+        if event['data']['user_id'] != self.user.id:
+            await self.send_json(event['data'])
+
+    async def chat_member_update(self, event):
+        """Forward member add/remove events."""
+        await self.send_json(event['data'])
+
+    async def chat_reaction(self, event):
+        """Forward reaction update events."""
+        await self.send_json(event['data'])
 
     # ── Database helpers ──
 
@@ -91,10 +135,15 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     @database_sync_to_async
     def _save_message(self, channel_id, content):
         from .models import Message
+        from .utils import extract_video_preview
+
+        video_preview = extract_video_preview(content)
+
         msg = Message.objects.create(
             channel_id=channel_id,
             author=self.user,
             content=content,
+            video_preview=video_preview,
         )
         return {
             'id': str(msg.id),
@@ -102,7 +151,14 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'author': self.user.id,
             'author_username': self.user.username,
             'author_avatar_preset': getattr(self.user, 'avatar_preset', '') or '',
+            'author_avatar': self.user.avatar.url if self.user.avatar else None,
             'content': msg.content,
+            'image_url': None,
+            'file_url': None,
+            'file_name': '',
+            'file_size': 0,
+            'video_preview': video_preview,
+            'reactions': [],
             'created_at': msg.created_at.isoformat(),
         }
 
@@ -110,6 +166,47 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     def _touch_channel(self, channel_id):
         from .models import Channel
         Channel.objects.filter(id=channel_id).update(updated_at=timezone.now())
+
+    @database_sync_to_async
+    def _toggle_reaction(self, channel_id, message_id, emoji):
+        from .models import Message, MessageReaction
+        from django.db.models import Count
+
+        try:
+            msg = Message.objects.get(id=message_id, channel_id=channel_id)
+        except Message.DoesNotExist:
+            return None
+
+        existing = MessageReaction.objects.filter(
+            message=msg, user=self.user, emoji=emoji,
+        )
+        if existing.exists():
+            existing.delete()
+            action = 'removed'
+        else:
+            MessageReaction.objects.create(
+                message=msg, user=self.user, emoji=emoji,
+            )
+            action = 'added'
+
+        # Build summary
+        counts = (
+            MessageReaction.objects.filter(message=msg)
+            .values('emoji').annotate(count=Count('id'))
+            .order_by('emoji')
+        )
+        reactions = [{'emoji': r['emoji'], 'count': r['count']} for r in counts]
+
+        return {
+            'type': 'reaction_update',
+            'channel_id': str(channel_id),
+            'message_id': str(message_id),
+            'reactions': reactions,
+            'actor_id': self.user.id,
+            'actor_username': self.user.username,
+            'emoji': emoji,
+            'action': action,
+        }
 
     @database_sync_to_async
     def _mark_read(self, channel_id, message_id):

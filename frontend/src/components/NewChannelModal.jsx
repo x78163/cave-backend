@@ -4,6 +4,7 @@ import { apiFetch } from '../hooks/useApi'
 export default function NewChannelModal({ onClose, onCreated }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [isPrivate, setIsPrivate] = useState(true)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState(null)
 
@@ -16,14 +17,14 @@ export default function NewChannelModal({ onClose, onCreated }) {
     try {
       const data = await apiFetch('/chat/channels/', {
         method: 'POST',
-        body: { name: name.trim(), description: description.trim() },
+        body: { name: name.trim(), description: description.trim(), is_private: isPrivate },
       })
       onCreated(data.id)
     } catch (err) {
       setError('Failed to create channel')
       setCreating(false)
     }
-  }, [name, description, onCreated])
+  }, [name, description, isPrivate, onCreated])
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -57,6 +58,28 @@ export default function NewChannelModal({ onClose, onCreated }) {
               rows={2}
               style={{ borderRadius: '1rem' }}
             />
+          </div>
+
+          <div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <button
+                type="button"
+                onClick={() => setIsPrivate(!isPrivate)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${
+                  isPrivate ? 'bg-cyan-700' : 'bg-gray-600'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                  !isPrivate ? 'translate-x-4' : ''
+                }`} />
+              </button>
+              <span className="text-xs text-[var(--cyber-text)]">
+                {isPrivate ? 'Private' : 'Public'}
+              </span>
+              <span className="text-[10px] text-[var(--cyber-text-dim)]">
+                {isPrivate ? 'Invite only' : 'Anyone can find and join'}
+              </span>
+            </label>
           </div>
 
           {error && (

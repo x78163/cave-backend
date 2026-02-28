@@ -72,6 +72,14 @@ class ChatSocketService {
     this.send({ type: 'chat.join_channel', channel_id: channelId })
   }
 
+  sendTyping(channelId) {
+    this.send({ type: 'chat.typing', channel_id: channelId })
+  }
+
+  sendReaction(channelId, messageId, emoji) {
+    this.send({ type: 'chat.react', channel_id: channelId, message_id: messageId, emoji })
+  }
+
   subscribe(listener) {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)

@@ -10,6 +10,7 @@ const useChatStore = create((set, get) => ({
   loadingChannels: false,
   loadingMessages: false,
   hasMoreMessages: {},    // { channelId: boolean }
+  typing: {},             // { channelId: { userId: { username, timeout } } }
 
   fetchChannels: async () => {
     set({ loadingChannels: true })
@@ -103,6 +104,10 @@ const useChatStore = create((set, get) => ({
     const channelMessages = state.messages[channelId] || []
     if (channelMessages.length === 0) return
 
+    // Skip if already read
+    const channel = state.channels.find(ch => ch.id === channelId)
+    if (channel && channel.unread_count === 0) return
+
     const lastMessage = channelMessages[channelMessages.length - 1]
     chatSocket.markRead(channelId, lastMessage.id)
 
@@ -133,6 +138,67 @@ const useChatStore = create((set, get) => ({
     set(state => {
       const { [channelId]: _, ...rest } = state.messages
       return { messages: rest }
+    })
+  },
+
+  removeChannel: (channelId) => {
+    set(state => {
+      const { [channelId]: _, ...restMessages } = state.messages
+      const channels = state.channels.filter(ch => ch.id !== channelId)
+      const totalUnread = channels.reduce((sum, ch) => sum + (ch.unread_count || 0), 0)
+      return { channels, messages: restMessages, totalUnread }
+    })
+  },
+
+  handleReactionUpdate: (data, currentUserId) => {
+    const { channel_id, message_id, reactions, actor_id, action, emoji } = data
+    set(state => {
+      const channelMessages = state.messages[channel_id]
+      if (!channelMessages) return state
+
+      const updatedMessages = channelMessages.map(msg => {
+        if (msg.id !== message_id) return msg
+
+        // Merge server counts with local reacted state
+        const newReactions = reactions.map(r => ({
+          emoji: r.emoji,
+          count: r.count,
+          // If current user is the actor, we know their reacted state
+          reacted: actor_id === currentUserId
+            ? (r.emoji === emoji ? action === 'added' : (msg.reactions?.find(mr => mr.emoji === r.emoji)?.reacted || false))
+            : (msg.reactions?.find(mr => mr.emoji === r.emoji)?.reacted || false),
+        }))
+
+        return { ...msg, reactions: newReactions }
+      })
+
+      return {
+        messages: { ...state.messages, [channel_id]: updatedMessages },
+      }
+    })
+  },
+
+  handleTypingEvent: (data) => {
+    const { channel_id, user_id, username } = data
+    set(state => {
+      const channelTyping = { ...(state.typing[channel_id] || {}) }
+
+      // Clear previous timeout for this user
+      if (channelTyping[user_id]?.timeout) {
+        clearTimeout(channelTyping[user_id].timeout)
+      }
+
+      // Auto-clear after 3 seconds
+      const timeout = setTimeout(() => {
+        set(s => {
+          const updated = { ...(s.typing[channel_id] || {}) }
+          delete updated[user_id]
+          return { typing: { ...s.typing, [channel_id]: updated } }
+        })
+      }, 3000)
+
+      channelTyping[user_id] = { username, timeout }
+      return { typing: { ...state.typing, [channel_id]: channelTyping } }
     })
   },
 }))

@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
     "@tailwindcss/vite": "^4.1.18",
     "@tiptap/extension-image": "^3.19.0",
     "@tiptap/extension-link": "^3.19.0",
@@ -17,6 +19,7 @@
     "@tiptap/react": "^3.19.0",
     "@tiptap/starter-kit": "^3.19.0",
     "axios": "^1.13.5",
+    "emoji-mart": "^5.6.0",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
     "mgrs": "^2.1.0",

@@ -7,14 +7,17 @@ import ChatSidebar from '../components/ChatSidebar'
 import ChatMessages from '../components/ChatMessages'
 import NewDMModal from '../components/NewDMModal'
 import NewChannelModal from '../components/NewChannelModal'
+import BrowseChannelsModal from '../components/BrowseChannelsModal'
 
 export default function ChatPage() {
   const { channelId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuthStore()
-  const { setActiveChannel, fetchChannels } = useChatStore()
+  const setActiveChannel = useChatStore(state => state.setActiveChannel)
+  const fetchChannels = useChatStore(state => state.fetchChannels)
   const [showNewDM, setShowNewDM] = useState(false)
   const [showNewChannel, setShowNewChannel] = useState(false)
+  const [showBrowse, setShowBrowse] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(!channelId)
 
   // Connect WebSocket on mount
@@ -23,6 +26,13 @@ export default function ChatPage() {
 
     const unsub = chatSocket.subscribe((data) => {
       if (data.type === 'connected') {
+        fetchChannels()
+      } else if (data.type === 'typing') {
+        useChatStore.getState().handleTypingEvent(data)
+      } else if (data.type === 'reaction_update') {
+        useChatStore.getState().handleReactionUpdate(data, user?.id)
+      } else if (data.type === 'member_update') {
+        // Refresh channel list when members change
         fetchChannels()
       } else if (data.id && data.channel_id) {
         // Chat message
@@ -62,6 +72,18 @@ export default function ChatPage() {
     navigate(`/chat/${newChannelId}`)
   }
 
+  const handleBrowseJoined = (joinedChannelId) => {
+    setShowBrowse(false)
+    chatSocket.joinChannel(joinedChannelId)
+    fetchChannels()
+    navigate(`/chat/${joinedChannelId}`)
+  }
+
+  const handleNavigateBack = () => {
+    useChatStore.getState().removeChannel(channelId)
+    navigate('/chat')
+  }
+
   return (
     <div className="flex" style={{ height: 'calc(100vh - 60px)' }}>
       {/* Sidebar — hidden on mobile when viewing messages */}
@@ -74,6 +96,7 @@ export default function ChatPage() {
           onSelect={handleSelectChannel}
           onNewDM={() => setShowNewDM(true)}
           onNewChannel={() => setShowNewChannel(true)}
+          onBrowse={() => setShowBrowse(true)}
         />
       </div>
 
@@ -89,10 +112,14 @@ export default function ChatPage() {
                 onClick={() => { setMobileSidebar(true); navigate('/chat') }}
                 className="text-xs text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)]"
               >
-                ← Back
+                &larr; Back
               </button>
             </div>
-            <ChatMessages channelId={channelId} currentUserId={user?.id} />
+            <ChatMessages
+              channelId={channelId}
+              currentUserId={user?.id}
+              onNavigateBack={handleNavigateBack}
+            />
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center">
@@ -111,6 +138,12 @@ export default function ChatPage() {
         <NewChannelModal
           onClose={() => setShowNewChannel(false)}
           onCreated={handleChannelCreated}
+        />
+      )}
+      {showBrowse && (
+        <BrowseChannelsModal
+          onClose={() => setShowBrowse(false)}
+          onJoined={handleBrowseJoined}
         />
       )}
     </div>

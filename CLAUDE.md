@@ -275,7 +275,10 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/chat/dm/` - Get-or-create DM with {user_id}
 - `GET /api/chat/unread-count/` - Total unread for nav badge
 - `GET /api/users/search/?q=<query>` - User search for DM targeting
-- `WS /ws/chat/?token=<jwt>` - WebSocket (multiplexed, handles chat.message, chat.mark_read, chat.join_channel)
+- `POST /api/chat/channels/{id}/messages/{msg_id}/react/` - Toggle emoji reaction
+- `GET /api/chat/channels/{id}/messages/{msg_id}/reactors/?emoji=X` - List users who reacted (capped at 20)
+- `POST /api/chat/channels/{id}/send/` - Send message with attachment (REST upload)
+- `WS /ws/chat/?token=<jwt>` - WebSocket (multiplexed, handles chat.message, chat.mark_read, chat.join_channel, chat.typing, chat.react)
 
 ### 3D Processing (Post-MVP)
 - `POST /api/caves/{id}/generate-mesh/` - Trigger 3D generation
@@ -790,8 +793,10 @@ This project includes:
 - Chat page (Discord-style real-time messaging)
   - ChatPage: full-height 3-panel layout (sidebar + messages + header), mobile responsive (sidebar OR messages)
   - ChatSidebar: grouped Channels/DMs sections, unread badges (magenta), last message preview, time ago
-  - ChatMessages: REST-fetched history, infinite scroll up for older messages, auto-scroll to bottom, message grouping by author (5min window), date separators, mark-read on view
-  - ChatComposer: auto-resize textarea, Enter to send, Shift+Enter newline
+  - ChatMessages: REST-fetched history, infinite scroll up for older messages, auto-scroll to bottom, message grouping by author (5min window), date separators, mark-read on view, bubble-style layout (user messages right-aligned with cyan tint, others left-aligned)
+  - Emoji reactions: hover smiley → lazy-loaded `@emoji-mart/react` picker (portaled to body), toggle via WS, reaction pills with counts, cyan highlight for own reactions, reactor username tooltips on hover, batch-loaded history (2-query aggregation, no N+1)
+  - Video embeds: server-side `video_preview` extraction on save (reuses `caves/video_utils.py`), client-side fallback parsing for pre-migration messages, thumbnail with play overlay + platform badge, click-to-expand inline iframe (16:9 YT/Vimeo, 9:16 TikTok)
+  - ChatComposer: auto-resize textarea, Enter to send, Shift+Enter newline, emoji picker button (inserts at cursor), file/image attachment with paste support
   - NewDMModal: user search (1+ chars) → create DM
   - NewChannelModal: name + description form → create channel
   - WebSocket singleton (chatSocket.js): auto-reconnect with exponential backoff (1s→30s), close code 4001 = auth failure (no reconnect)
@@ -852,17 +857,18 @@ This project includes:
 | `frontend/src/utils/mapLayers.js` | Tile layer configs (6 base layers + 3DEP hillshade), per-layer CSS filters, localStorage persistence, custom TileLayer for ArcGIS ImageServer |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets, user search |
-| `chat/models.py` | Channel, ChannelMembership, Message |
-| `chat/consumers.py` | ChatConsumer (AsyncJsonWebsocketConsumer) — WebSocket message/read/join handling |
+| `chat/models.py` | Channel, ChannelMembership, Message, MessageReaction |
+| `chat/consumers.py` | ChatConsumer — WebSocket message/read/join/typing/react handling |
 | `chat/middleware.py` | JWTAuthMiddleware — WebSocket JWT auth via query string |
-| `chat/views.py` | 9 REST endpoints: channels, messages, DMs, unread count, members |
+| `chat/views.py` | REST endpoints: channels, messages, DMs, unread count, members, reactions, reactors |
+| `chat/utils.py` | `extract_video_preview()` — reuses `caves/video_utils.py` for URL parsing |
 | `chat/routing.py` | WebSocket URL routing (`ws/chat/`) |
 | `cave_backend/asgi.py` | ProtocolTypeRouter — HTTP + WebSocket routing with JWT middleware |
-| `frontend/src/services/chatSocket.js` | WebSocket singleton with auto-reconnect, pub/sub |
-| `frontend/src/stores/chatStore.js` | Zustand chat state (channels, messages, unread) |
-| `frontend/src/pages/ChatPage.jsx` | Main chat page — 3-panel layout, WebSocket lifecycle |
+| `frontend/src/services/chatSocket.js` | WebSocket singleton with auto-reconnect, pub/sub, sendReaction |
+| `frontend/src/stores/chatStore.js` | Zustand chat state (channels, messages, unread, reactions, typing) |
+| `frontend/src/pages/ChatPage.jsx` | Main chat page — 3-panel layout, WebSocket lifecycle, reaction routing |
 | `frontend/src/components/ChatSidebar.jsx` | Channel/DM list with unread badges |
-| `frontend/src/components/ChatMessages.jsx` | Message list + composer with infinite scroll |
+| `frontend/src/components/ChatMessages.jsx` | Bubble-style messages, emoji reactions, video embeds, composer with emoji picker |
 | `frontend/src/components/NewDMModal.jsx` | User search + DM creation |
 | `frontend/src/components/NewChannelModal.jsx` | Channel creation form |
 
@@ -896,6 +902,8 @@ This project includes:
 
 ### Migrations (chat app)
 - 0001: Channel, ChannelMembership, Message models
+- 0002: is_private field, file attachment fields on Message
+- 0003: MessageReaction model, video_preview JSONField on Message
 
 ### Future Features (To Be Developed)
 
