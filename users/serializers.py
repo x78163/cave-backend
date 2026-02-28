@@ -42,7 +42,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
             'bio', 'avatar', 'avatar_preset', 'location',
-            'specialties', 'onboarding_complete',
+            'specialties', 'onboarding_complete', 'allow_dms',
             'is_staff',
             'caves_explored', 'total_mapping_distance', 'expeditions_count',
             'date_joined', 'updated_at',

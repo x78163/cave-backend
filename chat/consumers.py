@@ -10,12 +10,17 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         super().__init__(*args, **kwargs)
         self.user = None
         self.channel_groups = set()
+        self.personal_group = None
 
     async def connect(self):
         self.user = self.scope.get('user')
         if not self.user or self.user.is_anonymous:
             await self.close(code=4001)
             return
+
+        # Join personal notification group
+        self.personal_group = f'user_{self.user.id}'
+        await self.channel_layer.group_add(self.personal_group, self.channel_name)
 
         # Join all channel groups the user belongs to
         memberships = await self._get_user_channel_ids()
@@ -27,6 +32,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, close_code):
+        if self.personal_group:
+            await self.channel_layer.group_discard(self.personal_group, self.channel_name)
         for group_name in self.channel_groups:
             await self.channel_layer.group_discard(group_name, self.channel_name)
 
@@ -36,6 +43,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         if msg_type == 'chat.message':
             channel_id = content.get('channel_id')
             text = (content.get('content') or '').strip()
+            reply_to = content.get('reply_to')
             if not text or not channel_id:
                 return
 
@@ -43,7 +51,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({'type': 'error', 'message': 'Not a member'})
                 return
 
-            message = await self._save_message(channel_id, text)
+            message = await self._save_message(channel_id, text, reply_to)
             await self._touch_channel(channel_id)
 
             await self.channel_layer.group_send(
@@ -115,6 +123,22 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         """Forward reaction update events."""
         await self.send_json(event['data'])
 
+    async def chat_message_edit(self, event):
+        """Forward message edit events."""
+        await self.send_json(event['data'])
+
+    async def chat_message_delete(self, event):
+        """Forward message delete events."""
+        await self.send_json(event['data'])
+
+    async def chat_message_pin(self, event):
+        """Forward message pin/unpin events."""
+        await self.send_json(event['data'])
+
+    async def chat_notification(self, event):
+        """Forward personal notification — only reaches target user's group."""
+        await self.send_json(event['data'])
+
     # ── Database helpers ──
 
     @database_sync_to_async
@@ -133,18 +157,86 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         ).exists()
 
     @database_sync_to_async
-    def _save_message(self, channel_id, content):
-        from .models import Message
+    def _save_message(self, channel_id, content, reply_to=None):
+        import re
+        from django.contrib.auth import get_user_model
+        from .models import Message, MessageMention, Notification, ChannelMembership
         from .utils import extract_video_preview
 
+        User = get_user_model()
         video_preview = extract_video_preview(content)
+
+        # Validate reply_to
+        reply_to_id = None
+        reply_to_msg = None
+        if reply_to:
+            try:
+                reply_to_msg = Message.objects.select_related('author').get(
+                    id=reply_to, channel_id=channel_id, is_deleted=False,
+                )
+                # Enforce flat threading
+                if not reply_to_msg.reply_to_id:
+                    reply_to_id = reply_to_msg.id
+                else:
+                    reply_to_msg = None
+            except Message.DoesNotExist:
+                pass
 
         msg = Message.objects.create(
             channel_id=channel_id,
             author=self.user,
             content=content,
             video_preview=video_preview,
+            reply_to_id=reply_to_id,
         )
+
+        # Parse and save mentions
+        mentioned_users = []
+        mention_matches = re.findall(r'@(\w+)', content)
+        if mention_matches:
+            mentioned_users = list(User.objects.filter(username__in=mention_matches))
+            channel_member_ids = set(
+                ChannelMembership.objects.filter(channel_id=channel_id)
+                .values_list('user_id', flat=True)
+            )
+            for user in mentioned_users:
+                if user.id != self.user.id:
+                    MessageMention.objects.get_or_create(
+                        message=msg, user=user,
+                    )
+                    if user.id in channel_member_ids:
+                        Notification.objects.create(
+                            user=user,
+                            notification_type='mention',
+                            message=msg,
+                            channel_id=channel_id,
+                            actor=self.user,
+                        )
+
+        # Reply notification
+        if reply_to_msg and reply_to_msg.author_id != self.user.id:
+            Notification.objects.create(
+                user=reply_to_msg.author,
+                notification_type='reply',
+                message=msg,
+                channel_id=channel_id,
+                actor=self.user,
+            )
+
+        # Build reply_to_preview
+        reply_to_preview = None
+        if reply_to_msg:
+            reply_to_preview = {
+                'id': str(reply_to_msg.id),
+                'author_username': reply_to_msg.author.username,
+                'content': reply_to_msg.content[:120],
+            }
+
+        mentions_data = [
+            {'user_id': u.id, 'username': u.username}
+            for u in mentioned_users if u.id != self.user.id
+        ]
+
         return {
             'id': str(msg.id),
             'channel_id': str(channel_id),
@@ -159,6 +251,15 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             'file_size': 0,
             'video_preview': video_preview,
             'reactions': [],
+            'edited_at': None,
+            'is_deleted': False,
+            'reply_to': str(reply_to_id) if reply_to_id else None,
+            'reply_to_preview': reply_to_preview,
+            'is_pinned': False,
+            'pinned_by_username': None,
+            'pinned_at': None,
+            'mentions': mentions_data,
+            'reply_count': 0,
             'created_at': msg.created_at.isoformat(),
         }
 

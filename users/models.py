@@ -18,6 +18,9 @@ class UserProfile(AbstractUser):
     location = models.CharField(max_length=200, blank=True, default='')
     specialties = models.JSONField(default=list, blank=True)
     onboarding_complete = models.BooleanField(default=False)
+    allow_dms = models.BooleanField(
+        default=True, help_text='Allow direct messages from other users',
+    )
 
     # Exploration stats (computed/cached)
     caves_explored = models.IntegerField(default=0)

@@ -179,7 +179,10 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 #### Real-Time Chat
 - `Channel` - Chat channels (UUID PK, name, channel_type dm/channel, description, created_by FK, grotto FK nullable)
 - `ChannelMembership` - User↔Channel membership (role owner/member, last_read_message_id for unread tracking)
-- `Message` - Chat messages (UUID PK, channel FK, author FK, content, created_at)
+- `Message` - Chat messages (UUID PK, channel FK, author FK, content, created_at, edited_at, is_deleted, deleted_at, reply_to self-FK, is_pinned, pinned_by FK, pinned_at)
+- `MessageReaction` - Emoji reactions (message FK, user FK, emoji, unique_together)
+- `MessageMention` - @mention tracking (message FK, user FK, unique_together)
+- `Notification` - User notifications (user FK, type mention/reply/pin, message FK, channel FK, actor FK, is_read)
 
 #### Traditional Survey
 - `CaveSurvey` - Survey metadata (name, date, surveyors, unit, declination, computed totals, source: manual/slam)
@@ -272,13 +275,23 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/chat/channels/{id}/mark-read/` - Update read cursor
 - `POST /api/chat/channels/{id}/members/` - Add member to channel
 - `DELETE /api/chat/channels/{id}/leave/` - Leave channel
-- `POST /api/chat/dm/` - Get-or-create DM with {user_id}
+- `POST /api/chat/dm/` - Get-or-create DM with {user_id} (respects allow_dms)
 - `GET /api/chat/unread-count/` - Total unread for nav badge
 - `GET /api/users/search/?q=<query>` - User search for DM targeting
 - `POST /api/chat/channels/{id}/messages/{msg_id}/react/` - Toggle emoji reaction
 - `GET /api/chat/channels/{id}/messages/{msg_id}/reactors/?emoji=X` - List users who reacted (capped at 20)
-- `POST /api/chat/channels/{id}/send/` - Send message with attachment (REST upload)
-- `WS /ws/chat/?token=<jwt>` - WebSocket (multiplexed, handles chat.message, chat.mark_read, chat.join_channel, chat.typing, chat.react)
+- `POST /api/chat/channels/{id}/send/` - Send message with attachment (REST upload, supports reply_to)
+- `PATCH /api/chat/channels/{id}/messages/{msg_id}/` - Edit message (author only, re-parses mentions)
+- `DELETE /api/chat/channels/{id}/messages/{msg_id}/` - Soft delete message (author or channel owner)
+- `POST /api/chat/channels/{id}/messages/{msg_id}/pin/` - Toggle pin (any member, creates notification)
+- `GET /api/chat/channels/{id}/pinned/` - List pinned messages
+- `GET /api/chat/channels/{id}/messages/{msg_id}/replies/` - List replies (flat, one level)
+- `GET /api/chat/messages/search/?q=&channel_id=` - Search messages (user's channels, content icontains)
+- `GET /api/chat/notifications/` - User's notifications (optional ?unread_only=true)
+- `GET /api/chat/notifications/count/` - Unread notification count
+- `POST /api/chat/notifications/{id}/read/` - Mark single notification read
+- `POST /api/chat/notifications/read-all/` - Bulk mark all read
+- `WS /ws/chat/?token=<jwt>` - WebSocket (multiplexed, handles chat.message, chat.mark_read, chat.join_channel, chat.typing, chat.react + broadcasts message_edit, message_delete, message_pin, notification)
 
 ### 3D Processing (Post-MVP)
 - `POST /api/caves/{id}/generate-mesh/` - Trigger 3D generation
@@ -724,14 +737,24 @@ This project includes:
   - `generate_merged_slam_survey()`: multi-level merged survey with level-prefixed stations (L1-S1, L2-S1) and transition connecting shots
   - `source` field on CaveSurvey (manual/slam) distinguishes hand-entered from generated surveys
   - API: `POST /api/caves/{id}/generate-slam-survey/` — level='all' (default) merges all levels, level=0/1/... for single level; auto-computes render_data after creation
-- Real-time chat system (Phase 1 — Discord-style DMs + channels)
+- Real-time chat system (Phases 1-4 — Discord-style DMs + channels + message management)
   - Django Channels 4.x + Redis channel layer + Daphne ASGI server
   - Single WebSocket per user multiplexed across all channels via Redis groups
-  - `ChatConsumer(AsyncJsonWebsocketConsumer)` handles chat.message, chat.mark_read, chat.join_channel
+  - `ChatConsumer(AsyncJsonWebsocketConsumer)` handles chat.message, chat.mark_read, chat.join_channel + broadcasts edit/delete/pin/notification
+  - Personal `user_{id}` WS group for targeted notification delivery
   - JWT WebSocket auth via `?token=` query string (`chat/middleware.py`)
   - Unified channel model: DMs are channels with `channel_type='dm'` and exactly 2 members
   - Read cursors: `last_read_message_id` on ChannelMembership for unread tracking
-  - 9 REST endpoints + user search + cursor-paginated message history
+  - Message edit (PATCH, author only) with `edited_at` timestamp, re-parses mentions + video preview
+  - Message soft delete (DELETE, author or channel owner) — clears content/attachments, `is_deleted` + `deleted_at`
+  - Flat reply threading — `reply_to` self-FK, one level only (replies to replies rejected)
+  - Message pinning — toggle `is_pinned`, pinned messages list endpoint, pin notification to author
+  - @mentions — regex `@(\w+)` parsing, `MessageMention` model, notifications for mentioned channel members
+  - Notification system — `Notification` model (mention/reply/pin types), REST CRUD, WS delivery via personal group
+  - `allow_dms` BooleanField on UserProfile — enforced in `dm_get_or_create` (403 if disabled)
+  - Batch-loading helpers: `_inject_reaction_summaries`, `_inject_reply_counts`, `_inject_mentions` (2-query N+1 avoidance)
+  - Message search: `content__icontains` across user's channels, optional channel filter, limit 50
+  - 20+ REST endpoints + user search + cursor-paginated message history
   - User search endpoint: `GET /api/users/search/?q=<query>` (min 1 char, excludes self)
 
 **Frontend (React/Vite)**:
@@ -796,12 +819,23 @@ This project includes:
   - ChatMessages: REST-fetched history, infinite scroll up for older messages, auto-scroll to bottom, message grouping by author (5min window), date separators, mark-read on view, bubble-style layout (user messages right-aligned with cyan tint, others left-aligned)
   - Emoji reactions: hover smiley → lazy-loaded `@emoji-mart/react` picker (portaled to body), toggle via WS, reaction pills with counts, cyan highlight for own reactions, reactor username tooltips on hover, batch-loaded history (2-query aggregation, no N+1)
   - Video embeds: server-side `video_preview` extraction on save (reuses `caves/video_utils.py`), client-side fallback parsing for pre-migration messages, thumbnail with play overlay + platform badge, click-to-expand inline iframe (16:9 YT/Vimeo, 9:16 TikTok)
-  - ChatComposer: auto-resize textarea, Enter to send, Shift+Enter newline, emoji picker button (inserts at cursor), file/image attachment with paste support
+  - Hover action bar: 5 buttons (React, Reply, Pin, Edit, Delete) — Edit for own msgs, Delete for own or channel owner
+  - Inline message editing: textarea with Enter=save, Escape=cancel, "(edited)" label after content
+  - Soft delete: "[This message was deleted]" placeholder, no hover actions
+  - Flat reply threading: reply-to preview bar above bubble (clickable scroll-to-parent), reply count button, reply bar in composer ("Replying to @username")
+  - Pinned messages: pin indicator below messages, "Pinned N" button in header opens right sidebar panel with scrollable list
+  - @mentions: MentionAutocomplete portaled dropdown (debounced search, keyboard nav), mention highlighting in cyan
+  - Clickable usernames: open UserPreviewPopover (portaled card with avatar, bio, View Profile + Send DM buttons)
+  - Message highlight animation: `scrollToMessage` with 2s cyan flash CSS keyframes
+  - ChatComposer: auto-resize textarea, Enter to send, Shift+Enter newline, emoji picker button (inserts at cursor), file/image attachment with paste support, @mention detection + autocomplete, reply_to in send payload
   - NewDMModal: user search (1+ chars) → create DM
   - NewChannelModal: name + description form → create channel
   - WebSocket singleton (chatSocket.js): auto-reconnect with exponential backoff (1s→30s), close code 4001 = auth failure (no reconnect)
-  - Zustand chatStore: channels, messages cache, unread counts, incoming message handling
+  - Zustand chatStore: channels, messages cache, unread counts, incoming message handling, Phase 4 handlers (edit/delete/pin/notification), search, pinned messages cache, notifications state
   - TopBar: Chat nav with magenta unread badge, 60s polling via fetchUnreadCount when not on chat page
+- Public user profile page (`/users/:userId`): avatar, bio, stats (caves/mapped/expeditions), specialties, tabs (wall/media/ratings), Send DM button (respects allow_dms), redirects to `/profile` for self
+- UserPreviewPopover: portaled card on username click in chat, View Profile + Send DM buttons
+- Profile page: added allow_dms toggle (switch UI in edit panel)
 
 **GIS Integration (Tennessee)**:
 - Statewide COMPTROLLER_OLG_LANDUSE ArcGIS service (86/95 counties)
@@ -857,18 +891,21 @@ This project includes:
 | `frontend/src/utils/mapLayers.js` | Tile layer configs (6 base layers + 3DEP hillshade), per-layer CSS filters, localStorage persistence, custom TileLayer for ArcGIS ImageServer |
 | `social/views.py` | Wall posts (soft delete + cave_name_cache), ratings, activity feed |
 | `users/views.py` | Auth, profile, avatar presets, user search |
-| `chat/models.py` | Channel, ChannelMembership, Message, MessageReaction |
-| `chat/consumers.py` | ChatConsumer — WebSocket message/read/join/typing/react handling |
+| `chat/models.py` | Channel, ChannelMembership, Message (edit/delete/reply/pin fields), MessageReaction, MessageMention, Notification |
+| `chat/consumers.py` | ChatConsumer — WS message/read/join/typing/react + broadcast edit/delete/pin/notification, personal user group |
 | `chat/middleware.py` | JWTAuthMiddleware — WebSocket JWT auth via query string |
-| `chat/views.py` | REST endpoints: channels, messages, DMs, unread count, members, reactions, reactors |
+| `chat/views.py` | REST endpoints: channels, messages, DMs, edit/delete/pin, replies, search, notifications (20+ endpoints) |
 | `chat/utils.py` | `extract_video_preview()` — reuses `caves/video_utils.py` for URL parsing |
 | `chat/routing.py` | WebSocket URL routing (`ws/chat/`) |
 | `cave_backend/asgi.py` | ProtocolTypeRouter — HTTP + WebSocket routing with JWT middleware |
-| `frontend/src/services/chatSocket.js` | WebSocket singleton with auto-reconnect, pub/sub, sendReaction |
-| `frontend/src/stores/chatStore.js` | Zustand chat state (channels, messages, unread, reactions, typing) |
-| `frontend/src/pages/ChatPage.jsx` | Main chat page — 3-panel layout, WebSocket lifecycle, reaction routing |
+| `frontend/src/services/chatSocket.js` | WebSocket singleton with auto-reconnect, pub/sub, sendReaction, sendMessage with reply_to |
+| `frontend/src/stores/chatStore.js` | Zustand chat state (channels, messages, unread, reactions, typing, Phase 4: edit/delete/pin/search/notifications/pinned) |
+| `frontend/src/pages/ChatPage.jsx` | Main chat page — 3-panel layout, WebSocket lifecycle, routing for edit/delete/pin/notification events |
 | `frontend/src/components/ChatSidebar.jsx` | Channel/DM list with unread badges |
-| `frontend/src/components/ChatMessages.jsx` | Bubble-style messages, emoji reactions, video embeds, composer with emoji picker |
+| `frontend/src/components/ChatMessages.jsx` | Bubble-style messages, emoji reactions, video embeds, hover action bar (react/reply/pin/edit/delete), inline edit, reply threading, pinned panel, @mention rendering, user popover |
+| `frontend/src/components/MentionAutocomplete.jsx` | @mention typeahead dropdown (debounced search, keyboard nav, portaled) |
+| `frontend/src/components/UserPreviewPopover.jsx` | User card popover (avatar, bio, View Profile + Send DM, portaled) |
+| `frontend/src/pages/UserProfilePage.jsx` | Public user profile page (`/users/:userId`) with stats, tabs, DM button |
 | `frontend/src/components/NewDMModal.jsx` | User search + DM creation |
 | `frontend/src/components/NewChannelModal.jsx` | Channel creation form |
 
@@ -904,6 +941,10 @@ This project includes:
 - 0001: Channel, ChannelMembership, Message models
 - 0002: is_private field, file attachment fields on Message
 - 0003: MessageReaction model, video_preview JSONField on Message
+- 0004: Phase 4 — edited_at, is_deleted, deleted_at, reply_to, is_pinned, pinned_by, pinned_at on Message + MessageMention + Notification models
+
+### Migrations (users app)
+- 0003: allow_dms BooleanField on UserProfile
 
 ### Future Features (To Be Developed)
 

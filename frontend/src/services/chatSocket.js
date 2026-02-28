@@ -60,8 +60,10 @@ class ChatSocketService {
     }
   }
 
-  sendMessage(channelId, content) {
-    this.send({ type: 'chat.message', channel_id: channelId, content })
+  sendMessage(channelId, content, replyTo = null) {
+    const msg = { type: 'chat.message', channel_id: channelId, content }
+    if (replyTo) msg.reply_to = replyTo
+    this.send(msg)
   }
 
   markRead(channelId, messageId) {

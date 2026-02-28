@@ -502,6 +502,14 @@ em-emoji-picker {
   pointer-events: auto;
 }
 
+.chat-msg-highlight {
+  animation: msg-flash 2s ease-out;
+}
+@keyframes msg-flash {
+  0%, 30% { background-color: rgba(0, 229, 255, 0.08); }
+  100% { background-color: transparent; }
+}
+
 /* ── Cave Map Canvas ── */
 
 .cave-map-canvas {

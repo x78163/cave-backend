@@ -84,15 +84,95 @@ class Message(models.Model):
     video_preview = models.JSONField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Edit / Delete
+    edited_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    # Flat reply threading (one level)
+    reply_to = models.ForeignKey(
+        'self', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='replies',
+    )
+
+    # Pinned messages
+    is_pinned = models.BooleanField(default=False)
+    pinned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='+',
+    )
+    pinned_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['created_at']
         indexes = [
             models.Index(fields=['channel', 'created_at']),
             models.Index(fields=['author', '-created_at']),
+            models.Index(fields=['channel', 'is_pinned']),
+            models.Index(fields=['reply_to']),
         ]
 
     def __str__(self):
         return f'{self.author}: {self.content[:50]}'
+
+
+class MessageMention(models.Model):
+    """Tracks @mentions in messages for notification dispatch."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name='mentions',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='chat_mentions',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['message', 'user']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'@{self.user} in {self.message_id}'
+
+
+class Notification(models.Model):
+    class NotificationType(models.TextChoices):
+        MENTION = 'mention', 'Mention'
+        REPLY = 'reply', 'Reply'
+        PIN = 'pin', 'Pin'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='chat_notifications',
+    )
+    notification_type = models.CharField(
+        max_length=20, choices=NotificationType.choices,
+    )
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name='notifications',
+    )
+    channel = models.ForeignKey(
+        Channel, on_delete=models.CASCADE, related_name='notifications',
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='+',
+    )
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.notification_type} for {self.user} in {self.channel_id}'
 
 
 class MessageReaction(models.Model):

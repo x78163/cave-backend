@@ -5,7 +5,18 @@ import chatSocket from '../services/chatSocket'
 import { apiFetch } from '../hooks/useApi'
 import AvatarDisplay from './AvatarDisplay'
 import ChannelSettingsPanel from './ChannelSettingsPanel'
+import MentionAutocomplete from './MentionAutocomplete'
+import UserPreviewPopover from './UserPreviewPopover'
 import { parseVideoUrl, PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
+
+function scrollToMessage(messageId) {
+  const el = document.getElementById(`msg-${messageId}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('chat-msg-highlight')
+    setTimeout(() => el.classList.remove('chat-msg-highlight'), 2000)
+  }
+}
 
 function formatTime(dateStr) {
   const d = new Date(dateStr)
@@ -85,6 +96,23 @@ function getVideoPreview(msg) {
     }
   }
   return null
+}
+
+// Render message content with @mention highlighting
+function renderMessageContent(content, mentions) {
+  if (!mentions || mentions.length === 0) return content
+  const mentionUsernames = new Set(mentions.map(m => m.username))
+  const parts = content.split(/(@\w+)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('@') && mentionUsernames.has(part.slice(1))) {
+      return (
+        <span key={i} className="text-[var(--cyber-cyan)] font-medium cursor-pointer hover:underline">
+          {part}
+        </span>
+      )
+    }
+    return part
+  })
 }
 
 const EMPTY_TYPING = {}
@@ -332,12 +360,19 @@ export default function ChatMessages({ channelId, currentUserId, onNavigateBack 
   const hasMoreMessages = useChatStore(state => state.hasMoreMessages)
   const fetchMessages = useChatStore(state => state.fetchMessages)
   const markChannelRead = useChatStore(state => state.markChannelRead)
+  const pinnedMessages = useChatStore(state => state.pinnedMessages)
+  const fetchPinnedMessages = useChatStore(state => state.fetchPinnedMessages)
   const messagesEndRef = useRef(null)
   const containerRef = useRef(null)
   const [atBottom, setAtBottom] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
+  const [showPinnedPanel, setShowPinnedPanel] = useState(false)
   const [pickerMsgId, setPickerMsgId] = useState(null)
   const [pickerAnchorRect, setPickerAnchorRect] = useState(null)
+  const [editingMsgId, setEditingMsgId] = useState(null)
+  const [editText, setEditText] = useState('')
+  const [replyTo, setReplyTo] = useState(null) // { id, author_username, content }
+  const [popoverUser, setPopoverUser] = useState(null) // { userId, anchorRect }
 
   const channelMessages = messages[channelId] || []
 
@@ -434,6 +469,27 @@ export default function ChatMessages({ channelId, currentUserId, onNavigateBack 
           <span className="text-sm font-semibold text-[var(--cyber-text)] flex-1 truncate">
             {headerName}
           </span>
+          {/* Pinned messages button */}
+          {(() => {
+            const pinned = pinnedMessages[channelId]
+            const pinCount = pinned?.length || channelMessages.filter(m => m.is_pinned).length
+            return pinCount > 0 ? (
+              <button
+                onClick={() => {
+                  if (!pinnedMessages[channelId]) fetchPinnedMessages(channelId)
+                  setShowPinnedPanel(!showPinnedPanel)
+                }}
+                className={`text-xs px-2 py-1 rounded-full border transition-colors flex items-center gap-1
+                  ${showPinnedPanel
+                    ? 'border-cyan-700/50 text-[var(--cyber-cyan)]'
+                    : 'border-[var(--cyber-border)] text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50'
+                  }`}
+                title="Pinned messages"
+              >
+                <span>&#128204;</span> Pinned {pinCount}
+              </button>
+            ) : null
+          })()}
           {channel?.channel_type === 'channel' && (
             <button
               onClick={() => setShowSettings(!showSettings)}
@@ -490,73 +546,212 @@ export default function ChatMessages({ channelId, currentUserId, onNavigateBack 
                 </div>
                 <div className={`flex-1 min-w-0 max-w-[75%] ${isMe ? 'flex flex-col items-end' : ''}`}>
                   <div className={`flex items-baseline gap-2 ${isMe ? 'flex-row-reverse' : ''}`}>
-                    <span className={`text-sm font-semibold ${isMe ? 'text-[var(--cyber-cyan)]' : 'text-[var(--cyber-text)]'}`}>
+                    <button
+                      onClick={(e) => setPopoverUser({ userId: group.author, anchorRect: e.currentTarget.getBoundingClientRect() })}
+                      className={`text-sm font-semibold hover:underline cursor-pointer ${isMe ? 'text-[var(--cyber-cyan)]' : 'text-[var(--cyber-text)]'}`}
+                    >
                       {group.author_username}
-                    </span>
+                    </button>
                     <span className="text-[10px] text-[var(--cyber-text-dim)]">
                       {formatTime(group.messages[0].created_at)}
                     </span>
                   </div>
                   {group.messages.map(msg => {
-                    const videoPreview = getVideoPreview(msg)
-                    const hasReactions = msg.reactions && msg.reactions.length > 0
+                    const videoPreview = msg.is_deleted ? null : getVideoPreview(msg)
+                    const hasReactions = !msg.is_deleted && msg.reactions && msg.reactions.length > 0
+                    const isEditing = editingMsgId === msg.id
+                    const isOwner = channel?.members?.some(m => m.id === currentUserId && m.role === 'owner')
+                    const canEdit = msg.author === currentUserId && !msg.is_deleted
+                    const canDelete = (msg.author === currentUserId || isOwner) && !msg.is_deleted
+
                     return (
-                      <div key={msg.id} className={`mt-1 relative group/msg ${isMe ? 'flex flex-col items-end' : ''}`}>
-                        {msg.content && (
-                          <div className={`inline-block px-3 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap max-w-full
-                            ${isMe
-                              ? 'bg-[var(--cyber-cyan)]/15 border border-cyan-700/30 text-[var(--cyber-text)] rounded-tr-sm'
-                              : 'bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)] text-[var(--cyber-text)] rounded-tl-sm'
-                            }`}
+                      <div key={msg.id} id={`msg-${msg.id}`} className={`mt-1 relative group/msg ${isMe ? 'flex flex-col items-end' : ''}`}>
+                        {/* Reply-to preview */}
+                        {msg.reply_to_preview && (
+                          <button
+                            onClick={() => scrollToMessage(msg.reply_to_preview.id)}
+                            className={`flex items-center gap-1.5 mb-1 text-[11px] text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)] transition-colors max-w-full truncate ${isMe ? 'flex-row-reverse' : ''}`}
                           >
-                            {msg.content}
-                          </div>
-                        )}
-                        {msg.image_url && (
-                          <div className="mt-1 max-w-sm">
-                            <img
-                              src={msg.image_url}
-                              alt="shared"
-                              className="rounded-lg max-h-72 cursor-pointer hover:opacity-90 border border-[var(--cyber-border)]"
-                              onClick={() => window.open(msg.image_url, '_blank')}
-                              loading="lazy"
-                            />
-                          </div>
-                        )}
-                        {msg.file_url && !msg.image_url && (
-                          <a
-                            href={msg.file_url}
-                            download={msg.file_name}
-                            className="mt-1 inline-flex items-center gap-2 px-3 py-2 rounded-lg
-                              bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]
-                              hover:border-cyan-700/50 transition-colors text-sm"
-                          >
-                            <span className="text-[var(--cyber-cyan)]">&#128206;</span>
-                            <span className="text-[var(--cyber-text)]">{msg.file_name}</span>
-                            <span className="text-[var(--cyber-text-dim)] text-xs">
-                              {formatFileSize(msg.file_size)}
+                            <span className="w-0.5 h-4 bg-cyan-700/50 rounded-full flex-shrink-0" />
+                            <span className="truncate">
+                              <span className="font-medium">@{msg.reply_to_preview.author_username}</span>
+                              {' '}{msg.reply_to_preview.content.slice(0, 60)}
                             </span>
-                          </a>
+                          </button>
                         )}
-                        {videoPreview && (
-                          <ChatVideoEmbed preview={videoPreview} />
+
+                        {/* Deleted message */}
+                        {msg.is_deleted ? (
+                          <div className="inline-block px-3 py-1.5 rounded-2xl text-sm italic text-[var(--cyber-text-dim)]/50">
+                            [This message was deleted]
+                          </div>
+                        ) : isEditing ? (
+                          /* Inline edit mode */
+                          <div className="w-full max-w-md">
+                            <textarea
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              className="w-full cyber-input px-3 py-1.5 text-sm rounded-lg resize-none"
+                              rows={2}
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault()
+                                  const trimmed = editText.trim()
+                                  if (trimmed && trimmed !== msg.content) {
+                                    apiFetch(`/chat/channels/${channelId}/messages/${msg.id}/`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ content: trimmed }),
+                                    }).catch(() => {})
+                                  }
+                                  setEditingMsgId(null)
+                                }
+                                if (e.key === 'Escape') setEditingMsgId(null)
+                              }}
+                            />
+                            <div className="flex gap-2 mt-1">
+                              <button
+                                onClick={() => {
+                                  const trimmed = editText.trim()
+                                  if (trimmed && trimmed !== msg.content) {
+                                    apiFetch(`/chat/channels/${channelId}/messages/${msg.id}/`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ content: trimmed }),
+                                    }).catch(() => {})
+                                  }
+                                  setEditingMsgId(null)
+                                }}
+                                className="text-[10px] text-[var(--cyber-cyan)] hover:underline"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingMsgId(null)}
+                                className="text-[10px] text-[var(--cyber-text-dim)] hover:underline"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {msg.content && (
+                              <div className={`inline-block px-3 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap max-w-full
+                                ${isMe
+                                  ? 'bg-[var(--cyber-cyan)]/15 border border-cyan-700/30 text-[var(--cyber-text)] rounded-tr-sm'
+                                  : 'bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)] text-[var(--cyber-text)] rounded-tl-sm'
+                                }`}
+                              >
+                                {renderMessageContent(msg.content, msg.mentions)}
+                                {msg.edited_at && (
+                                  <span className="text-[10px] text-[var(--cyber-text-dim)]/60 ml-1.5">(edited)</span>
+                                )}
+                              </div>
+                            )}
+                            {msg.image_url && (
+                              <div className="mt-1 max-w-sm">
+                                <img
+                                  src={msg.image_url}
+                                  alt="shared"
+                                  className="rounded-lg max-h-72 cursor-pointer hover:opacity-90 border border-[var(--cyber-border)]"
+                                  onClick={() => window.open(msg.image_url, '_blank')}
+                                  loading="lazy"
+                                />
+                              </div>
+                            )}
+                            {msg.file_url && !msg.image_url && (
+                              <a
+                                href={msg.file_url}
+                                download={msg.file_name}
+                                className="mt-1 inline-flex items-center gap-2 px-3 py-2 rounded-lg
+                                  bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]
+                                  hover:border-cyan-700/50 transition-colors text-sm"
+                              >
+                                <span className="text-[var(--cyber-cyan)]">&#128206;</span>
+                                <span className="text-[var(--cyber-text)]">{msg.file_name}</span>
+                                <span className="text-[var(--cyber-text-dim)] text-xs">
+                                  {formatFileSize(msg.file_size)}
+                                </span>
+                              </a>
+                            )}
+                            {videoPreview && (
+                              <ChatVideoEmbed preview={videoPreview} />
+                            )}
+                          </>
                         )}
+
+                        {/* Pin indicator */}
+                        {msg.is_pinned && !msg.is_deleted && (
+                          <div className="text-[10px] text-[var(--cyber-text-dim)] mt-0.5 flex items-center gap-1">
+                            <span>&#128204;</span> Pinned{msg.pinned_by_username ? ` by ${msg.pinned_by_username}` : ''}
+                          </div>
+                        )}
+
                         {/* Reaction pills */}
                         {hasReactions && (
                           <ReactionBar msg={msg} channelId={channelId} isMe={isMe} onOpenPicker={(e) => openPickerForMsg(msg.id, e)} />
                         )}
-                        {/* Hover smiley — opens picker directly */}
-                        <button
-                          onClick={(e) => openPickerForMsg(msg.id, e)}
-                          className={`chat-hover-react opacity-0 group-hover/msg:opacity-100 absolute -top-2
-                            px-1.5 py-0.5 rounded-full text-xs border border-[var(--cyber-border)]
-                            bg-[var(--cyber-surface)] text-[var(--cyber-text-dim)]
-                            hover:border-cyan-700/30 hover:text-[var(--cyber-cyan)] transition-all z-10
+
+                        {/* Reply count */}
+                        {msg.reply_count > 0 && (
+                          <button
+                            onClick={() => scrollToMessage(msg.id)}
+                            className="text-[11px] text-[var(--cyber-cyan)] hover:underline mt-0.5"
+                          >
+                            {msg.reply_count} {msg.reply_count === 1 ? 'reply' : 'replies'}
+                          </button>
+                        )}
+
+                        {/* Hover action bar */}
+                        {!msg.is_deleted && (
+                          <div className={`chat-hover-react opacity-0 group-hover/msg:opacity-100 absolute -top-3
+                            flex items-center gap-0.5 rounded-full border border-[var(--cyber-border)]
+                            bg-[var(--cyber-surface)] shadow-lg z-10 px-1
                             ${isMe ? 'left-0' : 'right-0'}`}
-                          title="Add reaction"
-                        >
-                          &#128578;
-                        </button>
+                          >
+                            <button
+                              onClick={(e) => openPickerForMsg(msg.id, e)}
+                              className="p-1 text-xs text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)] transition-colors"
+                              title="React"
+                            >&#128578;</button>
+                            <button
+                              onClick={() => setReplyTo({ id: msg.id, author_username: msg.author_username || group.author_username, content: msg.content })}
+                              className="p-1 text-xs text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)] transition-colors"
+                              title="Reply"
+                            >&#8617;</button>
+                            <button
+                              onClick={() => {
+                                apiFetch(`/chat/channels/${channelId}/messages/${msg.id}/pin/`, {
+                                  method: 'POST',
+                                }).catch(() => {})
+                              }}
+                              className={`p-1 text-xs transition-colors ${msg.is_pinned ? 'text-[var(--cyber-cyan)]' : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)]'}`}
+                              title={msg.is_pinned ? 'Unpin' : 'Pin'}
+                            >&#128204;</button>
+                            {canEdit && (
+                              <button
+                                onClick={() => { setEditingMsgId(msg.id); setEditText(msg.content) }}
+                                className="p-1 text-xs text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)] transition-colors"
+                                title="Edit"
+                              >&#9998;</button>
+                            )}
+                            {canDelete && (
+                              <button
+                                onClick={() => {
+                                  if (confirm('Delete this message?')) {
+                                    apiFetch(`/chat/channels/${channelId}/messages/${msg.id}/`, {
+                                      method: 'DELETE',
+                                    }).catch(() => {})
+                                  }
+                                }}
+                                className="p-1 text-xs text-[var(--cyber-text-dim)] hover:text-red-400 transition-colors"
+                                title="Delete"
+                              >&#128465;</button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -571,8 +766,24 @@ export default function ChatMessages({ channelId, currentUserId, onNavigateBack 
         {/* Typing indicator */}
         <TypingIndicator channelId={channelId} />
 
+        {/* Reply preview bar */}
+        {replyTo && (
+          <div className="px-4 py-2 border-t border-[var(--cyber-border)] bg-[var(--cyber-surface)] flex items-center gap-2">
+            <span className="w-0.5 h-6 bg-cyan-700/50 rounded-full flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="text-[11px] text-[var(--cyber-text-dim)]">Replying to </span>
+              <span className="text-[11px] text-[var(--cyber-cyan)] font-medium">@{replyTo.author_username}</span>
+              <p className="text-xs text-[var(--cyber-text-dim)] truncate">{replyTo.content?.slice(0, 80)}</p>
+            </div>
+            <button
+              onClick={() => setReplyTo(null)}
+              className="text-[var(--cyber-text-dim)] hover:text-white text-sm flex-shrink-0"
+            >&times;</button>
+          </div>
+        )}
+
         {/* Composer */}
-        <ChatComposer channelId={channelId} />
+        <ChatComposer channelId={channelId} replyTo={replyTo} onReplySent={() => setReplyTo(null)} />
       </div>
 
       {/* Settings panel */}
@@ -585,6 +796,34 @@ export default function ChatMessages({ channelId, currentUserId, onNavigateBack 
         />
       )}
 
+      {/* Pinned messages panel */}
+      {showPinnedPanel && (
+        <div className="w-72 flex-shrink-0 border-l border-[var(--cyber-border)] bg-[var(--cyber-surface)] flex flex-col">
+          <div className="px-4 py-3 border-b border-[var(--cyber-border)] flex items-center justify-between">
+            <span className="text-sm font-semibold text-[var(--cyber-text)]">Pinned Messages</span>
+            <button onClick={() => setShowPinnedPanel(false)} className="text-[var(--cyber-text-dim)] hover:text-white">&times;</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {(pinnedMessages[channelId] || []).map(msg => (
+              <div
+                key={msg.id}
+                className="p-2 rounded-lg bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)] cursor-pointer hover:border-cyan-700/30 transition-colors"
+                onClick={() => { scrollToMessage(msg.id); setShowPinnedPanel(false) }}
+              >
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="text-xs font-medium text-[var(--cyber-text)]">{msg.author_username}</span>
+                  <span className="text-[10px] text-[var(--cyber-text-dim)]">{formatTime(msg.created_at)}</span>
+                </div>
+                <p className="text-xs text-[var(--cyber-text-dim)] line-clamp-3">{msg.content}</p>
+              </div>
+            ))}
+            {(!pinnedMessages[channelId] || pinnedMessages[channelId].length === 0) && (
+              <p className="text-xs text-[var(--cyber-text-dim)] text-center py-4">No pinned messages</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Floating emoji picker (portaled to body) */}
       {pickerMsgId && (
         <FloatingEmojiPicker
@@ -594,17 +833,29 @@ export default function ChatMessages({ channelId, currentUserId, onNavigateBack 
           onClose={closePicker}
         />
       )}
+
+      {/* User preview popover */}
+      {popoverUser && (
+        <UserPreviewPopover
+          userId={popoverUser.userId}
+          anchorRect={popoverUser.anchorRect}
+          onClose={() => setPopoverUser(null)}
+          currentUserId={currentUserId}
+        />
+      )}
     </div>
   )
 }
 
-function ChatComposer({ channelId }) {
+function ChatComposer({ channelId, replyTo, onReplySent }) {
   const [text, setText] = useState('')
   const [attachment, setAttachment] = useState(null)
   const [preview, setPreview] = useState(null)
   const [sending, setSending] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [ComposerPicker, setComposerPicker] = useState(null)
+  const [mentionQuery, setMentionQuery] = useState(null)
+  const [mentionAnchorRect, setMentionAnchorRect] = useState(null)
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
   const typingTimerRef = useRef(null)
@@ -634,6 +885,7 @@ function ChatComposer({ channelId }) {
         } else {
           form.append('file', attachment)
         }
+        if (replyTo?.id) form.append('reply_to', replyTo.id)
         await apiFetch(`/chat/channels/${channelId}/send/`, {
           method: 'POST',
           body: form,
@@ -644,8 +896,9 @@ function ChatComposer({ channelId }) {
       if (preview) { URL.revokeObjectURL(preview); setPreview(null) }
     } else {
       // Use WebSocket for text-only (faster)
-      chatSocket.sendMessage(channelId, trimmed)
+      chatSocket.sendMessage(channelId, trimmed, replyTo?.id || null)
     }
+    if (replyTo) onReplySent?.()
     setText('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -660,10 +913,22 @@ function ChatComposer({ channelId }) {
   }
 
   const handleInput = (e) => {
-    setText(e.target.value)
+    const newText = e.target.value
+    setText(newText)
     const el = e.target
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+
+    // Detect @mention pattern
+    const cursorPos = el.selectionStart
+    const textBeforeCursor = newText.slice(0, cursorPos)
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/)
+    if (mentionMatch) {
+      setMentionQuery(mentionMatch[1])
+      setMentionAnchorRect(el.getBoundingClientRect())
+    } else {
+      setMentionQuery(null)
+    }
 
     // Typing indicator (debounced: once per 2s)
     if (!typingTimerRef.current) {
@@ -673,6 +938,22 @@ function ChatComposer({ channelId }) {
       }, 2000)
     }
   }
+
+  const handleMentionSelect = useCallback((user) => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const cursorPos = ta.selectionStart
+    const textBefore = text.slice(0, cursorPos)
+    const textAfter = text.slice(cursorPos)
+    // Replace @partial with @username
+    const newBefore = textBefore.replace(/@\w*$/, `@${user.username} `)
+    setText(newBefore + textAfter)
+    setMentionQuery(null)
+    requestAnimationFrame(() => {
+      ta.selectionStart = ta.selectionEnd = newBefore.length
+      ta.focus()
+    })
+  }, [text])
 
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0]
@@ -854,6 +1135,16 @@ function ChatComposer({ channelId }) {
           />
         </div>,
         document.body
+      )}
+
+      {/* @Mention autocomplete */}
+      {mentionQuery !== null && (
+        <MentionAutocomplete
+          query={mentionQuery}
+          anchorRect={mentionAnchorRect}
+          onSelect={handleMentionSelect}
+          onClose={() => setMentionQuery(null)}
+        />
       )}
     </div>
   )

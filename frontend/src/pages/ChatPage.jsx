@@ -25,18 +25,25 @@ export default function ChatPage() {
     chatSocket.connect()
 
     const unsub = chatSocket.subscribe((data) => {
+      const store = useChatStore.getState()
       if (data.type === 'connected') {
         fetchChannels()
       } else if (data.type === 'typing') {
-        useChatStore.getState().handleTypingEvent(data)
+        store.handleTypingEvent(data)
       } else if (data.type === 'reaction_update') {
-        useChatStore.getState().handleReactionUpdate(data, user?.id)
+        store.handleReactionUpdate(data, user?.id)
       } else if (data.type === 'member_update') {
-        // Refresh channel list when members change
         fetchChannels()
+      } else if (data.type === 'message_edit') {
+        store.handleMessageEdit(data)
+      } else if (data.type === 'message_delete') {
+        store.handleMessageDelete(data)
+      } else if (data.type === 'message_pin') {
+        store.handleMessagePin(data)
+      } else if (data.type === 'notification') {
+        store.handleNotification(data)
       } else if (data.id && data.channel_id) {
-        // Chat message
-        useChatStore.getState().handleIncomingMessage(data)
+        store.handleIncomingMessage(data)
       }
     })
 
@@ -51,8 +58,17 @@ export default function ChatPage() {
   // Sync active channel from URL
   useEffect(() => {
     setActiveChannel(channelId || null)
-    if (channelId) setMobileSidebar(false)
-  }, [channelId, setActiveChannel])
+    if (channelId) {
+      setMobileSidebar(false)
+      // If channel isn't in the store yet (e.g. navigated from profile popover),
+      // refresh channels and join the WS group
+      const channels = useChatStore.getState().channels
+      if (!channels.find(ch => ch.id === channelId)) {
+        chatSocket.joinChannel(channelId)
+        fetchChannels()
+      }
+    }
+  }, [channelId, setActiveChannel, fetchChannels])
 
   const handleSelectChannel = (id) => {
     navigate(`/chat/${id}`)

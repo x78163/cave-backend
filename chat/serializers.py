@@ -13,6 +13,10 @@ class MessageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField()
     reactions = serializers.SerializerMethodField()
+    reply_to_preview = serializers.SerializerMethodField()
+    pinned_by_username = serializers.SerializerMethodField()
+    mentions = serializers.SerializerMethodField()
+    reply_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -21,6 +25,10 @@ class MessageSerializer(serializers.ModelSerializer):
             'author_avatar_preset', 'author_avatar', 'content',
             'image_url', 'file_url', 'file_name', 'file_size',
             'video_preview', 'reactions',
+            'edited_at', 'is_deleted',
+            'reply_to', 'reply_to_preview', 'reply_count',
+            'is_pinned', 'pinned_by', 'pinned_by_username', 'pinned_at',
+            'mentions',
             'created_at',
         ]
         read_only_fields = fields
@@ -29,14 +37,62 @@ class MessageSerializer(serializers.ModelSerializer):
         return obj.author.avatar.url if obj.author and obj.author.avatar else None
 
     def get_image_url(self, obj):
+        if obj.is_deleted:
+            return None
         return obj.image.url if obj.image else None
 
     def get_file_url(self, obj):
+        if obj.is_deleted:
+            return None
         return obj.file.url if obj.file else None
 
     def get_reactions(self, obj):
         # Injected by view — avoids N+1
         return getattr(obj, '_reaction_summary', [])
+
+    def get_reply_to_preview(self, obj):
+        if not obj.reply_to_id:
+            return None
+        parent = getattr(obj, '_reply_to_cache', None)
+        if parent is None:
+            try:
+                parent = Message.objects.select_related('author').get(id=obj.reply_to_id)
+            except Message.DoesNotExist:
+                return None
+        content = '[This message was deleted]' if parent.is_deleted else parent.content[:120]
+        return {
+            'id': str(parent.id),
+            'author_username': parent.author.username,
+            'content': content,
+        }
+
+    def get_pinned_by_username(self, obj):
+        if obj.pinned_by_id and hasattr(obj, 'pinned_by') and obj.pinned_by:
+            return obj.pinned_by.username
+        return None
+
+    def get_mentions(self, obj):
+        mention_data = getattr(obj, '_mention_data', None)
+        if mention_data is not None:
+            return mention_data
+        return [
+            {'user_id': m.user_id, 'username': m.user.username}
+            for m in obj.mentions.select_related('user').all()
+        ]
+
+    def get_reply_count(self, obj):
+        return getattr(obj, '_reply_count', 0)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.is_deleted:
+            data['content'] = '[This message was deleted]'
+            data['image_url'] = None
+            data['file_url'] = None
+            data['file_name'] = ''
+            data['file_size'] = 0
+            data['video_preview'] = None
+        return data
 
 
 class MemberSerializer(serializers.Serializer):

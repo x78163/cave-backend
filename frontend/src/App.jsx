@@ -16,6 +16,7 @@ const CaveDetail = lazy(() => import('./pages/CaveDetail'))
 const CreateCave = lazy(() => import('./pages/CreateCave'))
 const Profile = lazy(() => import('./pages/Profile'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
+const UserProfilePage = lazy(() => import('./pages/UserProfilePage'))
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -132,6 +133,7 @@ function AppContent() {
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/chat/:channelId" element={<ChatPage />} />
                 <Route path="/profile" element={<Profile />} />
+                <Route path="/users/:userId" element={<UserProfilePage />} />
               </Routes>
             </Suspense>
           </main>

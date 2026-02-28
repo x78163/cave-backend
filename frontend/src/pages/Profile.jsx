@@ -475,6 +475,7 @@ function ProfileEditPanel({ user, onSave, onCancel }) {
   const [avatarFile, setAvatarFile] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
   const [selectedSpecialties, setSelectedSpecialties] = useState(user?.specialties || [])
+  const [allowDms, setAllowDms] = useState(user?.allow_dms !== false)
   const [saving, setSaving] = useState(false)
 
   const handleAvatarUpload = (e) => {
@@ -513,6 +514,7 @@ function ProfileEditPanel({ user, onSave, onCancel }) {
       formData.append('location', location)
       formData.append('avatar_preset', avatarPreset)
       formData.append('specialties', JSON.stringify(selectedSpecialties))
+      formData.append('allow_dms', allowDms)
       if (avatarFile) formData.append('avatar', avatarFile)
 
       await api.patch('/users/me/', formData)
@@ -627,6 +629,21 @@ function ProfileEditPanel({ user, onSave, onCancel }) {
             )
           })}
         </div>
+      </div>
+
+      {/* Direct Messages */}
+      <div className="mb-5 flex items-center justify-between">
+        <div>
+          <label className="block text-xs font-medium" style={{ color: 'var(--cyber-text-dim)' }}>Allow Direct Messages</label>
+          <p className="text-[10px] text-[var(--cyber-text-dim)]/60 mt-0.5">Other users can send you DMs</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setAllowDms(!allowDms)}
+          className={`relative w-10 h-5 rounded-full transition-colors ${allowDms ? 'bg-cyan-700' : 'bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]'}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${allowDms ? 'left-5' : 'left-0.5'}`} />
+        </button>
       </div>
 
       {/* Save */}

@@ -11,6 +11,11 @@ const useChatStore = create((set, get) => ({
   loadingMessages: false,
   hasMoreMessages: {},    // { channelId: boolean }
   typing: {},             // { channelId: { userId: { username, timeout } } }
+  notifications: [],
+  unreadNotifications: 0,
+  searchResults: null,
+  searchLoading: false,
+  pinnedMessages: {},     // { channelId: [msg, ...] }
 
   fetchChannels: async () => {
     set({ loadingChannels: true })
@@ -200,6 +205,139 @@ const useChatStore = create((set, get) => ({
       channelTyping[user_id] = { username, timeout }
       return { typing: { ...state.typing, [channel_id]: channelTyping } }
     })
+  },
+
+  // ── Phase 4: Edit / Delete / Pin / Search / Notifications ──
+
+  handleMessageEdit: (data) => {
+    const { channel_id, message_id, content, edited_at, video_preview, mentions } = data
+    set(state => {
+      const msgs = state.messages[channel_id]
+      if (!msgs) return state
+      return {
+        messages: {
+          ...state.messages,
+          [channel_id]: msgs.map(m =>
+            m.id === message_id
+              ? { ...m, content, edited_at, video_preview, mentions }
+              : m
+          ),
+        },
+      }
+    })
+  },
+
+  handleMessageDelete: (data) => {
+    const { channel_id, message_id } = data
+    set(state => {
+      const msgs = state.messages[channel_id]
+      if (!msgs) return state
+      return {
+        messages: {
+          ...state.messages,
+          [channel_id]: msgs.map(m =>
+            m.id === message_id
+              ? {
+                  ...m,
+                  is_deleted: true,
+                  content: '[This message was deleted]',
+                  image_url: null,
+                  file_url: null,
+                  file_name: '',
+                  file_size: 0,
+                  video_preview: null,
+                }
+              : m
+          ),
+        },
+      }
+    })
+  },
+
+  handleMessagePin: (data) => {
+    const { channel_id, message_id, is_pinned, pinned_by_username, pinned_at } = data
+    set(state => {
+      const msgs = state.messages[channel_id]
+      if (!msgs) return state
+      return {
+        messages: {
+          ...state.messages,
+          [channel_id]: msgs.map(m =>
+            m.id === message_id
+              ? { ...m, is_pinned, pinned_by_username, pinned_at }
+              : m
+          ),
+        },
+        // Invalidate pinned cache so it's re-fetched
+        pinnedMessages: { ...state.pinnedMessages, [channel_id]: undefined },
+      }
+    })
+  },
+
+  handleNotification: (data) => {
+    set(state => ({
+      notifications: [data, ...state.notifications],
+      unreadNotifications: state.unreadNotifications + 1,
+    }))
+  },
+
+  searchMessages: async (query, channelId = null) => {
+    set({ searchLoading: true })
+    try {
+      const params = new URLSearchParams({ q: query })
+      if (channelId) params.set('channel_id', channelId)
+      const { data } = await api.get(`/chat/messages/search/?${params}`)
+      set({ searchResults: data, searchLoading: false })
+    } catch {
+      set({ searchLoading: false })
+    }
+  },
+
+  clearSearch: () => set({ searchResults: null }),
+
+  fetchPinnedMessages: async (channelId) => {
+    try {
+      const { data } = await api.get(`/chat/channels/${channelId}/pinned/`)
+      set(state => ({
+        pinnedMessages: { ...state.pinnedMessages, [channelId]: data },
+      }))
+    } catch { /* ignore */ }
+  },
+
+  fetchNotifications: async () => {
+    try {
+      const { data } = await api.get('/chat/notifications/')
+      set({ notifications: data })
+    } catch { /* ignore */ }
+  },
+
+  fetchNotificationCount: async () => {
+    try {
+      const { data } = await api.get('/chat/notifications/count/')
+      set({ unreadNotifications: data.unread_count })
+    } catch { /* ignore */ }
+  },
+
+  markNotificationRead: async (id) => {
+    try {
+      await api.post(`/chat/notifications/${id}/read/`)
+      set(state => ({
+        notifications: state.notifications.map(n =>
+          n.id === id ? { ...n, is_read: true } : n
+        ),
+        unreadNotifications: Math.max(0, state.unreadNotifications - 1),
+      }))
+    } catch { /* ignore */ }
+  },
+
+  markAllNotificationsRead: async () => {
+    try {
+      await api.post('/chat/notifications/read-all/')
+      set(state => ({
+        notifications: state.notifications.map(n => ({ ...n, is_read: true })),
+        unreadNotifications: 0,
+      }))
+    } catch { /* ignore */ }
   },
 }))
 
