@@ -154,9 +154,10 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 
 #### User Management
 - `User` - Django auth user (Google OAuth)
-- `UserProfile` - Extended profile (bio, stats, avatar)
+- `UserProfile` - Extended profile (bio, stats, avatar, `invited_by` FK)
 - `Grotto` - Organization/group
 - `GrottoMembership` - User → Grotto relationship
+- `InviteCode` - Gated registration codes (8-char auto-generated, use counting, active/inactive toggle)
 
 #### Device Management
 - `Device` - Registered Orange Pi devices
@@ -208,6 +209,9 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `POST /api/auth/google/` - Google OAuth login
 - `POST /api/auth/logout/` - Logout
 - `GET /api/auth/user/` - Current user info
+- `POST /api/users/auth/register/` - Register with invite code (returns JWT tokens)
+- `GET/POST /api/users/invite-codes/` - List user's codes (admin sees all) / generate new code
+- `PATCH/DELETE /api/users/invite-codes/{id}/` - Toggle active / delete code
 
 ### Device Management
 - `POST /api/devices/register/` - Register new device (QR code)
@@ -525,22 +529,44 @@ Multiple expedition sessions mapping different sections of the same cave need to
 
 ## Deployment
 
-### Initial Development (Current)
+See **[DEPLOY.md](DEPLOY.md)** for full deployment guide, step-by-step setup, and lessons learned.
+
+### Local Development
 - Windows 10 PC with WSL2
 - NVIDIA RTX 4090 GPU
-- Django dev server
-- React dev server (Vite)
-- PostgreSQL on WSL
+- Django dev server + React dev server (Vite)
+- SQLite (dev) / PostgreSQL (prod)
 - Cloudflare Quick Tunnel (`cloudflared`) for remote/mobile testing — `~/.local/bin/cloudflared tunnel --url http://localhost:5174`
 
-### Production (Future)
-- AWS EC2 or NameHero VPS
-- NVIDIA GPU instance (for 3D processing)
-- Nginx reverse proxy
-- Gunicorn WSGI server
-- PostgreSQL RDS or managed database
-- S3 or object storage for files
-- CloudFront CDN for static assets
+### Production (Live)
+- **URL**: `https://cavedragon.llc`
+- **Server**: Hetzner CPX11 (2 vCPU, 2 GB RAM + 2 GB swap, 40 GB SSD) — `178.156.149.31`
+- **PaaS**: Dokku (self-hosted, git-push deploys)
+- **ASGI**: Daphne (HTTP + WebSocket via single process)
+- **Database**: PostgreSQL 14 (Dokku plugin)
+- **Cache/PubSub**: Redis 7 (Dokku plugin, used by Django Channels)
+- **Object Storage**: Cloudflare R2 (S3-compatible, zero egress)
+- **DNS/CDN**: Cloudflare (proxied A records, Full Strict SSL)
+- **SSL**: Let's Encrypt (Dokku plugin, auto-renewal cron)
+- **Static Files**: WhiteNoise (serves Vite-built frontend + Django staticfiles)
+
+### Deploy Workflow
+```bash
+git push origin main    # GitHub backup
+git push dokku main     # Deploy (~2-3 min)
+# If migrations needed:
+ssh root@178.156.149.31 "dokku run cave-backend python manage.py migrate"
+```
+
+### Deployment Files
+| File | Purpose |
+|------|---------|
+| `Procfile` | Web process: Daphne ASGI server |
+| `.buildpacks` | Multi-buildpack: Node.js → Python |
+| `package.json` (root) | `heroku-postbuild` builds frontend |
+| `runtime.txt` | Python 3.12.8 |
+| `.slugignore` | Excludes source/docs from slug |
+| `frontend/.npmrc` | `legacy-peer-deps=true` for React 19 |
 
 ---
 
@@ -679,7 +705,7 @@ This project includes:
 - `MVP_PLAN.md` - Phase 1 development plan
 - `DATABASE_SCHEMA.md` - Database design
 - `API_SPEC.md` - REST API specification
-- `DEPLOY.md` - Deployment instructions (TBD)
+- `DEPLOY.md` - Production deployment guide (Hetzner/Dokku/R2/Cloudflare)
 
 ---
 
@@ -714,7 +740,7 @@ This project includes:
 - `gis_fields_visible` toggle on LandOwner — cave entry creator controls tier-2 field visibility
 - CaveRequest model with accept/deny lifecycle for contact access requests and contact info submissions
 - `contact_access_users` M2M on LandOwner for granular per-user contact visibility grants
-- User auth with registration, login, JWT tokens
+- User auth with registration, login, JWT tokens, invite-code-gated signups
 - Social features: comments, ratings/reviews, wiki-style descriptions with revision history, user wall posts
 - Media ownership system: photos, documents, video links belong to uploader (SET_NULL on cave FK)
 - `MediaVisibility` choices (public/unlisted/private) on all media models
@@ -1009,6 +1035,7 @@ This project includes:
 - 0015: coordinates_approximate BooleanField on Cave
 - 0016: public_land_name, public_land_type, public_land_owner, public_land_access on Cave (PAD-US)
 - 0017: SurfaceAnnotation model (polygon overlays on surface map)
+- 0018: Increase tpad_link max_length to 500 (PostgreSQL compatibility)
 
 ### Migrations (mapping app)
 - 0001: Initial PointOfInterest model
@@ -1033,6 +1060,7 @@ This project includes:
 
 ### Migrations (users app)
 - 0003: allow_dms BooleanField on UserProfile
+- 0004: InviteCode model + invited_by FK on UserProfile
 
 ### Migrations (events app)
 - 0001: Event, EventRSVP, EventInvitation, EventComment models with indexes and CheckConstraint
