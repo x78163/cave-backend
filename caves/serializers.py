@@ -19,7 +19,7 @@ class CavePhotoSerializer(serializers.ModelSerializer):
             'uploaded_by', 'uploaded_by_username',
             'cave', 'cave_name_cache', 'visibility',
         ]
-        read_only_fields = ['id', 'uploaded_at', 'uploaded_by', 'uploaded_by_username', 'cave_name_cache']
+        read_only_fields = ['id', 'uploaded_at', 'uploaded_by', 'uploaded_by_username', 'cave_name_cache', 'cave', 'origin_device']
 
 
 class SurveyMapSerializer(serializers.ModelSerializer):
@@ -79,7 +79,7 @@ class CaveDocumentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'file_size', 'page_count',
             'uploaded_by', 'uploaded_by_username', 'uploaded_at',
-            'cave_name_cache',
+            'cave_name_cache', 'cave',
         ]
 
     def get_file_url(self, obj):

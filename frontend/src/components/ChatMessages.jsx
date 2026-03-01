@@ -10,6 +10,7 @@ import MentionAutocomplete from './MentionAutocomplete'
 import UserPreviewPopover from './UserPreviewPopover'
 import { parseVideoUrl, PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
 import { TYPE_COLORS } from './EventCalendar'
+import emojiData from '@emoji-mart/data'
 
 function scrollToMessage(messageId) {
   const el = document.getElementById(`msg-${messageId}`)
@@ -291,14 +292,11 @@ function FloatingEmojiPicker({ msgId, channelId, anchorRect, onClose }) {
     let cancelled = false
     ;(async () => {
       if (!emojiPickerPromise) {
-        emojiPickerPromise = Promise.all([
-          import('@emoji-mart/react'),
-          import('@emoji-mart/data'),
-        ])
+        emojiPickerPromise = import('@emoji-mart/react')
       }
-      const [pickerModule, dataModule] = await emojiPickerPromise
+      const pickerModule = await emojiPickerPromise
       if (!cancelled) {
-        setEmojiPicker({ Picker: pickerModule.default, data: dataModule.default })
+        setEmojiPicker({ Picker: pickerModule.default, data: emojiData })
       }
     })()
     return () => { cancelled = true }
@@ -1030,13 +1028,10 @@ function ChatComposer({ channelId, replyTo, onReplySent }) {
     }
     if (!ComposerPicker) {
       if (!emojiPickerPromise) {
-        emojiPickerPromise = Promise.all([
-          import('@emoji-mart/react'),
-          import('@emoji-mart/data'),
-        ])
+        emojiPickerPromise = import('@emoji-mart/react')
       }
-      const [pickerModule, dataModule] = await emojiPickerPromise
-      setComposerPicker({ Picker: pickerModule.default, data: dataModule.default })
+      const pickerModule = await emojiPickerPromise
+      setComposerPicker({ Picker: pickerModule.default, data: emojiData })
     }
     setShowEmojiPicker(true)
   }, [showEmojiPicker, ComposerPicker])
