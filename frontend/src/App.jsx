@@ -115,7 +115,7 @@ function AppContent() {
         <Route path="/*" element={
           <ProtectedRoute>
             <TopBar />
-          <main className="flex-1">
+          <main className="flex-1 min-w-0 overflow-x-hidden">
             <Suspense fallback={
               <div className="flex items-center justify-center min-h-screen bg-[var(--cyber-bg)]">
                 <p className="text-[var(--cyber-text-dim)]">Loading...</p>

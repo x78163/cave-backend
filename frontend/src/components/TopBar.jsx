@@ -122,7 +122,7 @@ export default function TopBar() {
 
       {/* Mobile dropdown */}
       {mobileOpen && (
-        <div className="md:hidden border-t border-[var(--cyber-border)] px-4 py-3 space-y-1" style={{ background: 'var(--cyber-surface)' }}>
+        <div className="md:hidden border-t border-[var(--cyber-border)] px-4 py-3 flex flex-col gap-1" style={{ background: 'var(--cyber-surface)' }}>
           {navItems.map(navLink)}
           <div className="pt-2 mt-2 border-t border-[var(--cyber-border)] flex items-center justify-between">
             <Link to="/profile" className="flex items-center gap-2 no-underline">
