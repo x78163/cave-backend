@@ -848,6 +848,7 @@ This project includes:
   - 3D cave explorer (Three.js point cloud viewer)
   - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs), coordinate change cascades delta to all entrance POIs
   - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), nearby cave markers (purple), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay, map tools toolbar, coordinate readout)
+  - GPS "My Location" button on all map viewports (Explore, CaveDetail, FineTuneMapModal, EventDetail): browser Geolocation API, pulsing blue dot + accuracy ring, real-time position tracking, toggle between user location and cave/home center
   - Surface map tools (MapToolbar): Measure (click-two-points distance/bearing with copy), Waypoint (click-to-place POIs), Polygon (draw/label/area), Elevation Profile (3DEP terrain cross-section with canvas chart). Tier 1 (Measure + CoordReadout) on both Explore + CaveDetail maps; Tier 2 (Waypoint/Polygon/Elevation) on CaveDetail only
   - Unified SurveyLayerPanel on surface map: collapsible "Surveys (N)" button lists both computed survey overlays and scanned survey images with independent per-layer toggles, replaces old separate buttons
   - Nearby caves on surface map: purple markers (300m radius), popup with distance + link + "Toggle Survey" button, lazy-loaded muted purple survey overlays from neighboring caves
@@ -963,6 +964,7 @@ This project includes:
 | `frontend/src/components/maptools/WaypointTool.jsx` | Click-to-place surface waypoints (POI API) |
 | `frontend/src/components/maptools/PolygonTool.jsx` | Draw labeled polygons with color + area calculation |
 | `frontend/src/components/maptools/ElevationProfile.jsx` | Two-point terrain cross-section (USGS 3DEP, canvas chart) |
+| `frontend/src/components/maptools/MyLocationButton.jsx` | GPS location button — browser geolocation, pulsing blue dot, accuracy ring, toggle between user/cave |
 | `frontend/src/utils/geoUtils.js` | Shared haversine, bearing, polygon area, distance formatting, point interpolation |
 | `frontend/src/utils/elevationApi.js` | USGS 3DEP getSamples API wrapper for elevation queries |
 | `frontend/src/components/SurveyMapModal.jsx` | Adaptive survey map ingestion: two-point auto-calibration (2+ entrances) or classic 4-step flow |
