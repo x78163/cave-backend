@@ -13,8 +13,9 @@ const GPS_ICON = (
   </svg>
 )
 
-export default function MyLocationButton({ map }) {
+export default function MyLocationButton({ map, homeCenter = null }) {
   const [status, setStatus] = useState('idle') // idle | locating | active | error
+  const [viewingUser, setViewingUser] = useState(false) // true = centered on user, false = default
   const [errorMsg, setErrorMsg] = useState(null)
   const watchIdRef = useRef(null)
   const dotRef = useRef(null)
@@ -58,10 +59,14 @@ export default function MyLocationButton({ map }) {
       return
     }
 
-    // Already tracking — re-center
+    // Already tracking — toggle between user location and home
     if (status === 'active') {
-      if (dotRef.current) {
+      if (viewingUser && homeCenter) {
+        map.setView(homeCenter, map.getZoom(), { animate: true })
+        setViewingUser(false)
+      } else if (dotRef.current) {
         map.setView(dotRef.current.getLatLng(), Math.max(map.getZoom(), 16), { animate: true })
+        setViewingUser(true)
       }
       return
     }
@@ -110,6 +115,7 @@ export default function MyLocationButton({ map }) {
         if (!hasCenteredRef.current) {
           hasCenteredRef.current = true
           map.setView(latlng, Math.max(map.getZoom(), 16), { animate: true })
+          setViewingUser(true)
         }
       },
       (err) => {
@@ -124,7 +130,7 @@ export default function MyLocationButton({ map }) {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
     )
-  }, [map, status])
+  }, [map, status, viewingUser, homeCenter])
 
   return (
     <div className="relative inline-flex">
@@ -133,7 +139,7 @@ export default function MyLocationButton({ map }) {
         title={
           status === 'error' ? errorMsg :
           status === 'locating' ? 'Locating...' :
-          status === 'active' ? 'Re-center on my location' :
+          status === 'active' ? (viewingUser && homeCenter ? 'Back to cave' : 'Go to my location') :
           'Show my location'
         }
         className={`w-9 h-9 rounded-lg flex items-center justify-center

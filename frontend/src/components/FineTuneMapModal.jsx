@@ -206,7 +206,7 @@ export default function FineTuneMapModal({ initialLat, initialLon, onConfirm, on
 
           {/* GPS location button */}
           <div className="absolute bottom-3 left-3 z-[2100]">
-            <MyLocationButton map={mapRef.current} />
+            <MyLocationButton map={mapRef.current} homeCenter={hasInitial ? [initialLat, initialLon] : null} />
           </div>
         </div>
 

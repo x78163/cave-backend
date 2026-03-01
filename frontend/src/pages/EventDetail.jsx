@@ -386,7 +386,7 @@ function EventMiniMap({ lat, lng }) {
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
       {mapReady && (
         <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 1100 }}>
-          <MyLocationButton map={mapRef.current} />
+          <MyLocationButton map={mapRef.current} homeCenter={[lat, lng]} />
         </div>
       )}
     </div>

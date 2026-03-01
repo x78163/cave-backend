@@ -615,7 +615,7 @@ export default function SurfaceMap({
               ⊞ Survey
             </button>
           )}
-          <MyLocationButton map={mapRef.current} />
+          <MyLocationButton map={mapRef.current} homeCenter={center} />
         </div>
         {/* Map tools toolbar */}
         {enableMapTools && (
