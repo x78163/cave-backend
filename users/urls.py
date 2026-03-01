@@ -21,6 +21,10 @@ urlpatterns = [
     path('profile/<int:user_id>/media/', user_media, name='user_media'),
     path('media/<str:media_type>/<uuid:media_id>/', user_media_update, name='user_media_update'),
 
+    # Invite codes
+    path('invite-codes/', views.invite_code_list_create, name='invite_code_list_create'),
+    path('invite-codes/<uuid:code_id>/', views.invite_code_detail, name='invite_code_detail'),
+
     # Grottos
     path('grottos/', views.grotto_list, name='grotto_list'),
     path('grottos/<uuid:grotto_id>/', views.grotto_detail, name='grotto_detail'),

@@ -9,10 +9,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import UserProfile, Grotto, GrottoMembership
+from .models import UserProfile, Grotto, GrottoMembership, InviteCode
 from .serializers import (
     RegisterSerializer, UserProfileSerializer,
     GrottoSerializer, GrottoMembershipSerializer,
+    InviteCodeSerializer,
 )
 
 
@@ -221,3 +222,55 @@ def user_search(request):
         }
         for u in users
     ])
+
+
+# ── Invite Codes ────────────────────────────────────────────
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def invite_code_list_create(request):
+    """GET: list invite codes. POST: generate a new one."""
+    if request.method == 'GET':
+        if request.user.is_staff:
+            codes = InviteCode.objects.select_related('created_by').all()
+        else:
+            codes = InviteCode.objects.filter(created_by=request.user)
+        return Response({
+            'invite_codes': InviteCodeSerializer(codes, many=True).data,
+            'count': codes.count(),
+        })
+
+    # POST — generate new code
+    max_uses = request.data.get('max_uses', 1)
+    code = InviteCode.objects.create(
+        created_by=request.user,
+        max_uses=max_uses,
+    )
+    return Response(
+        InviteCodeSerializer(code).data,
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def invite_code_detail(request, code_id):
+    """PATCH: toggle active. DELETE: remove code."""
+    code = InviteCode.objects.filter(pk=code_id).first()
+    if not code:
+        return Response({'error': 'Code not found'}, status=status.HTTP_404_NOT_FOUND)
+    if not request.user.is_staff and code.created_by_id != request.user.id:
+        return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'DELETE':
+        code.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH — update is_active or max_uses
+    if 'is_active' in request.data:
+        code.is_active = request.data['is_active']
+    if 'max_uses' in request.data:
+        code.max_uses = request.data['max_uses']
+    code.save()
+    return Response(InviteCodeSerializer(code).data)

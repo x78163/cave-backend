@@ -1,7 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
-from .models import UserProfile, Grotto, GrottoMembership
+from .models import UserProfile, Grotto, GrottoMembership, InviteCode
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -9,6 +9,7 @@ class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
+    invite_code = serializers.CharField(max_length=8)
 
     def validate_username(self, value):
         if ' ' in value:
@@ -22,6 +23,15 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError('Email already registered.')
         return value
 
+    def validate_invite_code(self, value):
+        try:
+            code = InviteCode.objects.get(code=value.upper())
+        except InviteCode.DoesNotExist:
+            raise serializers.ValidationError('Invalid invite code.')
+        if not code.is_usable:
+            raise serializers.ValidationError('This invite code has already been used.')
+        return value.upper()
+
     def validate(self, data):
         if data['password'] != data['password_confirm']:
             raise serializers.ValidationError({'password_confirm': 'Passwords do not match.'})
@@ -33,7 +43,15 @@ class RegisterSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         validated_data.pop('password_confirm')
-        return UserProfile.objects.create_user(**validated_data)
+        code_str = validated_data.pop('invite_code')
+        invite = InviteCode.objects.get(code=code_str)
+        user = UserProfile.objects.create_user(
+            invited_by=invite.created_by,
+            **validated_data,
+        )
+        invite.use_count += 1
+        invite.save(update_fields=['use_count'])
+        return user
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -90,3 +108,19 @@ class GrottoMembershipSerializer(serializers.ModelSerializer):
         model = GrottoMembership
         fields = ['id', 'user', 'grotto', 'role', 'status', 'joined_at']
         read_only_fields = ['id', 'joined_at']
+
+
+class InviteCodeSerializer(serializers.ModelSerializer):
+    created_by_username = serializers.CharField(
+        source='created_by.username', read_only=True,
+    )
+
+    class Meta:
+        model = InviteCode
+        fields = [
+            'id', 'code', 'created_by', 'created_by_username',
+            'created_at', 'max_uses', 'use_count', 'is_active',
+        ]
+        read_only_fields = [
+            'id', 'code', 'created_by', 'created_at', 'use_count',
+        ]

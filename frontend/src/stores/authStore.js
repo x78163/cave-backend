@@ -24,7 +24,7 @@ const useAuthStore = create((set) => ({
     }
   },
 
-  register: async (username, email, password, passwordConfirm) => {
+  register: async (username, email, password, passwordConfirm, inviteCode) => {
     set({ error: null })
     try {
       const { data } = await api.post('/users/auth/register/', {
@@ -32,6 +32,7 @@ const useAuthStore = create((set) => ({
         email,
         password,
         password_confirm: passwordConfirm,
+        invite_code: inviteCode,
       })
       localStorage.setItem('access_token', data.tokens.access)
       localStorage.setItem('refresh_token', data.tokens.refresh)

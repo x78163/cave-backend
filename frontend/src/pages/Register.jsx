@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import useAuthStore from '../stores/authStore'
 
 // Matches Django's UnicodeUsernameValidator: letters, digits, and _ . @ + -
@@ -30,6 +30,8 @@ function FieldHint({ result }) {
 }
 
 export default function Register() {
+  const [searchParams] = useSearchParams()
+  const [inviteCode, setInviteCode] = useState(searchParams.get('code') || '')
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -46,15 +48,15 @@ export default function Register() {
     return { ok: true, msg: 'Passwords match' }
   }, [password, passwordConfirm])
 
-  const clientValid = usernameResult?.ok && passwordResult?.ok &&
-    confirmResult?.ok && email.length > 0
+  const clientValid = inviteCode.length > 0 && usernameResult?.ok &&
+    passwordResult?.ok && confirmResult?.ok && email.length > 0
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!clientValid) return
     setLoading(true)
     try {
-      await register(username, email, password, passwordConfirm)
+      await register(username, email, password, passwordConfirm, inviteCode)
       navigate('/')
     } catch {
       // error is set in store
@@ -85,6 +87,21 @@ export default function Register() {
               {error}
             </div>
           )}
+
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>
+              Invite Code
+            </label>
+            <input
+              type="text"
+              value={inviteCode}
+              onChange={(e) => { setInviteCode(e.target.value.toUpperCase()); clearError() }}
+              className="cyber-input w-full px-4 py-2.5 text-sm font-mono tracking-widest"
+              placeholder="XXXXXXXX"
+              maxLength={8}
+              required
+            />
+          </div>
 
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>

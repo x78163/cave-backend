@@ -1,7 +1,16 @@
+import secrets
+import string
 import uuid
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+
+
+def generate_invite_code():
+    """Generate an 8-character alphanumeric invite code."""
+    alphabet = string.ascii_uppercase + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(8))
 
 
 class UserProfile(AbstractUser):
@@ -20,6 +29,12 @@ class UserProfile(AbstractUser):
     onboarding_complete = models.BooleanField(default=False)
     allow_dms = models.BooleanField(
         default=True, help_text='Allow direct messages from other users',
+    )
+
+    invited_by = models.ForeignKey(
+        'self', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='invited_users',
+        help_text='User who generated the invite code used at registration',
     )
 
     # Exploration stats (computed/cached)
@@ -101,3 +116,33 @@ class GrottoMembership(models.Model):
 
     def __str__(self):
         return f"{self.user.username} in {self.grotto.name} ({self.role})"
+
+
+class InviteCode(models.Model):
+    """Invite codes for gated registration."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(
+        max_length=8, unique=True, default=generate_invite_code,
+        help_text='8-char alphanumeric code',
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='invite_codes',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    max_uses = models.IntegerField(
+        default=1, help_text='Max times this code can be used (0 = unlimited)',
+    )
+    use_count = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.code} by {self.created_by.username} ({self.use_count}/{self.max_uses})"
+
+    @property
+    def is_usable(self):
+        return self.is_active and (self.max_uses == 0 or self.use_count < self.max_uses)

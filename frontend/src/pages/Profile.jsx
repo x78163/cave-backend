@@ -695,6 +695,91 @@ const TABS = [
   { key: 'ratings', label: 'Ratings' },
 ]
 
+function InviteCodeSection() {
+  const [codes, setCodes] = useState([])
+  const [generating, setGenerating] = useState(false)
+  const [copied, setCopied] = useState(null)
+  const [loaded, setLoaded] = useState(false)
+
+  const loadCodes = useCallback(async () => {
+    try {
+      const data = await apiFetch('/users/invite-codes/')
+      setCodes(data.invite_codes || [])
+      setLoaded(true)
+    } catch { /* ignore */ }
+  }, [])
+
+  const generateCode = async () => {
+    setGenerating(true)
+    try {
+      const data = await apiFetch('/users/invite-codes/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_uses: 1 }),
+      })
+      setCodes(prev => [data, ...prev])
+    } catch { /* ignore */ }
+    setGenerating(false)
+  }
+
+  const copyLink = (code) => {
+    const url = `${window.location.origin}/register?code=${code}`
+    navigator.clipboard.writeText(url)
+    setCopied(code)
+    setTimeout(() => setCopied(null), 2000)
+  }
+
+  return (
+    <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--cyber-border)' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium" style={{ color: 'var(--cyber-text-dim)' }}>Invite Codes</span>
+        <div className="flex gap-2">
+          {!loaded && (
+            <button onClick={loadCodes} className="cyber-btn cyber-btn-ghost px-2 py-1 text-[10px]">
+              Show
+            </button>
+          )}
+          <button
+            onClick={generateCode}
+            disabled={generating}
+            className="cyber-btn cyber-btn-cyan px-2 py-1 text-[10px] disabled:opacity-50"
+          >
+            {generating ? '...' : '+ Generate'}
+          </button>
+        </div>
+      </div>
+      {loaded && codes.length > 0 && (
+        <div className="space-y-1">
+          {codes.map(c => (
+            <div key={c.id} className="flex items-center gap-2 text-xs">
+              <span className="font-mono tracking-wider" style={{
+                color: c.is_active && (c.max_uses === 0 || c.use_count < c.max_uses)
+                  ? 'var(--cyber-cyan)' : 'var(--cyber-text-dim)',
+                textDecoration: !c.is_active ? 'line-through' : 'none',
+              }}>
+                {c.code}
+              </span>
+              <span style={{ color: 'var(--cyber-text-dim)' }}>
+                {c.use_count}/{c.max_uses || '\u221E'}
+              </span>
+              <button
+                onClick={() => copyLink(c.code)}
+                className="text-[10px] hover:underline"
+                style={{ color: copied === c.code ? '#22c55e' : 'var(--cyber-magenta)' }}
+              >
+                {copied === c.code ? 'Copied!' : 'Copy Link'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {loaded && codes.length === 0 && (
+        <p className="text-xs" style={{ color: 'var(--cyber-text-dim)' }}>No codes yet. Generate one to invite someone.</p>
+      )}
+    </div>
+  )
+}
+
 export default function Profile() {
   const { user } = useAuthStore()
   const userId = user?.id
@@ -771,6 +856,8 @@ export default function Profile() {
                 <span className="text-[var(--cyber-text-dim)]">routes</span>
               </div>
             </div>
+
+            <InviteCodeSection />
           </div>
         </>
       )}
