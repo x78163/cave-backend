@@ -31,25 +31,21 @@ def _get_default_user():
 
 def _load_map_data(cave, mode='heatmap'):
     """Load map_data JSON for a cave."""
-    map_path = (
-        Path(django_settings.MEDIA_ROOT) / 'caves' / str(cave.id)
-        / f'map_data_{mode}.json'
-    )
-    if not map_path.exists():
+    from django.core.files.storage import default_storage
+    storage_path = f'caves/{cave.id}/map_data_{mode}.json'
+    if not default_storage.exists(storage_path):
         return None
-    with open(map_path) as f:
+    with default_storage.open(storage_path, 'r') as f:
         return json.load(f)
 
 
 def _load_spawn_data(cave):
     """Load spawn.json for a cave (3D keyframe poses)."""
-    spawn_path = (
-        Path(django_settings.MEDIA_ROOT) / 'caves' / str(cave.id)
-        / 'spawn.json'
-    )
-    if not spawn_path.exists():
+    from django.core.files.storage import default_storage
+    storage_path = f'caves/{cave.id}/spawn.json'
+    if not default_storage.exists(storage_path):
         return None
-    with open(spawn_path) as f:
+    with default_storage.open(storage_path, 'r') as f:
         return json.load(f)
 
 

@@ -15,8 +15,12 @@ from .serializers import (
     SurveyShotBulkItemSerializer,
 )
 from .compute import compute_survey
-from .ocr import extract_shots_from_image
 from .slam_survey import generate_slam_survey_data, generate_merged_slam_survey
+
+try:
+    from .ocr import extract_shots_from_image
+except ImportError:
+    extract_shots_from_image = None
 
 
 def _get_cave_or_404(cave_id):
@@ -254,6 +258,12 @@ def survey_ocr(request, cave_id, survey_id):
         except (ValueError, TypeError):
             expected_rows = None
 
+    if extract_shots_from_image is None:
+        return Response(
+            {'error': 'OCR not available on this server (torch not installed)'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     try:
         result = extract_shots_from_image(image, expected_rows=expected_rows)
         return Response(result)
@@ -353,11 +363,13 @@ def generate_slam_survey(request, cave_id):
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
     # Load map data
-    map_data_path = Path(settings.MEDIA_ROOT) / 'caves' / str(cave_id) / 'map_data.json'
-    if not map_data_path.exists():
+    from django.core.files.storage import default_storage
+    storage_path = f'caves/{cave_id}/map_data.json'
+    if not default_storage.exists(storage_path):
         return Response({'error': 'No map data available for this cave'}, status=status.HTTP_400_BAD_REQUEST)
 
-    map_data = json.loads(map_data_path.read_text())
+    with default_storage.open(storage_path, 'r') as f:
+        map_data = json.load(f)
     min_spacing = float(request.data.get('min_spacing', 0.5))
     level_param = request.data.get('level', 'all')
 

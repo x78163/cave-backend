@@ -610,25 +610,27 @@ def cave_map_data(request, cave_id):
     if not cave.has_map:
         return Response({'error': 'No map data available'}, status=status.HTTP_404_NOT_FOUND)
 
+    from django.core.files.storage import default_storage
+
     mode = request.query_params.get('mode', None)
-    map_dir = Path(django_settings.MEDIA_ROOT) / 'caves' / str(cave_id)
+    storage_dir = f'caves/{cave_id}'
 
     # Try mode-specific file first, then default
     candidates = []
     if mode:
-        candidates.append(map_dir / f'map_data_{mode}.json')
-    candidates.append(map_dir / 'map_data.json')
+        candidates.append(f'{storage_dir}/map_data_{mode}.json')
+    candidates.append(f'{storage_dir}/map_data.json')
 
-    for path in candidates:
-        if path.exists():
-            with open(path) as f:
+    for storage_path in candidates:
+        if default_storage.exists(storage_path):
+            with default_storage.open(storage_path, 'r') as f:
                 data = json.load(f)
-            # Inject available modes from directory
+            # Detect available modes
             available_modes = []
-            for p in map_dir.glob('map_data_*.json'):
-                m = p.stem.replace('map_data_', '')
-                available_modes.append(m)
-            if not available_modes and (map_dir / 'map_data.json').exists():
+            for m in ['standard', 'quick', 'detailed', 'raw_slice', 'heatmap', 'edges', 'points']:
+                if default_storage.exists(f'{storage_dir}/map_data_{m}.json'):
+                    available_modes.append(m)
+            if not available_modes and default_storage.exists(f'{storage_dir}/map_data.json'):
                 available_modes = ['standard']
             data['available_modes'] = sorted(available_modes) if available_modes else ['standard']
             data['mode'] = mode or data.get('mode', 'standard')
