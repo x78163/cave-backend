@@ -230,7 +230,7 @@ class LandOwner(models.Model):
         help_text='Which GIS service provided this data',
     )
     gis_lookup_at = models.DateTimeField(null=True, blank=True)
-    tpad_link = models.URLField(blank=True, default='', help_text='Link to TN Property Assessment Data')
+    tpad_link = models.URLField(max_length=500, blank=True, default='', help_text='Link to TN Property Assessment Data')
     parcel_geometry = models.JSONField(
         null=True, blank=True, default=None,
         help_text='Parcel boundary polygon rings as [[lat, lon], ...] arrays',
