@@ -484,9 +484,15 @@ export default function ChatMessages({ channelId, currentUserId, onNavigateBack 
           <span className="text-[var(--cyber-cyan)] font-medium">
             {channel?.channel_type === 'dm' ? '@' : '#'}
           </span>
-          <span className="text-sm font-semibold text-[var(--cyber-text)] flex-1 truncate">
-            {headerName}
-          </span>
+          {channel?.channel_type === 'dm' && channel?.other_user?.id ? (
+            <Link to={`/users/${channel.other_user.id}`} className="text-sm font-semibold text-[var(--cyber-text)] flex-1 truncate no-underline hover:text-[var(--cyber-cyan)] transition-colors">
+              {headerName}
+            </Link>
+          ) : (
+            <span className="text-sm font-semibold text-[var(--cyber-text)] flex-1 truncate">
+              {headerName}
+            </span>
+          )}
           {/* Pinned messages button */}
           {(() => {
             const pinned = pinnedMessages[channelId]
@@ -913,8 +919,18 @@ function ChatComposer({ channelId, replyTo, onReplySent }) {
       setAttachment(null)
       if (preview) { URL.revokeObjectURL(preview); setPreview(null) }
     } else {
-      // Use WebSocket for text-only (faster)
-      chatSocket.sendMessage(channelId, trimmed, replyTo?.id || null)
+      // Use WebSocket for text-only (faster), fall back to REST
+      const sent = chatSocket.sendMessage(channelId, trimmed, replyTo?.id || null)
+      if (!sent) {
+        try {
+          const body = { content: trimmed }
+          if (replyTo?.id) body.reply_to = replyTo.id
+          await apiFetch(`/chat/channels/${channelId}/send/`, {
+            method: 'POST',
+            body,
+          })
+        } catch { /* broadcast will handle display */ }
+      }
     }
     if (replyTo) onReplySent?.()
     setText('')

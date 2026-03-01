@@ -54,16 +54,22 @@ class ChatSocketService {
     }
   }
 
+  get isConnected() {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
+
   send(data) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data))
+      return true
     }
+    return false
   }
 
   sendMessage(channelId, content, replyTo = null) {
     const msg = { type: 'chat.message', channel_id: channelId, content }
     if (replyTo) msg.reply_to = replyTo
-    this.send(msg)
+    return this.send(msg)
   }
 
   markRead(channelId, messageId) {
