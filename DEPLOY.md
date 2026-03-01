@@ -90,7 +90,7 @@ chown dokku:dokku /home/dokku/cave-backend/nginx.conf.d/
 
 cat > /home/dokku/cave-backend/nginx.conf.d/websocket.conf << 'EOF'
 location /ws/ {
-    proxy_pass http://cave-backend-web;
+    proxy_pass http://cave-backend-5000;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -103,7 +103,7 @@ location /ws/ {
 EOF
 ```
 
-**Important**: The `nginx.conf.d/` directory must be owned by `dokku:dokku`, not root. Let's Encrypt will fail with permission errors otherwise.
+**Important**: The upstream name (`cave-backend-5000`) must match the upstream block in the generated nginx config. Check it with `dokku nginx:show-config cave-backend | grep upstream`. The `nginx.conf.d/` directory must be owned by `dokku:dokku`, not root. Let's Encrypt will fail with permission errors otherwise.
 
 ### 7. SSL with Let's Encrypt
 
@@ -324,6 +324,14 @@ ssh root@178.156.149.31 "dokku run cave-backend python manage.py loaddata /tmp/s
 8. **Django fixture ordering**: `dumpdata` with `--natural-primary --natural-foreign` handles most FK ordering. Excluding `contenttypes` and `auth.permission` avoids conflicts since Django creates these automatically.
 
 9. **`SECURE_SSL_REDIRECT` before SSL**: Set this to `False` initially (via env var) or the site will redirect to HTTPS before the cert exists, creating an infinite redirect loop. Enable after SSL is working.
+
+### Nginx/WebSocket
+
+10. **WebSocket upstream name**: The custom `websocket.conf` must use the exact upstream name from Dokku's generated nginx config (e.g., `cave-backend-5000`), not a guessed name like `cave-backend` or `cave-backend-web`. Verify with: `dokku nginx:show-config cave-backend | grep upstream`. A wrong upstream name causes 502 Bad Gateway on WebSocket connections while REST endpoints work fine.
+
+### Dependencies
+
+11. **Missing `requests` library**: The `requests` package was used by `caves/gis_lookup.py` but not in `requirements.txt` (it worked locally because other packages pulled it in transitively). Always explicitly list all direct dependencies.
 
 ---
 
