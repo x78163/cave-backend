@@ -5,6 +5,7 @@ import {
   BASE_LAYERS, getLayerById,
   create3DEPHillshadeLayer, HILLSHADE_OVERLAY,
 } from '../utils/mapLayers'
+import MyLocationButton from './maptools/MyLocationButton'
 
 // Cyan marker for picked location
 const pickIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40">
@@ -201,6 +202,11 @@ export default function FineTuneMapModal({ initialLat, initialLon, onConfirm, on
                 </div>
               </div>
             )}
+          </div>
+
+          {/* GPS location button */}
+          <div className="absolute bottom-3 left-3 z-[2100]">
+            <MyLocationButton map={mapRef.current} />
           </div>
         </div>
 

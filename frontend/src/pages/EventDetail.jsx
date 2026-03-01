@@ -8,6 +8,7 @@ import EventComments from '../components/EventComments'
 import EventCreateModal from '../components/EventCreateModal'
 import EventInviteModal from '../components/EventInviteModal'
 import L from 'leaflet'
+import MyLocationButton from '../components/maptools/MyLocationButton'
 import 'leaflet/dist/leaflet.css'
 
 function formatDate(dateStr, allDay) {
@@ -333,6 +334,7 @@ export default function EventDetail() {
 function EventMiniMap({ lat, lng }) {
   const mapRef = useRef(null)
   const containerRef = useRef(null)
+  const [mapReady, setMapReady] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -375,10 +377,20 @@ function EventMiniMap({ lat, lng }) {
       }),
     }).addTo(map)
     mapRef.current = map
-    return () => { map.remove(); mapRef.current = null }
+    setMapReady(true)
+    return () => { map.remove(); mapRef.current = null; setMapReady(false) }
   }, [lat, lng])
 
-  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      {mapReady && (
+        <div style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 1100 }}>
+          <MyLocationButton map={mapRef.current} />
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**

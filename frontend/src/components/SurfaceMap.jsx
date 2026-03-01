@@ -7,6 +7,7 @@ import CaveMapOverlay, { slamToLatLng } from './CaveMapOverlay'
 import HandDrawnMapOverlay from './HandDrawnMapOverlay'
 import SurveyOverlay from './SurveyOverlay'
 import MapToolbar from './maptools/MapToolbar'
+import MyLocationButton from './maptools/MyLocationButton'
 import SurveyLayerPanel from './SurveyLayerPanel'
 import {
   BASE_LAYERS, getStoredLayerId, storeLayerId, getLayerById,
@@ -577,8 +578,8 @@ export default function SurfaceMap({
             <rect x="5.5" y="9" width="3" height="31" rx="1.5" fill="#00e5ff" fillOpacity="0.5" />
           </svg>
         </div>
-        {showCenterButton && (
-          <div className="absolute bottom-3 left-3 z-[1100] flex gap-2">
+        <div className="absolute bottom-3 left-3 z-[1100] flex gap-2 items-center">
+          {showCenterButton && (
             <button
               onClick={() => {
                 if (mapRef.current) {
@@ -592,29 +593,30 @@ export default function SurfaceMap({
             >
               ⌖ Center
             </button>
-            {Object.values(activeSurveyOverlays).some(rd => rd?.bounds) && (
-              <button
-                onClick={() => {
-                  if (!mapRef.current) return
-                  const toLL = converter || ((x, y) => slamToLatLng(x, y, anchor?.lat, anchor?.lon, caveHeading || 0))
-                  const allCorners = []
-                  Object.values(activeSurveyOverlays).forEach(rd => {
-                    if (!rd?.bounds) return
-                    const [minX, minY, maxX, maxY] = rd.bounds
-                    allCorners.push(toLL(minX, minY), toLL(maxX, minY), toLL(minX, maxY), toLL(maxX, maxY))
-                  })
-                  if (allCorners.length > 0) mapRef.current.fitBounds(allCorners, { padding: [40, 40], animate: true })
-                }}
-                className="px-3 py-1.5 rounded-full text-xs font-medium
-                  bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
-                  backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
-                title="Zoom to fit survey"
-              >
-                ⊞ Survey
-              </button>
-            )}
-          </div>
-        )}
+          )}
+          {showCenterButton && Object.values(activeSurveyOverlays).some(rd => rd?.bounds) && (
+            <button
+              onClick={() => {
+                if (!mapRef.current) return
+                const toLL = converter || ((x, y) => slamToLatLng(x, y, anchor?.lat, anchor?.lon, caveHeading || 0))
+                const allCorners = []
+                Object.values(activeSurveyOverlays).forEach(rd => {
+                  if (!rd?.bounds) return
+                  const [minX, minY, maxX, maxY] = rd.bounds
+                  allCorners.push(toLL(minX, minY), toLL(maxX, minY), toLL(minX, maxY), toLL(maxX, maxY))
+                })
+                if (allCorners.length > 0) mapRef.current.fitBounds(allCorners, { padding: [40, 40], animate: true })
+              }}
+              className="px-3 py-1.5 rounded-full text-xs font-medium
+                bg-[#0a0a12]/80 text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+                backdrop-blur-sm hover:text-[var(--cyber-cyan)] hover:border-cyan-700/50 transition-all shadow-lg"
+              title="Zoom to fit survey"
+            >
+              ⊞ Survey
+            </button>
+          )}
+          <MyLocationButton map={mapRef.current} />
+        </div>
         {/* Map tools toolbar */}
         {enableMapTools && (
           <MapToolbar
