@@ -26,7 +26,9 @@ def _create_activity(actor, action_type, cave=None, target=None, message=''):
 
 
 @receiver(post_save, sender=Cave)
-def cave_created_activity(sender, instance, created, **kwargs):
+def cave_created_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created and instance.owner:
         _create_activity(
             instance.owner, Activity.ActionType.CAVE_CREATED,
@@ -36,7 +38,9 @@ def cave_created_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=CavePhoto)
-def photo_uploaded_activity(sender, instance, created, **kwargs):
+def photo_uploaded_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created and hasattr(instance, 'cave') and instance.cave.owner:
         _create_activity(
             instance.cave.owner, Activity.ActionType.PHOTO_UPLOADED,
@@ -46,7 +50,9 @@ def photo_uploaded_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=CaveComment)
-def comment_added_activity(sender, instance, created, **kwargs):
+def comment_added_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created and instance.author:
         _create_activity(
             instance.author, Activity.ActionType.COMMENT_ADDED,
@@ -56,7 +62,9 @@ def comment_added_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=DescriptionRevision)
-def description_edited_activity(sender, instance, created, **kwargs):
+def description_edited_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created and instance.editor:
         _create_activity(
             instance.editor, Activity.ActionType.DESCRIPTION_EDITED,
@@ -66,7 +74,9 @@ def description_edited_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=CaveRating)
-def rating_posted_activity(sender, instance, created, **kwargs):
+def rating_posted_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created:
         _create_activity(
             instance.user, Activity.ActionType.RATING_POSTED,
@@ -76,7 +86,9 @@ def rating_posted_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=UserFollow)
-def user_followed_activity(sender, instance, created, **kwargs):
+def user_followed_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created:
         _create_activity(
             instance.follower, Activity.ActionType.USER_FOLLOWED,
@@ -86,7 +98,9 @@ def user_followed_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=Expedition)
-def expedition_created_activity(sender, instance, created, **kwargs):
+def expedition_created_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created:
         _create_activity(
             instance.organizer, Activity.ActionType.EXPEDITION_CREATED,
@@ -96,7 +110,9 @@ def expedition_created_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=ExpeditionMember)
-def expedition_joined_activity(sender, instance, created, **kwargs):
+def expedition_joined_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if not created and instance.status == 'confirmed':
         _create_activity(
             instance.user, Activity.ActionType.EXPEDITION_JOINED,
@@ -109,7 +125,9 @@ def expedition_joined_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=Event)
-def event_created_activity(sender, instance, created, **kwargs):
+def event_created_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created:
         _create_activity(
             instance.created_by, Activity.ActionType.EVENT_CREATED,
@@ -146,7 +164,9 @@ def event_created_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=EventRSVP)
-def event_rsvp_activity(sender, instance, created, **kwargs):
+def event_rsvp_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created and instance.status == 'going':
         _create_activity(
             instance.user, Activity.ActionType.EVENT_RSVP,
@@ -170,7 +190,9 @@ def event_rsvp_activity(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=EventComment)
-def event_commented_activity(sender, instance, created, **kwargs):
+def event_commented_activity(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        return
     if created:
         _create_activity(
             instance.author, Activity.ActionType.EVENT_COMMENTED,

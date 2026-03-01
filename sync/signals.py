@@ -43,8 +43,10 @@ def get_sync_device():
 SYNCABLE_MODELS = [Cave, CavePhoto, CaveComment, DescriptionRevision, PointOfInterest, SensorAlert]
 
 
-def _handle_save(sender, instance, created, **kwargs):
+def _handle_save(sender, instance, created, raw=False, **kwargs):
     """Create a DataDelta when a syncable model is saved."""
+    if raw:
+        return
     model_name = get_model_name(sender)
     if not model_name:
         return
