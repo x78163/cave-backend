@@ -6,6 +6,7 @@ import { apiFetch } from '../hooks/useApi'
 import EditorViewportLayout from '../components/editor/EditorViewportLayout'
 import EditorToolbar from '../components/editor/EditorToolbar'
 import EditorCloudPanel from '../components/editor/EditorCloudPanel'
+import AlignmentPanel from '../components/editor/AlignmentPanel'
 import CloudImportModal from '../components/editor/CloudImportModal'
 
 function MobileGuard() {
@@ -58,6 +59,8 @@ export default function PointCloudEditor() {
   const clearAll = useEditorStore(s => s.clearAll)
   const importModalOpen = useEditorStore(s => s.importModalOpen)
   const setImportModalOpen = useEditorStore(s => s.setImportModalOpen)
+  const alignmentMode = useEditorStore(s => s.alignmentMode)
+  const pickedPoints = useEditorStore(s => s.pickedPoints)
 
   const [cave, setCave] = useState(null)
   const [authError, setAuthError] = useState(null)
@@ -215,10 +218,10 @@ export default function PointCloudEditor() {
         <EditorToolbar onFitView={handleFitView} />
 
         {/* Center viewport layout */}
-        <EditorViewportLayout ref={layoutRef} clouds={clouds} />
+        <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} />
 
-        {/* Right cloud panel */}
-        <EditorCloudPanel />
+        {/* Right panel — swap based on alignment mode */}
+        {alignmentMode ? <AlignmentPanel /> : <EditorCloudPanel />}
       </div>
 
       {/* Import modal */}

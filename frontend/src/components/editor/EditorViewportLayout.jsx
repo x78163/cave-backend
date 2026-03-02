@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import useEditorStore from '../../stores/editorStore'
+import { KDTree3D } from '../../utils/alignmentMath'
 
 const DIVIDER_SIZE = 4
 const MIN_PANE_PCT = 15
@@ -89,7 +90,7 @@ const _pos = new THREE.Vector3()
 const _quat = new THREE.Quaternion()
 const _scale = new THREE.Vector3()
 
-const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds }, ref) {
+const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, pickedPoints }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const stateRef = useRef(null) // holds all Three.js state
@@ -104,6 +105,9 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds }
   const transformMode = useEditorStore(s => s.transformMode)
   const selectedCloudId = useEditorStore(s => s.selectedCloudId)
   const flyMode = useEditorStore(s => s.flyMode)
+  const sourceCloudId = useEditorStore(s => s.sourceCloudId)
+  const targetCloudId = useEditorStore(s => s.targetCloudId)
+  const overlapVisActive = useEditorStore(s => s.overlapVisActive)
 
   // Keep splitRef in sync with state
   useEffect(() => { splitRef.current = split }, [split])
@@ -206,7 +210,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds }
     // Key tracking for WASD fly mode
     const keysDown = new Set()
 
-    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown }
+    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown, pickMarkers: [], stashedColors: null }
 
     // Resize observer
     const ro = new ResizeObserver(entries => {
@@ -334,6 +338,13 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds }
       for (const p of pointObjects) {
         scene.remove(p)
         p.material.dispose()
+      }
+      // Cleanup pick markers
+      const pm = stateRef.current?.pickMarkers || []
+      for (const obj of pm) {
+        scene.remove(obj)
+        if (obj.geometry) obj.geometry.dispose()
+        if (obj.material) obj.material.dispose()
       }
       stateRef.current = null
     }
@@ -725,6 +736,193 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds }
     }
     return () => cleanups.forEach(fn => fn())
   }, [handleWheel, handleOrthoMouseDown])
+
+  // ── Point picking via raycasting ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+    if (activeTool !== 'pick') return
+
+    const raycaster = new THREE.Raycaster()
+    raycaster.params.Points.threshold = 0.3
+
+    function handleClick(vpIndex, e) {
+      const state = useEditorStore.getState()
+      if (state.activeTool !== 'pick' || !state.alignmentMode) return
+
+      const el = vpDivRefs.current[vpIndex]
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      )
+
+      const cam = s.cameras[vpIndex]
+      raycaster.setFromCamera(ndc, cam)
+
+      const cloudId = state.pickPhase === 'source' ? state.sourceCloudId : state.targetCloudId
+      const pts = s.pointObjects.find(p => p.userData.cloudId === cloudId)
+      if (!pts) return
+
+      const hits = raycaster.intersectObject(pts)
+      if (hits.length > 0) {
+        const p = hits[0].point
+        state.addPickedPoint(cloudId, { x: p.x, y: p.y, z: p.z })
+      }
+    }
+
+    const handlers = []
+    for (let i = 0; i < 4; i++) {
+      const el = vpDivRefs.current[i]
+      if (!el) continue
+      const idx = i
+      const handler = (e) => handleClick(idx, e)
+      el.addEventListener('click', handler)
+      handlers.push([el, handler])
+    }
+
+    return () => {
+      for (const [el, handler] of handlers) {
+        el.removeEventListener('click', handler)
+      }
+    }
+  }, [activeTool])
+
+  // ── Sync pick markers to scene ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+
+    // Clean up existing markers
+    for (const obj of s.pickMarkers) {
+      s.scene.remove(obj)
+      if (obj.geometry) obj.geometry.dispose()
+      if (obj.material) obj.material.dispose()
+    }
+    s.pickMarkers = []
+
+    if (!pickedPoints || pickedPoints.length === 0) return
+
+    const state = useEditorStore.getState()
+
+    // Group by pairIndex
+    const pairMap = new Map()
+    for (const pt of pickedPoints) {
+      if (!pairMap.has(pt.pairIndex)) pairMap.set(pt.pairIndex, [])
+      pairMap.get(pt.pairIndex).push(pt)
+    }
+
+    for (const [, pts] of pairMap) {
+      const src = pts.find(p => p.cloudId === state.sourceCloudId)
+      const tgt = pts.find(p => p.cloudId === state.targetCloudId)
+
+      if (src) {
+        const geo = new THREE.SphereGeometry(0.15, 8, 8)
+        const mat = new THREE.MeshBasicMaterial({ color: 0x4ade80, depthTest: false })
+        const mesh = new THREE.Mesh(geo, mat)
+        mesh.position.set(src.position.x, src.position.y, src.position.z)
+        mesh.renderOrder = 999
+        s.scene.add(mesh)
+        s.pickMarkers.push(mesh)
+      }
+
+      if (tgt) {
+        const geo = new THREE.SphereGeometry(0.15, 8, 8)
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff6b6b, depthTest: false })
+        const mesh = new THREE.Mesh(geo, mat)
+        mesh.position.set(tgt.position.x, tgt.position.y, tgt.position.z)
+        mesh.renderOrder = 999
+        s.scene.add(mesh)
+        s.pickMarkers.push(mesh)
+      }
+
+      // Yellow connecting line for complete pairs
+      if (src && tgt) {
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(src.position.x, src.position.y, src.position.z),
+          new THREE.Vector3(tgt.position.x, tgt.position.y, tgt.position.z),
+        ])
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xfbbf24, depthTest: false })
+        const line = new THREE.Line(lineGeo, lineMat)
+        line.renderOrder = 999
+        s.scene.add(line)
+        s.pickMarkers.push(line)
+      }
+    }
+  }, [pickedPoints, sourceCloudId, targetCloudId])
+
+  // ── Overlap visualization (distance-based coloring) ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+
+    // Restore stashed colors when toggling off
+    if (!overlapVisActive) {
+      if (s.stashedColors) {
+        for (const { pts, origColors } of s.stashedColors) {
+          const colorAttr = pts.geometry.getAttribute('color')
+          if (colorAttr) {
+            colorAttr.array.set(origColors)
+            colorAttr.needsUpdate = true
+          }
+        }
+        s.stashedColors = null
+      }
+      return
+    }
+
+    const state = useEditorStore.getState()
+    const srcPts = s.pointObjects.find(p => p.userData.cloudId === state.sourceCloudId)
+    const tgtPts = s.pointObjects.find(p => p.userData.cloudId === state.targetCloudId)
+    if (!srcPts || !tgtPts) return
+
+    // Get world positions for target cloud → build KD-tree
+    const tgtGeo = tgtPts.geometry
+    const tgtPosAttr = tgtGeo.getAttribute('position')
+    const tgtCount = tgtPosAttr.count
+    const tgtWorld = new Float32Array(tgtCount * 3)
+    const v = new THREE.Vector3()
+    tgtPts.updateWorldMatrix(true, false)
+
+    for (let i = 0; i < tgtCount; i++) {
+      v.set(tgtPosAttr.array[i * 3], tgtPosAttr.array[i * 3 + 1], tgtPosAttr.array[i * 3 + 2])
+      v.applyMatrix4(tgtPts.matrixWorld)
+      tgtWorld[i * 3] = v.x
+      tgtWorld[i * 3 + 1] = v.y
+      tgtWorld[i * 3 + 2] = v.z
+    }
+
+    const tree = new KDTree3D(tgtWorld)
+
+    // Stash source colors and recolor by proximity
+    const srcGeo = srcPts.geometry
+    const srcColorAttr = srcGeo.getAttribute('color')
+    if (!srcColorAttr) return
+
+    s.stashedColors = [{ pts: srcPts, origColors: new Float32Array(srcColorAttr.array) }]
+
+    const srcPosAttr = srcGeo.getAttribute('position')
+    const srcCount = srcPosAttr.count
+    srcPts.updateWorldMatrix(true, false)
+
+    const threshold = 0.5 // meters — blue (close) → original (far)
+    for (let i = 0; i < srcCount; i++) {
+      v.set(srcPosAttr.array[i * 3], srcPosAttr.array[i * 3 + 1], srcPosAttr.array[i * 3 + 2])
+      v.applyMatrix4(srcPts.matrixWorld)
+
+      const { distSq } = tree.nearest(v.x, v.y, v.z)
+      const dist = Math.sqrt(distSq)
+      const t = Math.min(1, dist / threshold) // 0 = close (blue), 1 = far (original)
+
+      const idx = i * 3
+      srcColorAttr.array[idx]     = t * s.stashedColors[0].origColors[idx]     + (1 - t) * 0.2
+      srcColorAttr.array[idx + 1] = t * s.stashedColors[0].origColors[idx + 1] + (1 - t) * 0.4
+      srcColorAttr.array[idx + 2] = t * s.stashedColors[0].origColors[idx + 2] + (1 - t) * 1.0
+    }
+    srcColorAttr.needsUpdate = true
+  }, [overlapVisActive])
 
   return (
     <div ref={containerRef} className="relative flex-1 overflow-hidden" style={{ background: '#0a0a12' }}>

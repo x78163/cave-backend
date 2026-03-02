@@ -40,6 +40,13 @@ const TRANSFORM_TOOLS = [
   )},
 ]
 
+const PICK_TOOL = { id: 'pick', label: 'Pick Points', key: 'P', icon: (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+  </svg>
+)}
+
 const FLY_MODE = { id: 'flyMode', label: 'Fly Mode (WASD)', key: 'G', icon: (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
     <circle cx="12" cy="12" r="2" />
@@ -54,6 +61,14 @@ const FIT_VIEW = { id: 'fitView', label: 'Fit to View', key: 'F', icon: (
   </svg>
 )}
 
+const ALIGN_TOGGLE = { id: 'align', label: 'Align Clouds', key: 'A', icon: (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+    <rect x="2" y="6" width="8" height="8" rx="1" />
+    <rect x="14" y="10" width="8" height="8" rx="1" />
+    <path d="M10 10l4 4" />
+  </svg>
+)}
+
 export default function EditorToolbar({ onFitView }) {
   const activeTool = useEditorStore(s => s.activeTool)
   const setActiveTool = useEditorStore(s => s.setActiveTool)
@@ -61,6 +76,9 @@ export default function EditorToolbar({ onFitView }) {
   const setTransformMode = useEditorStore(s => s.setTransformMode)
   const flyMode = useEditorStore(s => s.flyMode)
   const toggleFlyMode = useEditorStore(s => s.toggleFlyMode)
+  const alignmentMode = useEditorStore(s => s.alignmentMode)
+  const enterAlignmentMode = useEditorStore(s => s.enterAlignmentMode)
+  const exitAlignmentMode = useEditorStore(s => s.exitAlignmentMode)
 
   useEffect(() => {
     function onKey(e) {
@@ -71,6 +89,22 @@ export default function EditorToolbar({ onFitView }) {
       if (key === FLY_MODE.key) {
         e.preventDefault()
         toggleFlyMode()
+        return
+      }
+
+      // Align mode toggle
+      if (key === ALIGN_TOGGLE.key) {
+        if (useEditorStore.getState().flyMode) return // A = strafe left in fly mode
+        e.preventDefault()
+        if (useEditorStore.getState().alignmentMode) exitAlignmentMode()
+        else enterAlignmentMode()
+        return
+      }
+
+      // Pick tool
+      if (key === PICK_TOOL.key) {
+        e.preventDefault()
+        setActiveTool('pick')
         return
       }
 
@@ -98,7 +132,7 @@ export default function EditorToolbar({ onFitView }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setActiveTool, setTransformMode, toggleFlyMode, onFitView])
+  }, [setActiveTool, setTransformMode, toggleFlyMode, enterAlignmentMode, exitAlignmentMode, onFitView])
 
   return (
     <div
@@ -147,6 +181,20 @@ export default function EditorToolbar({ onFitView }) {
 
       <div className="w-6 border-t border-[var(--cyber-border)] my-1" />
 
+      {/* Pick Points tool */}
+      <button
+        onClick={() => setActiveTool('pick')}
+        title={`${PICK_TOOL.label} (${PICK_TOOL.key})`}
+        className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+        style={{
+          background: activeTool === 'pick' ? 'rgba(251,191,36,0.15)' : 'transparent',
+          color: activeTool === 'pick' ? '#fbbf24' : 'var(--cyber-text-dim)',
+          border: activeTool === 'pick' ? '1px solid rgba(251,191,36,0.3)' : '1px solid transparent',
+        }}
+      >
+        {PICK_TOOL.icon}
+      </button>
+
       {/* Fly Mode toggle */}
       <button
         onClick={toggleFlyMode}
@@ -173,6 +221,22 @@ export default function EditorToolbar({ onFitView }) {
         }}
       >
         {FIT_VIEW.icon}
+      </button>
+
+      <div className="w-6 border-t border-[var(--cyber-border)] my-1" />
+
+      {/* Align toggle */}
+      <button
+        onClick={() => alignmentMode ? exitAlignmentMode() : enterAlignmentMode()}
+        title={`${ALIGN_TOGGLE.label} (${ALIGN_TOGGLE.key})`}
+        className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+        style={{
+          background: alignmentMode ? 'rgba(192,132,252,0.15)' : 'transparent',
+          color: alignmentMode ? '#c084fc' : 'var(--cyber-text-dim)',
+          border: alignmentMode ? '1px solid rgba(192,132,252,0.3)' : '1px solid transparent',
+        }}
+      >
+        {ALIGN_TOGGLE.icon}
       </button>
     </div>
   )

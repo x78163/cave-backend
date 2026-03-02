@@ -75,6 +75,21 @@ const useEditorStore = create((set, get) => ({
   loading: false,
   error: null,
 
+  // Alignment mode state
+  alignmentMode: false,
+  sourceCloudId: null,
+  targetCloudId: null,
+  pickedPoints: [],
+  currentPairIndex: 0,
+  pickPhase: 'source', // 'source' | 'target'
+  preAlignmentTransform: null,
+  registrationResult: null,
+  icpResult: null,
+  icpRunning: false,
+  icpProgress: null,
+  overlapVisActive: false,
+  icpSampleSize: 5000,
+
   setCaveId: (id) => set({ caveId: id }),
   setCaveName: (name) => set({ caveName: name }),
   setActiveTool: (tool) => set({ activeTool: tool, transformMode: null }),
@@ -256,6 +271,115 @@ const useEditorStore = create((set, get) => ({
     })
   },
 
+  // ── Alignment actions ──
+  enterAlignmentMode: () => {
+    const state = get()
+    const unlocked = state.clouds.filter(c => !c.locked)
+    if (unlocked.length < 2) return
+    const source = unlocked.find(c => c.id === state.selectedCloudId) || unlocked[0]
+    const target = unlocked.find(c => c.id !== source.id) || unlocked[1]
+    set({
+      alignmentMode: true,
+      sourceCloudId: source.id,
+      targetCloudId: target.id,
+      preAlignmentTransform: source.transform.clone(),
+      activeTool: 'pick',
+      transformMode: null,
+      pickedPoints: [],
+      currentPairIndex: 0,
+      pickPhase: 'source',
+      registrationResult: null,
+      icpResult: null,
+      icpProgress: null,
+      overlapVisActive: false,
+    })
+  },
+
+  exitAlignmentMode: () => set({
+    alignmentMode: false,
+    sourceCloudId: null,
+    targetCloudId: null,
+    pickedPoints: [],
+    currentPairIndex: 0,
+    pickPhase: 'source',
+    preAlignmentTransform: null,
+    registrationResult: null,
+    icpResult: null,
+    icpRunning: false,
+    icpProgress: null,
+    overlapVisActive: false,
+    activeTool: 'select',
+  }),
+
+  setSourceCloud: (id) => set({ sourceCloudId: id }),
+  setTargetCloud: (id) => set({ targetCloudId: id }),
+
+  addPickedPoint: (cloudId, position) => set(state => {
+    const pt = {
+      id: crypto.randomUUID(),
+      cloudId,
+      position,
+      pairIndex: state.currentPairIndex,
+    }
+    const isTarget = state.pickPhase === 'target'
+    return {
+      pickedPoints: [...state.pickedPoints, pt],
+      pickPhase: isTarget ? 'source' : 'target',
+      currentPairIndex: isTarget ? state.currentPairIndex + 1 : state.currentPairIndex,
+    }
+  }),
+
+  removePickedPair: (pairIndex) => set(state => ({
+    pickedPoints: state.pickedPoints.filter(p => p.pairIndex !== pairIndex),
+  })),
+
+  clearPickedPoints: () => set({
+    pickedPoints: [],
+    currentPairIndex: 0,
+    pickPhase: 'source',
+    registrationResult: null,
+  }),
+
+  resetAlignment: () => {
+    const state = get()
+    if (state.preAlignmentTransform && state.sourceCloudId) {
+      set(prev => ({
+        clouds: prev.clouds.map(c =>
+          c.id === prev.sourceCloudId ? { ...c, transform: prev.preAlignmentTransform.clone() } : c
+        ),
+        registrationResult: null,
+        icpResult: null,
+        icpProgress: null,
+      }))
+    }
+  },
+
+  acceptAlignment: () => {
+    set({
+      alignmentMode: false,
+      sourceCloudId: null,
+      targetCloudId: null,
+      pickedPoints: [],
+      currentPairIndex: 0,
+      pickPhase: 'source',
+      preAlignmentTransform: null,
+      registrationResult: null,
+      icpResult: null,
+      icpRunning: false,
+      icpProgress: null,
+      overlapVisActive: false,
+      activeTool: 'select',
+      isDirty: true,
+    })
+  },
+
+  setRegistrationResult: (result) => set({ registrationResult: result }),
+  setIcpRunning: (running) => set({ icpRunning: running }),
+  setIcpProgress: (progress) => set({ icpProgress: progress }),
+  setIcpResult: (result) => set({ icpResult: result }),
+  setIcpSampleSize: (size) => set({ icpSampleSize: size }),
+  toggleOverlapVis: () => set(state => ({ overlapVisActive: !state.overlapVisActive })),
+
   clearAll: () => {
     const { clouds } = get()
     for (const c of clouds) {
@@ -274,6 +398,18 @@ const useEditorStore = create((set, get) => ({
       isDirty: false,
       loading: false,
       error: null,
+      alignmentMode: false,
+      sourceCloudId: null,
+      targetCloudId: null,
+      pickedPoints: [],
+      currentPairIndex: 0,
+      pickPhase: 'source',
+      preAlignmentTransform: null,
+      registrationResult: null,
+      icpResult: null,
+      icpRunning: false,
+      icpProgress: null,
+      overlapVisActive: false,
     })
   },
 }))
