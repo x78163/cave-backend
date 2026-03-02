@@ -655,7 +655,7 @@ export default function CaveDetail() {
           <div className="px-4 pb-3">
             <div className="rounded-2xl overflow-hidden border border-[var(--cyber-border)]"
               style={{ height: '500px' }}>
-              <CaveExplorer caveId={caveId} pointcloudUrl={cave.pointcloud_url} spawnUrl={cave.spawn_url} />
+              <CaveExplorer caveId={caveId} />
             </div>
           </div>
         )}

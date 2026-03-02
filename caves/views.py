@@ -595,6 +595,27 @@ def cave_share(request, cave_id):
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+def cave_media_file(request, cave_id, filename):
+    """Proxy a cave media file from storage (local or R2) to avoid CORS issues."""
+    from django.core.files.storage import default_storage
+    from django.http import FileResponse, HttpResponseNotFound
+
+    ALLOWED = {'cave_pointcloud.glb', 'spawn.json'}
+    if filename not in ALLOWED:
+        return HttpResponseNotFound()
+
+    path = f'caves/{cave_id}/{filename}'
+    if not default_storage.exists(path):
+        return HttpResponseNotFound()
+
+    content_types = {
+        'cave_pointcloud.glb': 'model/gltf-binary',
+        'spawn.json': 'application/json',
+    }
+    f = default_storage.open(path, 'rb')
+    return FileResponse(f, content_type=content_types.get(filename, 'application/octet-stream'))
+
+
 @api_view(['GET'])
 def cave_map_data(request, cave_id):
     """

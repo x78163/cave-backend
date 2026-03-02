@@ -12,7 +12,7 @@ const SPRINT_MULT = 2.5
 const DAMPING = 8.0
 const MAX_FALL_DISTANCE = 10
 
-export default function CaveExplorer({ caveId, pointcloudUrl, spawnUrl }) {
+export default function CaveExplorer({ caveId }) {
   const containerRef = useRef(null)
   const cleanupRef = useRef(null)
 
@@ -156,9 +156,9 @@ export default function CaveExplorer({ caveId, pointcloudUrl, spawnUrl }) {
       let isPointCloud = false
       let gltf = null
 
-      // Load spawn data (try API-provided URL first, then local paths)
+      // Load spawn data (try API proxy first, then local paths)
       const spawnPaths = [
-        ...(spawnUrl ? [spawnUrl] : []),
+        ...(caveId ? [`/api/caves/${caveId}/media/spawn.json`] : []),
         ...(caveId
           ? [
               `/media/caves/${caveId}/spawn.json`,
@@ -184,9 +184,9 @@ export default function CaveExplorer({ caveId, pointcloudUrl, spawnUrl }) {
         )
       }
 
-      // Try loading point cloud GLB (API-provided URL first, then local path)
+      // Try loading point cloud GLB (API proxy first, then local path)
       const pcUrls = [
-        ...(pointcloudUrl ? [pointcloudUrl] : []),
+        ...(caveId ? [`/api/caves/${caveId}/media/cave_pointcloud.glb`] : []),
         ...(caveId ? [`/media/caves/${caveId}/cave_pointcloud.glb`] : []),
       ]
       for (const pcUrl of pcUrls) {

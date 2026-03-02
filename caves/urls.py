@@ -17,6 +17,7 @@ urlpatterns = [
     path('<uuid:cave_id>/permissions/', views.cave_permissions, name='cave_permissions'),
     path('<uuid:cave_id>/share/', views.cave_share, name='cave_share'),
     path('<uuid:cave_id>/map-data/', views.cave_map_data, name='cave_map_data'),
+    path('<uuid:cave_id>/media/<str:filename>', views.cave_media_file, name='cave_media_file'),
     path('<uuid:cave_id>/land-owner/', views.cave_land_owner, name='cave_land_owner'),
     path('<uuid:cave_id>/land-owner/gis-lookup/', views.cave_land_owner_gis_lookup, name='cave_land_owner_gis_lookup'),
     path('<uuid:cave_id>/public-land-lookup/', views.cave_public_land_lookup, name='cave_public_land_lookup'),
