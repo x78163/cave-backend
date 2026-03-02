@@ -25,7 +25,7 @@ export default function CaveExplorer({ caveId }) {
     scene.fog = new THREE.FogExp2(0x050508, 0.08)
 
     const camera = new THREE.PerspectiveCamera(
-      75, container.clientWidth / container.clientHeight, 0.05, 200
+      75, container.clientWidth / container.clientHeight, 0.05, 500
     )
 
     const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -144,27 +144,17 @@ export default function CaveExplorer({ caveId }) {
     // ── Load mesh ──
     const loader = new GLTFLoader()
 
+    // Point cloud material — simple first, headlamp shader later
+    const pointMaterial = new THREE.PointsMaterial({
+      size: 0.08,
+      vertexColors: true,
+      sizeAttenuation: true,
+    })
+
     async function loadAll() {
-      // Fetch mesh URL from reconstruction API
-      let meshUrl = null
       let spawnData = null
-
-      if (caveId) {
-        try {
-          const res = await fetch(`/api/reconstruction/cave/${caveId}/latest/`)
-          if (res.ok) {
-            const job = await res.json()
-            const rawUrl = job.mesh_url || job.mesh_file
-            // Strip origin to use relative path through Vite proxy
-            if (rawUrl) {
-              try { meshUrl = new URL(rawUrl).pathname } catch { meshUrl = rawUrl }
-            }
-          }
-        } catch { /* fallback below */ }
-      }
-
-      // Fallback to hardcoded path
-      if (!meshUrl) meshUrl = '/media/reconstruction/textured_mesh.glb'
+      let isPointCloud = false
+      let gltf = null
 
       // Load spawn data (try per-cave path first, then global)
       const spawnPaths = caveId
@@ -181,50 +171,136 @@ export default function CaveExplorer({ caveId }) {
         } catch { /* try next */ }
       }
 
-      // Load mesh
-      const gltf = await new Promise((resolve, reject) =>
-        loader.load(meshUrl, resolve, undefined, reject)
-      )
+      // Helper: load GLB via fetch + parse (avoids GLTFLoader.load issues with Daphne)
+      async function loadGlb(url) {
+        const resp = await fetch(url)
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`)
+        const buffer = await resp.arrayBuffer()
+        return new Promise((resolve, reject) =>
+          loader.parse(buffer, '', resolve, reject)
+        )
+      }
+
+      // Try loading cave-specific point cloud GLB
+      if (caveId) {
+        try {
+          gltf = await loadGlb(`/media/caves/${caveId}/cave_pointcloud.glb`)
+          isPointCloud = true
+        } catch {
+          // No point cloud GLB, try mesh fallbacks
+        }
+      }
+
+      // Fallback: try reconstruction API, then hardcoded path
+      if (!gltf && caveId) {
+        try {
+          const res = await fetch(`/api/reconstruction/cave/${caveId}/latest/`)
+          if (res.ok) {
+            const job = await res.json()
+            const rawUrl = job.mesh_url || job.mesh_file
+            if (rawUrl) {
+              const meshUrl = rawUrl.startsWith('/') ? rawUrl : new URL(rawUrl).pathname
+              gltf = await loadGlb(meshUrl)
+            }
+          }
+        } catch { /* fallback below */ }
+      }
+
+      if (!gltf) {
+        gltf = await loadGlb('/media/reconstruction/textured_mesh.glb')
+      }
 
       const model = gltf.scene
-      model.traverse(child => {
-        if (child.isMesh) {
-          child.castShadow = true
-          child.receiveShadow = true
-          if (child.material) {
-            child.material.roughness = 0.85
-            child.material.metalness = 0.05
-            child.material.side = THREE.DoubleSide
-          }
-        }
-      })
 
-      model.rotation.x = -Math.PI / 2
-      model.updateMatrixWorld(true)
-      scene.add(model)
+      if (isPointCloud) {
+        // Extract geometry and build THREE.Points manually
+        let pointsAdded = false
+        model.traverse(child => {
+          if (child.geometry) {
+            const geo = child.geometry
+            if (!geo.getAttribute('color')) {
+              const count = geo.getAttribute('position').count
+              const colors = new Float32Array(count * 3).fill(0.7)
+              geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+            }
+            scene.add(new THREE.Points(geo, pointMaterial))
+            pointsAdded = true
+          }
+        })
+        // No collision for point clouds — use noclip by default
+        noclip = true
+        ambient.intensity = 0.0
+        scene.fog = null
+      } else {
+        // Mesh: standard material setup
+        model.traverse(child => {
+          if (child.isMesh) {
+            child.castShadow = true
+            child.receiveShadow = true
+            if (child.material) {
+              child.material.roughness = 0.85
+              child.material.metalness = 0.05
+              child.material.side = THREE.DoubleSide
+            }
+          }
+        })
+        model.rotation.x = -Math.PI / 2
+      }
+
+      if (!isPointCloud) {
+        model.updateMatrixWorld(true)
+        scene.add(model)
+      }
 
       collisionMeshes = []
-      model.traverse(child => {
-        if (child.isMesh) collisionMeshes.push(child)
-      })
+      if (!isPointCloud) {
+        model.traverse(child => {
+          if (child.isMesh) collisionMeshes.push(child)
+        })
+      }
 
-      const box = new THREE.Box3().setFromObject(model)
+      // Compute bounds from scene objects (point cloud already added above with rotation)
+      const boundsTarget = isPointCloud ? scene : model
+      const box = new THREE.Box3().setFromObject(boundsTarget)
       const center = box.getCenter(new THREE.Vector3())
       fallbackFloorY = box.min.y - 0.5
 
-      if (spawnData) {
-        const spawnPos = slamToThreePos(spawnData.spawn.position)
-        camera.position.copy(spawnPos)
-        const spawnQuat = slamToThreeQuat(spawnData.spawn.orientation)
-        const euler = new THREE.Euler().setFromQuaternion(spawnQuat, 'YXZ')
-        camera.rotation.set(euler.x, euler.y, 0, 'YXZ')
+      if (isPointCloud) {
+        // Point cloud: use raw SLAM coordinates (no coord swap — data is Y-up compatible)
+        if (spawnData) {
+          const p = spawnData.spawn.position
+          camera.position.set(p[0], p[1], p[2])
+        } else {
+          camera.position.copy(center)
+        }
+        // Face toward center of cloud, keep level
+        const lookTarget = center.clone()
+        lookTarget.y = camera.position.y
+        if (lookTarget.distanceTo(camera.position) > 0.1) {
+          camera.lookAt(lookTarget)
+        }
+        // Ensure clean state for PointerLockControls
+        camera.up.set(0, 1, 0)
+        camera.rotation.order = 'YXZ'
+        const yaw = Math.atan2(
+          center.x - camera.position.x,
+          center.z - camera.position.z
+        )
+        camera.rotation.set(0, yaw, 0, 'YXZ')
       } else {
-        camera.position.copy(center)
+        if (spawnData) {
+          const spawnPos = slamToThreePos(spawnData.spawn.position)
+          camera.position.copy(spawnPos)
+          const spawnQuat = slamToThreeQuat(spawnData.spawn.orientation)
+          const euler = new THREE.Euler().setFromQuaternion(spawnQuat, 'YXZ')
+          camera.rotation.set(euler.x, euler.y, 0, 'YXZ')
+        } else {
+          camera.position.copy(center)
+        }
+        const floorY = findFloor(camera.position)
+        camera.position.y = floorY + PLAYER_HEIGHT
       }
-
-      const floorY = findFloor(camera.position)
-      camera.position.y = floorY + PLAYER_HEIGHT
-      onGround = true
+      onGround = !isPointCloud
       verticalVelocity = 0
     }
 
@@ -245,28 +321,48 @@ export default function CaveExplorer({ caveId }) {
       if (controls.isLocked) {
         const speed = SPEED * (moveState.sprint ? SPRINT_MULT : 1.0)
 
-        direction.set(0, 0, 0)
-        if (moveState.forward) direction.z -= 1
-        if (moveState.backward) direction.z += 1
-        if (moveState.left) direction.x -= 1
-        if (moveState.right) direction.x += 1
-
-        if (direction.lengthSq() > 0) {
-          direction.normalize()
-          const euler = new THREE.Euler(0, camera.rotation.y, 0, 'YXZ')
-          direction.applyEuler(euler)
-          velocity.x += direction.x * speed * delta
-          velocity.z += direction.z * speed * delta
-        }
-
-        velocity.x *= Math.max(0, 1 - DAMPING * delta)
-        velocity.z *= Math.max(0, 1 - DAMPING * delta)
-
         if (noclip) {
-          if (moveState.jump) velocity.y += speed * delta
-          velocity.y *= Math.max(0, 1 - DAMPING * delta)
+          // Noclip: fly in camera direction (full 3D)
+          direction.set(0, 0, 0)
+          if (moveState.forward) direction.z -= 1
+          if (moveState.backward) direction.z += 1
+          if (moveState.left) direction.x -= 1
+          if (moveState.right) direction.x += 1
+          if (moveState.jump) direction.y += 1
+
+          if (direction.lengthSq() > 0) {
+            direction.normalize()
+            // Apply full camera rotation (yaw + pitch) for fly-through movement
+            direction.applyQuaternion(camera.quaternion)
+            velocity.x += direction.x * speed * delta
+            velocity.y += direction.y * speed * delta
+            velocity.z += direction.z * speed * delta
+          }
+
+          const damp = Math.max(0, 1 - DAMPING * delta)
+          velocity.x *= damp
+          velocity.y *= damp
+          velocity.z *= damp
           camera.position.add(velocity)
         } else {
+          // Walking mode: horizontal movement with gravity
+          direction.set(0, 0, 0)
+          if (moveState.forward) direction.z -= 1
+          if (moveState.backward) direction.z += 1
+          if (moveState.left) direction.x -= 1
+          if (moveState.right) direction.x += 1
+
+          if (direction.lengthSq() > 0) {
+            direction.normalize()
+            const euler = new THREE.Euler(0, camera.rotation.y, 0, 'YXZ')
+            direction.applyEuler(euler)
+            velocity.x += direction.x * speed * delta
+            velocity.z += direction.z * speed * delta
+          }
+
+          velocity.x *= Math.max(0, 1 - DAMPING * delta)
+          velocity.z *= Math.max(0, 1 - DAMPING * delta)
+
           // Wall collision — test X and Z independently
           const newPos = camera.position.clone()
           if (Math.abs(velocity.x) > 0.001) {

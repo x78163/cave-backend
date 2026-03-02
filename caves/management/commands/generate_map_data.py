@@ -175,31 +175,41 @@ def load_keyframes(source_dir, stdout=None):
 # Level detection
 # ========================================================================
 
-def detect_levels(trajectory_z, threshold=2.0):
-    """Cluster keyframes by Z height to identify separate cave levels."""
+def detect_levels(trajectory_z, min_gap=3.0):
+    """Cluster keyframes by Z height to identify separate cave levels.
+
+    Uses gap-based splitting: sorts all Z values and only splits into a new
+    level when consecutive sorted Z values have a gap >= min_gap meters.
+    This correctly handles gradual slopes (single level) while detecting
+    genuine vertical separations (e.g., upper vs lower cave passages).
+
+    Previous algorithm compared each Z to the running level mean, which
+    caused gradual slopes to fragment into many false levels.
+    """
     if len(trajectory_z) == 0:
         return []
 
     sorted_indices = np.argsort(trajectory_z)
     sorted_z = trajectory_z[sorted_indices]
 
+    # Find gaps between consecutive sorted Z values
     levels = []
     current_level_z = [sorted_z[0]]
     current_level_ids = [int(sorted_indices[0])]
 
     for i in range(1, len(sorted_z)):
-        z = sorted_z[i]
-        level_center = np.mean(current_level_z)
+        gap = sorted_z[i] - sorted_z[i - 1]
 
-        if abs(z - level_center) > threshold:
+        if gap >= min_gap:
+            # Significant vertical gap — start a new level
             levels.append({
                 'z_values': current_level_z,
                 'keyframe_ids': current_level_ids,
             })
-            current_level_z = [z]
+            current_level_z = [sorted_z[i]]
             current_level_ids = [int(sorted_indices[i])]
         else:
-            current_level_z.append(z)
+            current_level_z.append(sorted_z[i])
             current_level_ids.append(int(sorted_indices[i]))
 
     levels.append({
@@ -357,15 +367,69 @@ def density_to_polylines(xy_points, resolution=0.05, threshold_pct=70):
     return polylines, [x_min, y_min, x_max, y_max]
 
 
-def process_level_quick(level_points, z_min, stdout=None):
-    """Quick mode: density-based wall extraction for a single level."""
-    floor_z = z_min
-    wall_mask = (level_points[:, 2] >= floor_z + 0.5) & (level_points[:, 2] <= floor_z + 1.8)
-    wall_points = level_points[wall_mask][:, :2]
+def trajectory_adaptive_wall_mask(level_points, trajectory, level_keyframe_ids,
+                                   band_lo=0.3, band_hi=1.8):
+    """Select wall-height points by following the trajectory's Z at each keyframe.
 
-    if len(wall_points) < 10:
-        wall_mask = (level_points[:, 2] >= floor_z + 0.2) & (level_points[:, 2] <= floor_z + 2.5)
-        wall_points = level_points[wall_mask][:, :2]
+    For each trajectory point, includes all points within [traj_z + band_lo,
+    traj_z + band_hi] in a local XY radius. This handles caves with continuous
+    vertical descent where a fixed Z band would miss deeper passages.
+
+    Falls back to simple z_min-relative banding when the level's total Z range
+    is small (< 4m), since that means the cave is roughly horizontal.
+    """
+    z_min = level_points[:, 2].min()
+    z_max = level_points[:, 2].max()
+    z_range = z_max - z_min
+
+    # For mostly-horizontal levels, use the simple fixed-band approach
+    if z_range < 4.0:
+        mask = ((level_points[:, 2] >= z_min + band_lo) &
+                (level_points[:, 2] <= z_min + band_hi))
+        if mask.sum() < 10:
+            mask = ((level_points[:, 2] >= z_min + 0.2) &
+                    (level_points[:, 2] <= z_min + 2.5))
+        return mask
+
+    # Trajectory-adaptive: for each keyframe, select points near its Z height
+    combined_mask = np.zeros(len(level_points), dtype=bool)
+    xy_pts = level_points[:, :2]
+
+    for kf_idx in level_keyframe_ids:
+        if kf_idx >= len(trajectory):
+            continue
+        tx, ty, tz = trajectory[kf_idx]
+
+        # XY radius around this trajectory point — enough to capture passage walls
+        xy_dist = np.sqrt((xy_pts[:, 0] - tx) ** 2 + (xy_pts[:, 1] - ty) ** 2)
+        nearby = xy_dist < 5.0  # 5m radius
+
+        # Z band relative to this trajectory point's height
+        z_vals = level_points[:, 2]
+        z_ok = (z_vals >= tz + band_lo) & (z_vals <= tz + band_hi)
+
+        combined_mask |= (nearby & z_ok)
+
+    return combined_mask
+
+
+def process_level_quick(level_points, z_min, trajectory=None, level_keyframe_ids=None,
+                        stdout=None):
+    """Quick mode: density-based wall extraction for a single level."""
+    if trajectory is not None and level_keyframe_ids is not None:
+        wall_mask = trajectory_adaptive_wall_mask(
+            level_points, trajectory, level_keyframe_ids,
+            band_lo=0.3, band_hi=1.8,
+        )
+    else:
+        floor_z = z_min
+        wall_mask = ((level_points[:, 2] >= floor_z + 0.5) &
+                     (level_points[:, 2] <= floor_z + 1.8))
+        if wall_mask.sum() < 10:
+            wall_mask = ((level_points[:, 2] >= floor_z + 0.2) &
+                         (level_points[:, 2] <= floor_z + 2.5))
+
+    wall_points = level_points[wall_mask][:, :2]
 
     if len(wall_points) < 10:
         return None, None
@@ -499,24 +563,41 @@ def segments_to_polylines(segments, resolution=0.03):
 # Standard mode: Poisson + multi-height slicing
 # ========================================================================
 
-def process_level_standard(mesh, level_z_min, level_z_max, stdout=None):
-    """Standard mode: slice Poisson mesh at multiple fixed heights within level."""
+def process_level_standard(mesh, level_z_min, level_z_max, trajectory=None,
+                           level_keyframe_ids=None, stdout=None):
+    """Standard mode: slice Poisson mesh at multiple heights within level.
+
+    For levels with large vertical extent (>4m), slices adaptively along the
+    trajectory at each keyframe's Z height. For flat levels, uses the original
+    fixed-height approach.
+    """
     floor_z = level_z_min
     ceiling_z = level_z_max
+    z_range = ceiling_z - floor_z
 
-    slice_min = floor_z + 0.5
-    slice_max = min(floor_z + 1.8, ceiling_z - 0.2)
-
-    if slice_max <= slice_min:
-        slice_min = floor_z + 0.2
-        slice_max = ceiling_z - 0.1
-
-    if slice_max <= slice_min:
-        slice_min = slice_max = (floor_z + ceiling_z) / 2
-
-    z_heights = np.arange(slice_min, slice_max + 0.1, 0.2)
-    if len(z_heights) < 2:
-        z_heights = np.array([slice_min, slice_max])
+    if z_range > 4.0 and trajectory is not None and level_keyframe_ids is not None:
+        # Trajectory-adaptive: slice at each trajectory point's Z ± offsets
+        z_heights_set = set()
+        for kf_idx in level_keyframe_ids:
+            if kf_idx >= len(trajectory):
+                continue
+            tz = trajectory[kf_idx][2]
+            # Slice at passage height relative to trajectory (0.5m to 1.5m above)
+            for offset in [0.5, 0.8, 1.1, 1.4]:
+                z_heights_set.add(round(tz + offset, 2))
+        z_heights = np.array(sorted(z_heights_set))
+    else:
+        # Original fixed-height approach for flat levels
+        slice_min = floor_z + 0.5
+        slice_max = min(floor_z + 1.8, ceiling_z - 0.2)
+        if slice_max <= slice_min:
+            slice_min = floor_z + 0.2
+            slice_max = ceiling_z - 0.1
+        if slice_max <= slice_min:
+            slice_min = slice_max = (floor_z + ceiling_z) / 2
+        z_heights = np.arange(slice_min, slice_max + 0.1, 0.2)
+        if len(z_heights) < 2:
+            z_heights = np.array([slice_min, slice_max])
 
     if stdout:
         stdout.write(f'    Slicing at {len(z_heights)} heights: '
@@ -526,8 +607,11 @@ def process_level_standard(mesh, level_z_min, level_z_max, stdout=None):
     for z in z_heights:
         segs = slice_mesh_at_z(mesh, z)
         all_segments.extend(segs)
-        if stdout:
+        if stdout and len(z_heights) <= 20:
             stdout.write(f'      Z={z:.2f}m: {len(segs)} segments')
+
+    if stdout and len(z_heights) > 20:
+        stdout.write(f'    (showing summary for {len(z_heights)} slice heights)')
 
     if not all_segments:
         return None, None
@@ -606,19 +690,34 @@ def process_level_detailed(mesh, points, trajectory, level, stdout=None):
     """Detailed mode: multi-height slicing + ceiling-aware adaptive slices."""
     floor_z = level['z_min']
     ceiling_z = level['z_max']
+    z_range = ceiling_z - floor_z
     z_band = 0.15
 
-    slice_min = floor_z + 0.4
-    slice_max = min(floor_z + 2.0, ceiling_z - 0.1)
-    if slice_max <= slice_min:
-        slice_min = floor_z + 0.2
-        slice_max = ceiling_z - 0.05
+    if z_range > 4.0:
+        # Trajectory-adaptive: slice at each keyframe's Z with adaptive ceiling
+        regular_heights = []
+        for kf_idx in level['keyframe_ids']:
+            if kf_idx >= len(trajectory):
+                continue
+            tz = trajectory[kf_idx][2]
+            for offset in [0.4, 0.7, 1.0, 1.3, 1.6]:
+                regular_heights.append(round(tz + offset, 2))
+        regular_heights = sorted(set(regular_heights))
+        if stdout:
+            stdout.write(f'    Trajectory-adaptive slices: {len(regular_heights)} '
+                         f'(Z=[{regular_heights[0]:.2f} .. {regular_heights[-1]:.2f}])')
+    else:
+        slice_min = floor_z + 0.4
+        slice_max = min(floor_z + 2.0, ceiling_z - 0.1)
+        if slice_max <= slice_min:
+            slice_min = floor_z + 0.2
+            slice_max = ceiling_z - 0.05
+        regular_heights = list(np.arange(slice_min, slice_max + 0.05, 0.15))
+        if stdout:
+            stdout.write(f'    Regular slices: {len(regular_heights)} '
+                         f'(Z=[{regular_heights[0]:.2f} .. {regular_heights[-1]:.2f}])')
 
-    regular_heights = list(np.arange(slice_min, slice_max + 0.05, 0.15))
-    if stdout:
-        stdout.write(f'    Regular slices: {len(regular_heights)} '
-                     f'(Z=[{regular_heights[0]:.2f} .. {regular_heights[-1]:.2f}])')
-
+    # Also add ceiling-aware adaptive heights
     default_abs_z = floor_z + 1.0
     slice_heights = compute_adaptive_slice_heights(
         points, trajectory, level['keyframe_ids'],
@@ -654,10 +753,18 @@ def process_level_detailed(mesh, points, trajectory, level, stdout=None):
 # Heatmap mode: point density grid
 # ========================================================================
 
-def process_level_heatmap(level_points, z_min, resolution=0.08, stdout=None):
+def process_level_heatmap(level_points, z_min, resolution=0.08, trajectory=None,
+                          level_keyframe_ids=None, stdout=None):
     """Heatmap mode: output a normalized density grid for canvas rendering."""
-    floor_z = z_min
-    wall_mask = (level_points[:, 2] >= floor_z + 0.3) & (level_points[:, 2] <= floor_z + 2.0)
+    if trajectory is not None and level_keyframe_ids is not None:
+        wall_mask = trajectory_adaptive_wall_mask(
+            level_points, trajectory, level_keyframe_ids,
+            band_lo=0.3, band_hi=2.0,
+        )
+    else:
+        floor_z = z_min
+        wall_mask = ((level_points[:, 2] >= floor_z + 0.3) &
+                     (level_points[:, 2] <= floor_z + 2.0))
     wall_points = level_points[wall_mask][:, :2]
 
     if len(wall_points) < 10:
@@ -705,10 +812,18 @@ def process_level_heatmap(level_points, z_min, resolution=0.08, stdout=None):
 # Edges mode: gradient edge detection → polylines
 # ========================================================================
 
-def process_level_edges(level_points, z_min, resolution=0.04, stdout=None):
+def process_level_edges(level_points, z_min, resolution=0.04, trajectory=None,
+                        level_keyframe_ids=None, stdout=None):
     """Edges mode: Canny edge detection on density grid → polylines."""
-    floor_z = z_min
-    wall_mask = (level_points[:, 2] >= floor_z + 0.3) & (level_points[:, 2] <= floor_z + 2.0)
+    if trajectory is not None and level_keyframe_ids is not None:
+        wall_mask = trajectory_adaptive_wall_mask(
+            level_points, trajectory, level_keyframe_ids,
+            band_lo=0.3, band_hi=2.0,
+        )
+    else:
+        floor_z = z_min
+        wall_mask = ((level_points[:, 2] >= floor_z + 0.3) &
+                     (level_points[:, 2] <= floor_z + 2.0))
     wall_points = level_points[wall_mask][:, :2]
 
     if len(wall_points) < 10:
@@ -772,26 +887,47 @@ def process_level_edges(level_points, z_min, resolution=0.04, stdout=None):
 # Raw slice mode: single-height Poisson mesh slice
 # ========================================================================
 
-def process_level_raw_slice(mesh, level_z_min, level_z_max, stdout=None):
-    """Raw slice mode: single clean Poisson mesh slice at optimal height."""
+def process_level_raw_slice(mesh, level_z_min, level_z_max, trajectory=None,
+                           level_keyframe_ids=None, stdout=None):
+    """Raw slice mode: Poisson mesh slice(s) at optimal height(s).
+
+    For levels with large vertical extent, slices at each trajectory point's Z + 1m.
+    For flat levels, uses a single slice at the midpoint.
+    """
     floor_z = level_z_min
     ceiling_z = level_z_max
-    passage_height = ceiling_z - floor_z
+    z_range = ceiling_z - floor_z
 
-    slice_z = floor_z + min(1.0, passage_height * 0.5)
+    if z_range > 4.0 and trajectory is not None and level_keyframe_ids is not None:
+        # Trajectory-adaptive: slice at each keyframe's Z + 1m
+        z_heights = set()
+        for kf_idx in level_keyframe_ids:
+            if kf_idx >= len(trajectory):
+                continue
+            z_heights.add(round(trajectory[kf_idx][2] + 1.0, 2))
+        z_heights = sorted(z_heights)
+        if stdout:
+            stdout.write(f'    Adaptive slicing at {len(z_heights)} heights')
+    else:
+        passage_height = ceiling_z - floor_z
+        z_heights = [floor_z + min(1.0, passage_height * 0.5)]
+        if stdout:
+            stdout.write(f'    Single slice at Z={z_heights[0]:.2f}m')
+
+    all_segments = []
+    for z in z_heights:
+        segs = slice_mesh_at_z(mesh, z)
+        all_segments.extend(segs)
 
     if stdout:
-        stdout.write(f'    Single slice at Z={slice_z:.2f}m')
-    segments = slice_mesh_at_z(mesh, slice_z)
-    if stdout:
-        stdout.write(f'    Segments: {len(segments)}')
+        stdout.write(f'    Total segments: {len(all_segments)}')
 
-    if not segments:
+    if not all_segments:
         return None, None
 
     polylines = []
     all_pts = []
-    for (p1, p2) in segments:
+    for (p1, p2) in all_segments:
         all_pts.extend([p1, p2])
         polylines.append([
             [round(float(p1[0]), 3), round(float(p1[1]), 3)],
@@ -812,10 +948,18 @@ def process_level_raw_slice(mesh, level_z_min, level_z_max, stdout=None):
 # Points mode: density-weighted point cloud
 # ========================================================================
 
-def process_level_points(level_points, z_min, grid_size=0.05, contrast=0.7, stdout=None):
+def process_level_points(level_points, z_min, grid_size=0.05, contrast=0.7, trajectory=None,
+                         level_keyframe_ids=None, stdout=None):
     """Points mode: density-weighted point cloud matching cave_app rendering."""
-    floor_z = z_min
-    wall_mask = (level_points[:, 2] >= floor_z + 0.3) & (level_points[:, 2] <= floor_z + 2.0)
+    if trajectory is not None and level_keyframe_ids is not None:
+        wall_mask = trajectory_adaptive_wall_mask(
+            level_points, trajectory, level_keyframe_ids,
+            band_lo=0.3, band_hi=2.0,
+        )
+    else:
+        floor_z = z_min
+        wall_mask = ((level_points[:, 2] >= floor_z + 0.3) &
+                     (level_points[:, 2] <= floor_z + 2.0))
     wall_points = level_points[wall_mask][:, :2]
 
     if len(wall_points) < 10:
@@ -931,25 +1075,36 @@ def process_cave_map(source_dir, output_dir, mode='quick', stdout=None):
 
         heatmap_info = None
         density_info = None
+        kf_ids = level['keyframe_ids']
         if mode == 'quick':
-            walls, bounds = process_level_quick(level_points, z_min, stdout=stdout)
+            walls, bounds = process_level_quick(
+                level_points, z_min, trajectory=trajectory,
+                level_keyframe_ids=kf_ids, stdout=stdout)
         elif mode == 'standard':
-            walls, bounds = process_level_standard(mesh, z_min, z_max, stdout=stdout)
+            walls, bounds = process_level_standard(
+                mesh, z_min, z_max, trajectory=trajectory,
+                level_keyframe_ids=kf_ids, stdout=stdout)
         elif mode == 'detailed':
             walls, bounds = process_level_detailed(
                 mesh, level_points, trajectory, level, stdout=stdout,
             )
         elif mode == 'heatmap':
             walls, bounds, heatmap_info = process_level_heatmap(
-                level_points, z_min, stdout=stdout,
+                level_points, z_min, trajectory=trajectory,
+                level_keyframe_ids=kf_ids, stdout=stdout,
             )
         elif mode == 'edges':
-            walls, bounds = process_level_edges(level_points, z_min, stdout=stdout)
+            walls, bounds = process_level_edges(
+                level_points, z_min, trajectory=trajectory,
+                level_keyframe_ids=kf_ids, stdout=stdout)
         elif mode == 'raw_slice':
-            walls, bounds = process_level_raw_slice(mesh, z_min, z_max, stdout=stdout)
+            walls, bounds = process_level_raw_slice(
+                mesh, z_min, z_max, trajectory=trajectory,
+                level_keyframe_ids=kf_ids, stdout=stdout)
         elif mode == 'points':
             walls, bounds, density_info = process_level_points(
-                level_points, z_min, stdout=stdout,
+                level_points, z_min, trajectory=trajectory,
+                level_keyframe_ids=kf_ids, stdout=stdout,
             )
         else:
             raise ValueError(f"Unknown mode '{mode}'")
