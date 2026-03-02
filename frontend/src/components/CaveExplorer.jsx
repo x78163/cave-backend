@@ -1,6 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react'
 import * as THREE from 'three'
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 const PLAYER_HEIGHT = 1.6
@@ -11,6 +10,7 @@ const SPEED = 2.0
 const SPRINT_MULT = 2.5
 const DAMPING = 8.0
 const MAX_FALL_DISTANCE = 10
+const MOUSE_SENSITIVITY = 0.002
 
 export default function CaveExplorer({ caveId }) {
   const containerRef = useRef(null)
@@ -52,11 +52,33 @@ export default function CaveExplorer({ caveId }) {
     fillLight.position.set(0, -2, 0)
     camera.add(fillLight)
 
-    // ── Controls ──
-    const controls = new PointerLockControls(camera, container)
+    // ── Pointer Lock (replaces PointerLockControls for full 6DOF) ──
+    let isLocked = false
+
+    function onPointerLockChange() {
+      isLocked = document.pointerLockElement === container
+    }
+    document.addEventListener('pointerlockchange', onPointerLockChange)
+
+    function onMouseMove(e) {
+      if (!isLocked) return
+
+      if (noclip) {
+        // 6DOF: all rotations relative to camera's own axes
+        camera.rotateY(-e.movementX * MOUSE_SENSITIVITY)
+        camera.rotateX(-e.movementY * MOUSE_SENSITIVITY)
+      } else {
+        // FPS walking: yaw around world Y, pitch around local X
+        camera.rotation.order = 'YXZ'
+        camera.rotation.y -= e.movementX * MOUSE_SENSITIVITY
+        camera.rotation.x -= e.movementY * MOUSE_SENSITIVITY
+        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x))
+      }
+    }
+    document.addEventListener('mousemove', onMouseMove)
 
     // ── State ──
-    const moveState = { forward: false, backward: false, left: false, right: false, sprint: false, jump: false }
+    const moveState = { forward: false, backward: false, left: false, right: false, sprint: false, jump: false, turnLeft: false, turnRight: false }
     const velocity = new THREE.Vector3()
     const direction = new THREE.Vector3()
     let noclip = false
@@ -110,7 +132,7 @@ export default function CaveExplorer({ caveId }) {
 
     // ── Keyboard ──
     function onKeyDown(e) {
-      if (!controls.isLocked) return
+      if (!isLocked) return
       switch (e.code) {
         case 'KeyW': moveState.forward = true; break
         case 'KeyS': moveState.backward = true; break
@@ -126,6 +148,8 @@ export default function CaveExplorer({ caveId }) {
           noclip = !noclip
           verticalVelocity = 0
           break
+        case 'KeyQ': moveState.turnLeft = true; break
+        case 'KeyE': moveState.turnRight = true; break
       }
     }
     function onKeyUp(e) {
@@ -136,6 +160,8 @@ export default function CaveExplorer({ caveId }) {
         case 'KeyD': moveState.right = false; break
         case 'Space': moveState.jump = false; break
         case 'ShiftLeft': case 'ShiftRight': moveState.sprint = false; break
+        case 'KeyQ': moveState.turnLeft = false; break
+        case 'KeyE': moveState.turnRight = false; break
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -273,6 +299,29 @@ export default function CaveExplorer({ caveId }) {
       const center = box.getCenter(new THREE.Vector3())
       fallbackFloorY = box.min.y - 0.5
 
+      // ── Horizontal reference plane (oriented to true horizontal via gravity correction) ──
+      if (isPointCloud) {
+        // Use a reasonable plane size (based on keyframe extent, not outlier-inflated bounds)
+        const planeSize = 60
+
+        // Determine true up direction
+        const hasGravity = !!spawnData?.gravity_correction?.true_up
+        const trueUp = hasGravity
+          ? new THREE.Vector3(...spawnData.gravity_correction.true_up).normalize()
+          : new THREE.Vector3(0, 1, 0)
+
+        console.log('Reference plane — gravity data:', hasGravity, 'trueUp:', trueUp.toArray(), 'center:', center.toArray())
+
+        // Grid — GridHelper is already horizontal (XZ plane, normal = +Y)
+        // Rotate so its +Y aligns with trueUp
+        const gridHelper = new THREE.GridHelper(planeSize, 30, 0x00ccff, 0x00ccff)
+        gridHelper.material.transparent = true
+        gridHelper.material.opacity = 0.15
+        gridHelper.position.copy(center)
+        gridHelper.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), trueUp)
+        scene.add(gridHelper)
+      }
+
       if (isPointCloud) {
         // Point cloud: use raw SLAM coordinates (no coord swap — data is Y-up compatible)
         if (spawnData) {
@@ -281,20 +330,8 @@ export default function CaveExplorer({ caveId }) {
         } else {
           camera.position.copy(center)
         }
-        // Face toward center of cloud, keep level
-        const lookTarget = center.clone()
-        lookTarget.y = camera.position.y
-        if (lookTarget.distanceTo(camera.position) > 0.1) {
-          camera.lookAt(lookTarget)
-        }
-        // Ensure clean state for PointerLockControls
-        camera.up.set(0, 1, 0)
-        camera.rotation.order = 'YXZ'
-        const yaw = Math.atan2(
-          center.x - camera.position.x,
-          center.z - camera.position.z
-        )
-        camera.rotation.set(0, yaw, 0, 'YXZ')
+        // Face toward center of cloud
+        camera.lookAt(center)
       } else {
         if (spawnData) {
           const spawnPos = slamToThreePos(spawnData.spawn.position)
@@ -305,6 +342,7 @@ export default function CaveExplorer({ caveId }) {
         } else {
           camera.position.copy(center)
         }
+        camera.rotation.order = 'YXZ'
         const floorY = findFloor(camera.position)
         camera.position.y = floorY + PLAYER_HEIGHT
       }
@@ -315,7 +353,7 @@ export default function CaveExplorer({ caveId }) {
     loadAll().catch(err => console.error('CaveExplorer load failed:', err))
 
     // ── Click to lock ──
-    const onClick = () => controls.lock()
+    const onClick = () => container.requestPointerLock()
     container.addEventListener('click', onClick)
 
     // ── Animation loop ──
@@ -326,11 +364,23 @@ export default function CaveExplorer({ caveId }) {
       animId = requestAnimationFrame(animate)
       const delta = Math.min(clock.getDelta(), 0.1)
 
-      if (controls.isLocked) {
+      if (isLocked) {
         const speed = SPEED * (moveState.sprint ? SPRINT_MULT : 1.0)
 
+        // ── Q/E roll (camera-relative roll around forward axis) ──
+        if (moveState.turnLeft || moveState.turnRight) {
+          const rollSpeed = 1.5 * delta
+          if (noclip) {
+            if (moveState.turnLeft) camera.rotateZ(rollSpeed)
+            if (moveState.turnRight) camera.rotateZ(-rollSpeed)
+          } else {
+            if (moveState.turnLeft) camera.rotation.y += rollSpeed
+            if (moveState.turnRight) camera.rotation.y -= rollSpeed
+          }
+        }
+
         if (noclip) {
-          // Noclip: fly in camera direction (full 3D)
+          // Noclip: fly in camera direction (full 6DOF)
           direction.set(0, 0, 0)
           if (moveState.forward) direction.z -= 1
           if (moveState.backward) direction.z += 1
@@ -340,7 +390,7 @@ export default function CaveExplorer({ caveId }) {
 
           if (direction.lengthSq() > 0) {
             direction.normalize()
-            // Apply full camera rotation (yaw + pitch) for fly-through movement
+            // Apply full camera rotation for fly-through movement
             direction.applyQuaternion(camera.quaternion)
             velocity.x += direction.x * speed * delta
             velocity.y += direction.y * speed * delta
@@ -441,8 +491,9 @@ export default function CaveExplorer({ caveId }) {
       if (animId) cancelAnimationFrame(animId)
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('keyup', onKeyUp)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('pointerlockchange', onPointerLockChange)
       container.removeEventListener('click', onClick)
-      controls.dispose()
       renderer.dispose()
       ro.disconnect()
       if (renderer.domElement.parentNode) {
@@ -472,7 +523,7 @@ export default function CaveExplorer({ caveId }) {
         }}
         className="explorer-hint"
       >
-        Click to enter — WASD to move, Mouse to look, F flashlight, V noclip
+        Click to enter — WASD move, Q/E roll, Mouse look, F flashlight, V noclip
       </div>
     </div>
   )
