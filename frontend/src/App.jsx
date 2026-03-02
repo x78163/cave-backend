@@ -18,6 +18,7 @@ const Profile = lazy(() => import('./pages/Profile'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const UserProfilePage = lazy(() => import('./pages/UserProfilePage'))
 const EventDetail = lazy(() => import('./pages/EventDetail'))
+const PointCloudEditor = lazy(() => import('./pages/PointCloudEditor'))
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -127,6 +128,7 @@ function AppContent() {
                 <Route path="/caves/new" element={<CreateCave />} />
                 <Route path="/caves/:caveId" element={<CaveDetail />} />
                 <Route path="/caves/:caveId/edit" element={<CreateCave />} />
+                <Route path="/caves/:caveId/editor" element={<PointCloudEditor />} />
                 <Route path="/events" element={<Events />} />
                 <Route path="/events/:eventId" element={<EventDetail />} />
                 <Route path="/expeditions" element={<Navigate to="/events" replace />} />

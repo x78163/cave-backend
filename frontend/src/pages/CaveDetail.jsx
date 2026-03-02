@@ -622,6 +622,18 @@ export default function CaveDetail() {
               </span>
             )}
 
+            {canManage && cave.has_map && (
+              <button
+                onClick={() => navigate(`/caves/${caveId}/editor`)}
+                className="px-4 py-3 rounded-full font-semibold text-sm text-center transition-all
+                  bg-[var(--cyber-surface-2)] text-[var(--cyber-magenta)] border border-[rgba(255,0,200,0.3)]
+                  hover:border-[rgba(255,0,200,0.5)] active:scale-[0.97]"
+                title="Open 3D Editor"
+              >
+                Edit 3D
+              </button>
+            )}
+
             <span
               className={`inline-flex items-center justify-center px-4 py-3 rounded-full text-sm font-medium
                 ${cave.visibility === 'public'
