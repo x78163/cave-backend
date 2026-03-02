@@ -104,3 +104,9 @@ Thumbs.db
 *.key
 *.crt
 secrets.json
+
+# Raw field data (large LiDAR/keyframe datasets)
+Field Test Maps/
+
+# Database dumps
+datadump.json
