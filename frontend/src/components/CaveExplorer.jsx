@@ -12,7 +12,7 @@ const SPRINT_MULT = 2.5
 const DAMPING = 8.0
 const MAX_FALL_DISTANCE = 10
 
-export default function CaveExplorer({ caveId }) {
+export default function CaveExplorer({ caveId, pointcloudUrl, spawnUrl }) {
   const containerRef = useRef(null)
   const cleanupRef = useRef(null)
 
@@ -156,14 +156,17 @@ export default function CaveExplorer({ caveId }) {
       let isPointCloud = false
       let gltf = null
 
-      // Load spawn data (try per-cave path first, then global)
-      const spawnPaths = caveId
-        ? [
-            `/media/caves/${caveId}/spawn.json`,
-            `/media/reconstruction/output/${caveId}_spawn.json`,
-            '/media/reconstruction/spawn.json',
-          ]
-        : ['/media/reconstruction/spawn.json']
+      // Load spawn data (try API-provided URL first, then local paths)
+      const spawnPaths = [
+        ...(spawnUrl ? [spawnUrl] : []),
+        ...(caveId
+          ? [
+              `/media/caves/${caveId}/spawn.json`,
+              `/media/reconstruction/output/${caveId}_spawn.json`,
+              '/media/reconstruction/spawn.json',
+            ]
+          : ['/media/reconstruction/spawn.json']),
+      ]
       for (const sp of spawnPaths) {
         try {
           const resp = await fetch(sp)
@@ -181,13 +184,18 @@ export default function CaveExplorer({ caveId }) {
         )
       }
 
-      // Try loading cave-specific point cloud GLB
-      if (caveId) {
+      // Try loading point cloud GLB (API-provided URL first, then local path)
+      const pcUrls = [
+        ...(pointcloudUrl ? [pointcloudUrl] : []),
+        ...(caveId ? [`/media/caves/${caveId}/cave_pointcloud.glb`] : []),
+      ]
+      for (const pcUrl of pcUrls) {
         try {
-          gltf = await loadGlb(`/media/caves/${caveId}/cave_pointcloud.glb`)
+          gltf = await loadGlb(pcUrl)
           isPointCloud = true
+          break
         } catch {
-          // No point cloud GLB, try mesh fallbacks
+          // try next
         }
       }
 

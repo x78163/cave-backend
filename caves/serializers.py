@@ -1,4 +1,5 @@
 from django.db.models import Avg, Count
+from django.core.files.storage import default_storage
 from rest_framework import serializers
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
@@ -253,6 +254,8 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     pending_request_count = serializers.SerializerMethodField()
     user_pending_request = serializers.SerializerMethodField()
     user_has_contact_access = serializers.SerializerMethodField()
+    pointcloud_url = serializers.SerializerMethodField()
+    spawn_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Cave
@@ -277,6 +280,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'pending_request_count', 'user_pending_request',
             'user_has_contact_access',
             'public_land_name', 'public_land_type', 'public_land_owner', 'public_land_access',
+            'pointcloud_url', 'spawn_url',
             'visibility', 'collaboration_setting',
             'owner', 'origin_device',
             'created_at', 'updated_at',
@@ -327,6 +331,16 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             return lo.contact_access_users.filter(id=request.user.id).exists()
         except LandOwner.DoesNotExist:
             return False
+
+    def get_pointcloud_url(self, obj):
+        if not obj.has_map:
+            return None
+        return default_storage.url(f'caves/{obj.id}/cave_pointcloud.glb')
+
+    def get_spawn_url(self, obj):
+        if not obj.has_map:
+            return None
+        return default_storage.url(f'caves/{obj.id}/spawn.json')
 
     def get_land_owner(self, obj):
         try:
