@@ -90,7 +90,25 @@ const _pos = new THREE.Vector3()
 const _quat = new THREE.Quaternion()
 const _scale = new THREE.Vector3()
 
-const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, pickedPoints }, ref) {
+function DragRectOverlay({ rect }) {
+  const left = Math.min(rect.x1, rect.x2)
+  const top = Math.min(rect.y1, rect.y2)
+  const width = Math.abs(rect.x2 - rect.x1)
+  const height = Math.abs(rect.y2 - rect.y1)
+  return (
+    <div
+      className="absolute pointer-events-none"
+      style={{
+        left, top, width, height,
+        border: '1px dashed #fb923c',
+        background: 'rgba(251,146,60,0.08)',
+        zIndex: 10,
+      }}
+    />
+  )
+}
+
+const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, pickedPoints, selectedIndices }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const stateRef = useRef(null) // holds all Three.js state
@@ -100,6 +118,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
 
   const [split, setSplit] = useState(splitRef.current)
   const [activeVp, setActiveVp] = useState(null)
+  const [dragRect, setDragRect] = useState(null) // { vpIndex, x1, y1, x2, y2 } screen coords relative to viewport
   const setActiveViewport = useEditorStore(s => s.setActiveViewport)
   const activeTool = useEditorStore(s => s.activeTool)
   const transformMode = useEditorStore(s => s.transformMode)
@@ -210,7 +229,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
     // Key tracking for WASD fly mode
     const keysDown = new Set()
 
-    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown, pickMarkers: [], stashedColors: null }
+    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown, pickMarkers: [], stashedColors: null, selectionOverlay: null }
 
     // Resize observer
     const ro = new ResizeObserver(entries => {
@@ -345,6 +364,12 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
         scene.remove(obj)
         if (obj.geometry) obj.geometry.dispose()
         if (obj.material) obj.material.dispose()
+      }
+      // Cleanup selection overlay
+      if (stateRef.current?.selectionOverlay) {
+        scene.remove(stateRef.current.selectionOverlay)
+        stateRef.current.selectionOverlay.geometry.dispose()
+        stateRef.current.selectionOverlay.material.dispose()
       }
       stateRef.current = null
     }
@@ -924,6 +949,178 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
     srcColorAttr.needsUpdate = true
   }, [overlapVisActive])
 
+  // ── Box select drag handler ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+    if (activeTool !== 'boxSelect') return
+
+    function handleMouseDown(vpIndex, e) {
+      if (e.button !== 0) return
+      const state = useEditorStore.getState()
+      if (state.activeTool !== 'boxSelect') return
+
+      const el = vpDivRefs.current[vpIndex]
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const startX = e.clientX - rect.left
+      const startY = e.clientY - rect.top
+
+      setDragRect({ vpIndex, x1: startX, y1: startY, x2: startX, y2: startY })
+
+      function onMove(me) {
+        const r = el.getBoundingClientRect()
+        setDragRect(prev => prev ? { ...prev, x2: me.clientX - r.left, y2: me.clientY - r.top } : null)
+      }
+
+      function onUp(me) {
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+
+        const r = el.getBoundingClientRect()
+        const endX = me.clientX - r.left
+        const endY = me.clientY - r.top
+        setDragRect(null)
+
+        // Minimum drag distance to avoid accidental clicks
+        if (Math.abs(endX - startX) < 5 && Math.abs(endY - startY) < 5) return
+
+        // Compute selection: project all points to screen, check if inside rect
+        const state = useEditorStore.getState()
+        const cloudId = state.selectedCloudId
+        if (!cloudId) return
+
+        const cloud = state.clouds.find(c => c.id === cloudId)
+        if (!cloud?.geometry || !cloud.visible) return
+
+        const cam = s.cameras[vpIndex]
+        const posAttr = cloud.geometry.getAttribute('position')
+        const count = posAttr.count
+
+        const minX = Math.min(startX, endX)
+        const maxX = Math.max(startX, endX)
+        const minY = Math.min(startY, endY)
+        const maxY = Math.max(startY, endY)
+
+        const vpW = r.width
+        const vpH = r.height
+        const v = new THREE.Vector3()
+        const selected = []
+
+        for (let i = 0; i < count; i++) {
+          v.set(posAttr.array[i * 3], posAttr.array[i * 3 + 1], posAttr.array[i * 3 + 2])
+          v.applyMatrix4(cloud.transform)
+          v.project(cam)
+
+          // NDC to viewport pixel coords
+          const sx = (v.x * 0.5 + 0.5) * vpW
+          const sy = (-v.y * 0.5 + 0.5) * vpH
+
+          if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) {
+            selected.push(i)
+          }
+        }
+
+        if (selected.length > 0) {
+          if (me.shiftKey) {
+            state.addToSelection(cloudId, selected)
+          } else {
+            state.setSelectedIndices(cloudId, selected)
+          }
+        } else if (!me.shiftKey) {
+          state.clearSelection()
+        }
+      }
+
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    }
+
+    const handlers = []
+    for (let i = 0; i < 4; i++) {
+      const el = vpDivRefs.current[i]
+      if (!el) continue
+      const idx = i
+      const handler = (e) => handleMouseDown(idx, e)
+      el.addEventListener('mousedown', handler)
+      handlers.push([el, handler])
+    }
+
+    return () => {
+      for (const [el, handler] of handlers) {
+        el.removeEventListener('mousedown', handler)
+      }
+    }
+  }, [activeTool])
+
+  // ── Selection highlight overlay ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+
+    // Remove previous overlay
+    if (s.selectionOverlay) {
+      s.scene.remove(s.selectionOverlay)
+      s.selectionOverlay.geometry.dispose()
+      s.selectionOverlay.material.dispose()
+      s.selectionOverlay = null
+    }
+
+    if (!selectedIndices) return
+
+    // Find the cloud with the most selected points
+    let bestCloudId = null
+    let bestIndices = null
+    for (const [cloudId, indices] of Object.entries(selectedIndices)) {
+      if (indices && indices.length > 0) {
+        if (!bestIndices || indices.length > bestIndices.length) {
+          bestCloudId = cloudId
+          bestIndices = indices
+        }
+      }
+    }
+
+    if (!bestCloudId || !bestIndices || bestIndices.length === 0) return
+
+    const cloud = clouds.find(c => c.id === bestCloudId)
+    if (!cloud?.geometry) return
+
+    const srcPos = cloud.geometry.getAttribute('position')
+    const count = bestIndices.length
+
+    // Build overlay geometry with selected points in world space
+    const positions = new Float32Array(count * 3)
+    for (let j = 0; j < count; j++) {
+      const i = bestIndices[j]
+      positions[j * 3] = srcPos.array[i * 3]
+      positions[j * 3 + 1] = srcPos.array[i * 3 + 1]
+      positions[j * 3 + 2] = srcPos.array[i * 3 + 2]
+    }
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+
+    const mat = new THREE.PointsMaterial({
+      size: 0.15,
+      color: 0xfbbf24, // bright amber/yellow
+      depthTest: false,
+      sizeAttenuation: true,
+    })
+
+    const overlay = new THREE.Points(geo, mat)
+    overlay.renderOrder = 998
+
+    // Apply same transform as the source cloud
+    _pos.set(0, 0, 0); _quat.identity(); _scale.set(1, 1, 1)
+    cloud.transform.decompose(_pos, _quat, _scale)
+    overlay.position.copy(_pos)
+    overlay.quaternion.copy(_quat)
+    overlay.scale.copy(_scale)
+
+    s.scene.add(overlay)
+    s.selectionOverlay = overlay
+  }, [selectedIndices, clouds])
+
   return (
     <div ref={containerRef} className="relative flex-1 overflow-hidden" style={{ background: '#0a0a12' }}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ display: 'block' }} />
@@ -944,6 +1141,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
           style={{ ...vpStyle('top'), borderRight: '1px solid var(--cyber-border)', borderBottom: '1px solid var(--cyber-border)' }}
         >
           <span className="absolute top-1 left-2 text-[10px] font-mono pointer-events-none" style={{ color: 'var(--cyber-text-dim)', zIndex: 1 }}>{VIEW_LABELS.top}</span>
+          {dragRect && dragRect.vpIndex === 0 && <DragRectOverlay rect={dragRect} />}
         </div>
 
         {/* Vertical divider (top) */}
@@ -957,6 +1155,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
           style={{ ...vpStyle('free'), borderBottom: '1px solid var(--cyber-border)' }}
         >
           <span className="absolute top-1 left-2 text-[10px] font-mono pointer-events-none" style={{ color: 'var(--cyber-text-dim)', zIndex: 1 }}>{VIEW_LABELS.free}</span>
+          {dragRect && dragRect.vpIndex === 1 && <DragRectOverlay rect={dragRect} />}
         </div>
 
         {/* Horizontal divider (left) */}
@@ -976,6 +1175,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
           style={{ ...vpStyle('front'), borderRight: '1px solid var(--cyber-border)' }}
         >
           <span className="absolute top-1 left-2 text-[10px] font-mono pointer-events-none" style={{ color: 'var(--cyber-text-dim)', zIndex: 1 }}>{VIEW_LABELS.front}</span>
+          {dragRect && dragRect.vpIndex === 2 && <DragRectOverlay rect={dragRect} />}
         </div>
 
         {/* Vertical divider (bottom) */}
@@ -989,6 +1189,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
           style={vpStyle('profile')}
         >
           <span className="absolute top-1 left-2 text-[10px] font-mono pointer-events-none" style={{ color: 'var(--cyber-text-dim)', zIndex: 1 }}>{VIEW_LABELS.profile}</span>
+          {dragRect && dragRect.vpIndex === 3 && <DragRectOverlay rect={dragRect} />}
         </div>
       </div>
     </div>

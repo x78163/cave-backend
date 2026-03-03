@@ -40,6 +40,13 @@ const TRANSFORM_TOOLS = [
   )},
 ]
 
+const BOX_SELECT = { id: 'boxSelect', label: 'Box Select', key: 'B', icon: (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+    <rect x="3" y="3" width="18" height="18" rx="1" strokeDasharray="4 2" />
+    <path d="M8 8h8v8H8z" opacity="0.3" fill="currentColor" stroke="none" />
+  </svg>
+)}
+
 const PICK_TOOL = { id: 'pick', label: 'Pick Points', key: 'P', icon: (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
     <circle cx="12" cy="12" r="3" />
@@ -79,11 +86,43 @@ export default function EditorToolbar({ onFitView }) {
   const alignmentMode = useEditorStore(s => s.alignmentMode)
   const enterAlignmentMode = useEditorStore(s => s.enterAlignmentMode)
   const exitAlignmentMode = useEditorStore(s => s.exitAlignmentMode)
+  const clearSelection = useEditorStore(s => s.clearSelection)
+  const selectAllPoints = useEditorStore(s => s.selectAllPoints)
+  const deleteSelectedPoints = useEditorStore(s => s.deleteSelectedPoints)
 
   useEffect(() => {
     function onKey(e) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       const key = e.key.toUpperCase()
+
+      // Delete selected points
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const sel = useEditorStore.getState().selectedIndices
+        const hasSelection = Object.values(sel).some(arr => arr.length > 0)
+        if (hasSelection) {
+          e.preventDefault()
+          deleteSelectedPoints()
+          return
+        }
+      }
+
+      // Ctrl+A: select all points in active cloud
+      if (key === 'A' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        selectAllPoints()
+        return
+      }
+
+      // Escape: clear selection (before other Esc handlers)
+      if (e.key === 'Escape') {
+        const sel = useEditorStore.getState().selectedIndices
+        const hasSelection = Object.values(sel).some(arr => arr.length > 0)
+        if (hasSelection) {
+          e.preventDefault()
+          clearSelection()
+          return
+        }
+      }
 
       // Fly mode toggle
       if (key === FLY_MODE.key) {
@@ -95,9 +134,18 @@ export default function EditorToolbar({ onFitView }) {
       // Align mode toggle
       if (key === ALIGN_TOGGLE.key) {
         if (useEditorStore.getState().flyMode) return // A = strafe left in fly mode
+        if (e.ctrlKey || e.metaKey) return // Ctrl+A handled above
         e.preventDefault()
         if (useEditorStore.getState().alignmentMode) exitAlignmentMode()
         else enterAlignmentMode()
+        return
+      }
+
+      // Box Select tool
+      if (key === BOX_SELECT.key) {
+        if (useEditorStore.getState().flyMode) return
+        e.preventDefault()
+        setActiveTool('boxSelect')
         return
       }
 
@@ -132,7 +180,7 @@ export default function EditorToolbar({ onFitView }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setActiveTool, setTransformMode, toggleFlyMode, enterAlignmentMode, exitAlignmentMode, onFitView])
+  }, [setActiveTool, setTransformMode, toggleFlyMode, enterAlignmentMode, exitAlignmentMode, clearSelection, selectAllPoints, deleteSelectedPoints, onFitView])
 
   return (
     <div
@@ -193,6 +241,20 @@ export default function EditorToolbar({ onFitView }) {
         }}
       >
         {PICK_TOOL.icon}
+      </button>
+
+      {/* Box Select tool */}
+      <button
+        onClick={() => setActiveTool('boxSelect')}
+        title={`${BOX_SELECT.label} (${BOX_SELECT.key})`}
+        className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+        style={{
+          background: activeTool === 'boxSelect' ? 'rgba(251,146,60,0.15)' : 'transparent',
+          color: activeTool === 'boxSelect' ? '#fb923c' : 'var(--cyber-text-dim)',
+          border: activeTool === 'boxSelect' ? '1px solid rgba(251,146,60,0.3)' : '1px solid transparent',
+        }}
+      >
+        {BOX_SELECT.icon}
       </button>
 
       {/* Fly Mode toggle */}

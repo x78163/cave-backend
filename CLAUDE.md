@@ -923,7 +923,7 @@ This project includes:
   - Profile.jsx: "My Events" tab; UserProfilePage.jsx: "Events" tab
   - PostCard.jsx: inline event pill rendering with color-coded capsule + cave pill ("Created event [pill] at [cave]")
   - ChatMessages.jsx: `[event:/events/{id}|{name}]` token rendered as clickable event pills
-- 3D Point Cloud Editor (`/editor` or `/editor/:caveId`) — map stitching tool (Phases 1-3 complete)
+- 3D Point Cloud Editor (`/editor` or `/editor/:caveId`) — map stitching tool (Phases 1-5 complete)
   - Quad-viewport layout: Top (XZ), Free Camera, Front (XY), Profile (ZY) with resizable dividers
   - Single WebGL renderer with scissor test, 4 cameras per frame
   - Multi-format import: GLB, PLY, PCD via Three.js loaders (file upload + cross-cave import)
@@ -934,6 +934,10 @@ This project includes:
   - AlignmentPanel sidebar: source/target cloud selectors, control point list, registration with RMSE, ICP progress bar, overlap colors toggle, accept/reset
   - Pure math module (`alignmentMath.js`): 3x3 SVD (Jacobi), Procrustes, KD-tree, ICP — zero Three.js dependencies
   - Pick markers: green spheres (source), red spheres (target), yellow connecting lines (`depthTest: false`)
+  - Box Select tool (B key): drag rectangle in any viewport, screen-space projection selects points, Shift+drag adds to selection, Ctrl+A select all, Esc clear
+  - Point deletion (Del/Backspace): geometry rebuild without selected indices
+  - Point painting: color presets + custom picker, modifies vertex colors in-place
+  - SelectionPanel: floating bottom bar with point count, paint colors, delete/clear buttons
   - Zustand store (`editorStore.js`) for all state
   - Route `/editor`, `/editor/:caveId` (lazy-loaded)
 
@@ -988,12 +992,13 @@ This project includes:
 | `frontend/src/utils/videoUtils.js` | Client-side video URL parser (mirrors backend) |
 | `frontend/src/components/BulkImportModal.jsx` | Three-step admin bulk import modal (file upload or URL paste → preview/resolve → results) |
 | `frontend/src/utils/parseCoordinates.js` | Universal coordinate format parser |
-| `frontend/src/pages/PointCloudEditor.jsx` | 3D Point Cloud Editor main page — header, toolbar, viewport, conditional panel swap (alignment/cloud) |
-| `frontend/src/stores/editorStore.js` | Editor state: clouds, tools, transforms, fly mode, alignment mode, ICP, multi-format import (GLB/PLY/PCD) |
-| `frontend/src/components/editor/EditorViewportLayout.jsx` | All Three.js rendering: 4 cameras, scissor test, TransformControls, 6DOF fly mode, pick raycasting, markers, overlap vis |
-| `frontend/src/components/editor/EditorToolbar.jsx` | Tool buttons: Select/Pan/Zoom, Translate/Rotate/Scale, Pick Points (P), Fly Mode (G), Fit View (F), Align (A) |
+| `frontend/src/pages/PointCloudEditor.jsx` | 3D Point Cloud Editor main page — header, toolbar, viewport, conditional panel swap (alignment/cloud), selection panel |
+| `frontend/src/stores/editorStore.js` | Editor state: clouds, tools, transforms, fly mode, alignment, ICP, selection, paint, multi-format import (GLB/PLY/PCD) |
+| `frontend/src/components/editor/EditorViewportLayout.jsx` | All Three.js rendering: 4 cameras, scissor test, TransformControls, 6DOF fly mode, pick raycasting, markers, overlap vis, box select drag, selection overlay |
+| `frontend/src/components/editor/EditorToolbar.jsx` | Tool buttons: Select/Pan/Zoom, Translate/Rotate/Scale, Pick Points (P), Box Select (B), Fly Mode (G), Fit View (F), Align (A) |
 | `frontend/src/components/editor/EditorCloudPanel.jsx` | Right panel: cloud list with visibility/lock/color/delete, Import button |
 | `frontend/src/components/editor/AlignmentPanel.jsx` | Alignment sidebar: cloud selectors, point pairs, N-point registration, ICP fine-tune, overlap visualization |
+| `frontend/src/components/editor/SelectionPanel.jsx` | Floating bottom bar: selection count, paint color presets + custom picker, delete with confirmation, clear |
 | `frontend/src/components/editor/CloudImportModal.jsx` | Two-tab import: Upload File (GLB/PLY/PCD drag-drop) + From Cave (search caves with 3D maps) |
 | `frontend/src/utils/alignmentMath.js` | Pure math: 3x3 SVD (Jacobi), Procrustes rigid registration, KD-tree, ICP, downsample |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |

@@ -90,6 +90,10 @@ const useEditorStore = create((set, get) => ({
   overlapVisActive: false,
   icpSampleSize: 5000,
 
+  // Selection + painting state
+  selectedIndices: {}, // { [cloudId]: number[] }
+  paintColor: '#ff6b6b',
+
   setCaveId: (id) => set({ caveId: id }),
   setCaveName: (name) => set({ caveName: name }),
   setActiveTool: (tool) => set({ activeTool: tool, transformMode: null }),
@@ -380,6 +384,108 @@ const useEditorStore = create((set, get) => ({
   setIcpSampleSize: (size) => set({ icpSampleSize: size }),
   toggleOverlapVis: () => set(state => ({ overlapVisActive: !state.overlapVisActive })),
 
+  // ── Selection + Paint actions ──
+  setSelectedIndices: (cloudId, indices) => set(state => ({
+    selectedIndices: { ...state.selectedIndices, [cloudId]: indices },
+  })),
+
+  addToSelection: (cloudId, indices) => set(state => {
+    const existing = state.selectedIndices[cloudId] || []
+    const merged = new Set([...existing, ...indices])
+    return { selectedIndices: { ...state.selectedIndices, [cloudId]: [...merged] } }
+  }),
+
+  clearSelection: () => set({ selectedIndices: {} }),
+
+  selectAllPoints: () => {
+    const state = get()
+    const cloudId = state.selectedCloudId
+    if (!cloudId) return
+    const cloud = state.clouds.find(c => c.id === cloudId)
+    if (!cloud?.geometry) return
+    const count = cloud.geometry.getAttribute('position').count
+    const all = Array.from({ length: count }, (_, i) => i)
+    set({ selectedIndices: { ...state.selectedIndices, [cloudId]: all } })
+  },
+
+  deleteSelectedPoints: () => {
+    const state = get()
+    const entries = Object.entries(state.selectedIndices).filter(([, indices]) => indices.length > 0)
+    if (entries.length === 0) return
+
+    const newClouds = state.clouds.map(cloud => {
+      const indices = state.selectedIndices[cloud.id]
+      if (!indices || indices.length === 0) return cloud
+
+      const toDelete = new Set(indices)
+      const oldGeo = cloud.geometry
+      const oldPos = oldGeo.getAttribute('position')
+      const oldCol = oldGeo.getAttribute('color')
+      const oldCount = oldPos.count
+
+      // Build new arrays without deleted indices
+      const keepIndices = []
+      for (let i = 0; i < oldCount; i++) {
+        if (!toDelete.has(i)) keepIndices.push(i)
+      }
+
+      const newCount = keepIndices.length
+      const newPos = new Float32Array(newCount * 3)
+      const newCol = new Float32Array(newCount * 3)
+
+      for (let j = 0; j < newCount; j++) {
+        const i = keepIndices[j]
+        newPos[j * 3] = oldPos.array[i * 3]
+        newPos[j * 3 + 1] = oldPos.array[i * 3 + 1]
+        newPos[j * 3 + 2] = oldPos.array[i * 3 + 2]
+        if (oldCol) {
+          newCol[j * 3] = oldCol.array[i * 3]
+          newCol[j * 3 + 1] = oldCol.array[i * 3 + 1]
+          newCol[j * 3 + 2] = oldCol.array[i * 3 + 2]
+        }
+      }
+
+      const newGeo = new THREE.BufferGeometry()
+      newGeo.setAttribute('position', new THREE.Float32BufferAttribute(newPos, 3))
+      newGeo.setAttribute('color', new THREE.Float32BufferAttribute(newCol, 3))
+
+      oldGeo.dispose()
+      return { ...cloud, geometry: newGeo, pointCount: newCount }
+    })
+
+    set({ clouds: newClouds, selectedIndices: {}, isDirty: true })
+  },
+
+  paintSelectedPoints: (hexColor) => {
+    const state = get()
+    const entries = Object.entries(state.selectedIndices).filter(([, indices]) => indices.length > 0)
+    if (entries.length === 0) return
+
+    // Convert hex to RGB 0-1
+    const hex = hexColor.replace('#', '')
+    const r = parseInt(hex.substring(0, 2), 16) / 255
+    const g = parseInt(hex.substring(2, 4), 16) / 255
+    const b = parseInt(hex.substring(4, 6), 16) / 255
+
+    for (const [cloudId, indices] of entries) {
+      const cloud = state.clouds.find(c => c.id === cloudId)
+      if (!cloud?.geometry) continue
+      const colorAttr = cloud.geometry.getAttribute('color')
+      if (!colorAttr) continue
+
+      for (const i of indices) {
+        colorAttr.array[i * 3] = r
+        colorAttr.array[i * 3 + 1] = g
+        colorAttr.array[i * 3 + 2] = b
+      }
+      colorAttr.needsUpdate = true
+    }
+
+    set({ isDirty: true })
+  },
+
+  setPaintColor: (color) => set({ paintColor: color }),
+
   clearAll: () => {
     const { clouds } = get()
     for (const c of clouds) {
@@ -410,6 +516,8 @@ const useEditorStore = create((set, get) => ({
       icpRunning: false,
       icpProgress: null,
       overlapVisActive: false,
+      selectedIndices: {},
+      paintColor: '#ff6b6b',
     })
   },
 }))

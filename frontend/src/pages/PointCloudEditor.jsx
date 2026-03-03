@@ -7,6 +7,7 @@ import EditorViewportLayout from '../components/editor/EditorViewportLayout'
 import EditorToolbar from '../components/editor/EditorToolbar'
 import EditorCloudPanel from '../components/editor/EditorCloudPanel'
 import AlignmentPanel from '../components/editor/AlignmentPanel'
+import SelectionPanel from '../components/editor/SelectionPanel'
 import CloudImportModal from '../components/editor/CloudImportModal'
 
 function MobileGuard() {
@@ -61,6 +62,7 @@ export default function PointCloudEditor() {
   const setImportModalOpen = useEditorStore(s => s.setImportModalOpen)
   const alignmentMode = useEditorStore(s => s.alignmentMode)
   const pickedPoints = useEditorStore(s => s.pickedPoints)
+  const selectedIndices = useEditorStore(s => s.selectedIndices)
 
   const [cave, setCave] = useState(null)
   const [authError, setAuthError] = useState(null)
@@ -218,7 +220,10 @@ export default function PointCloudEditor() {
         <EditorToolbar onFitView={handleFitView} />
 
         {/* Center viewport layout */}
-        <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} />
+        <div className="relative flex-1 flex min-h-0">
+          <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} selectedIndices={selectedIndices} />
+          <SelectionPanel />
+        </div>
 
         {/* Right panel — swap based on alignment mode */}
         {alignmentMode ? <AlignmentPanel /> : <EditorCloudPanel />}
