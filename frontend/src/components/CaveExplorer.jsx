@@ -1,6 +1,9 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js'
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 
 const PLAYER_HEIGHT = 1.6
 const PLAYER_RADIUS = 0.3
@@ -15,6 +18,9 @@ const MOUSE_SENSITIVITY = 0.002
 export default function CaveExplorer({ caveId }) {
   const containerRef = useRef(null)
   const cleanupRef = useRef(null)
+  const [viewMode, setViewMode] = useState('points') // 'points' or 'mesh'
+  const [hasMesh, setHasMesh] = useState(false)
+  const viewToggleRef = useRef(null) // called by the toggle button
 
   const init = useCallback((container) => {
     if (!container) return
@@ -87,6 +93,13 @@ export default function CaveExplorer({ caveId }) {
     let flashlightOn = false
     let collisionMeshes = []
     let fallbackFloorY = 0
+
+    // Layer toggle state: store all three representations
+    let pointCloudObjects = []   // THREE.Points added to scene
+    let meshModel = null         // THREE.Group (solid mesh scene)
+    let wireframeObjects = []    // THREE.LineSegments (wireframe edges)
+    let currentMode = 'points'   // 'points' | 'wireframe' | 'mesh'
+    let gridHelper = null        // reference plane (points-only)
 
     const downRay = new THREE.Raycaster()
     const _rayOrigin = new THREE.Vector3()
@@ -179,8 +192,9 @@ export default function CaveExplorer({ caveId }) {
 
     async function loadAll() {
       let spawnData = null
-      let isPointCloud = false
-      let gltf = null
+      let pcGltf = null
+      let meshGltf = null
+      let wireGltf = null
 
       // Load spawn data (try API proxy first, then local paths)
       const spawnPaths = [
@@ -210,25 +224,32 @@ export default function CaveExplorer({ caveId }) {
         )
       }
 
-      // Try loading point cloud GLB (API proxy first, then local path)
       // Cache-bust to pick up editor saves
       const cacheBust = `?t=${Date.now()}`
-      const pcUrls = [
-        ...(caveId ? [`/api/caves/${caveId}/media/cave_pointcloud.glb${cacheBust}`] : []),
-        ...(caveId ? [`/media/caves/${caveId}/cave_pointcloud.glb${cacheBust}`] : []),
-      ]
-      for (const pcUrl of pcUrls) {
-        try {
-          gltf = await loadGlb(pcUrl)
-          isPointCloud = true
-          break
-        } catch {
-          // try next
+
+      // Try loading point cloud GLB
+      if (caveId) {
+        const pcUrls = [
+          `/api/caves/${caveId}/media/cave_pointcloud.glb${cacheBust}`,
+          `/media/caves/${caveId}/cave_pointcloud.glb${cacheBust}`,
+        ]
+        for (const pcUrl of pcUrls) {
+          try { pcGltf = await loadGlb(pcUrl); break } catch { /* try next */ }
         }
       }
 
+      // Try loading mesh + wireframe GLBs (may not exist yet if generation is in progress)
+      if (caveId) {
+        try {
+          meshGltf = await loadGlb(`/api/caves/${caveId}/media/cave_mesh.glb${cacheBust}`)
+        } catch { /* mesh not available */ }
+        try {
+          wireGltf = await loadGlb(`/api/caves/${caveId}/media/cave_wireframe.glb${cacheBust}`)
+        } catch { /* wireframe not available */ }
+      }
+
       // Fallback: try reconstruction API, then hardcoded path
-      if (!gltf && caveId) {
+      if (!meshGltf && caveId) {
         try {
           const res = await fetch(`/api/reconstruction/cave/${caveId}/latest/`)
           if (res.ok) {
@@ -236,22 +257,25 @@ export default function CaveExplorer({ caveId }) {
             const rawUrl = job.mesh_url || job.mesh_file
             if (rawUrl) {
               const meshUrl = rawUrl.startsWith('/') ? rawUrl : new URL(rawUrl).pathname
-              gltf = await loadGlb(meshUrl)
+              meshGltf = await loadGlb(meshUrl)
             }
           }
-        } catch { /* fallback below */ }
+        } catch { /* no mesh */ }
       }
 
-      if (!gltf) {
-        gltf = await loadGlb('/media/reconstruction/textured_mesh.glb')
+      // Must have at least one
+      if (!pcGltf && !meshGltf) {
+        try { meshGltf = await loadGlb('/media/reconstruction/textured_mesh.glb') } catch { /* nothing */ }
       }
 
-      const model = gltf.scene
+      if (!pcGltf && !meshGltf) {
+        console.error('CaveExplorer: no point cloud or mesh available')
+        return
+      }
 
-      if (isPointCloud) {
-        // Extract geometry and build THREE.Points manually
-        let pointsAdded = false
-        model.traverse(child => {
+      // ── Prepare point cloud objects ──
+      if (pcGltf) {
+        pcGltf.scene.traverse(child => {
           if (child.geometry) {
             const geo = child.geometry
             if (!geo.getAttribute('color')) {
@@ -259,80 +283,144 @@ export default function CaveExplorer({ caveId }) {
               const colors = new Float32Array(count * 3).fill(0.7)
               geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
             }
-            scene.add(new THREE.Points(geo, pointMaterial))
-            pointsAdded = true
+            const pts = new THREE.Points(geo, pointMaterial)
+            pointCloudObjects.push(pts)
           }
         })
-        // No collision for point clouds — use noclip by default
-        noclip = true
-        ambient.intensity = 0.0
-        scene.fog = null
-      } else {
-        // Mesh: standard material setup
-        model.traverse(child => {
+      }
+
+      // ── Prepare mesh model (solid) ──
+      if (meshGltf) {
+        meshModel = meshGltf.scene
+        meshModel.traverse(child => {
           if (child.isMesh) {
             child.castShadow = true
             child.receiveShadow = true
             if (child.material) {
+              child.material.vertexColors = true
               child.material.roughness = 0.85
               child.material.metalness = 0.05
               child.material.side = THREE.DoubleSide
+              child.material.needsUpdate = true
             }
           }
         })
-        model.rotation.x = -Math.PI / 2
+        meshModel.updateMatrixWorld(true)
+        setHasMesh(true)
       }
 
-      if (!isPointCloud) {
-        model.updateMatrixWorld(true)
-        scene.add(model)
-      }
+      // ── Prepare wireframe from pre-built GLB ──
+      if (wireGltf) {
+        wireGltf.scene.traverse(child => {
+          if (child.isLine || child.isLineSegments || child.geometry) {
+            const geo = child.geometry
+            if (!geo) return
+            const posAttr = geo.getAttribute('position')
+            if (!posAttr) return
 
-      collisionMeshes = []
-      if (!isPointCloud) {
-        model.traverse(child => {
-          if (child.isMesh) collisionMeshes.push(child)
+            const positions = new Float32Array(posAttr.count * 3)
+            for (let i = 0; i < posAttr.count; i++) {
+              positions[i * 3] = posAttr.getX(i)
+              positions[i * 3 + 1] = posAttr.getY(i)
+              positions[i * 3 + 2] = posAttr.getZ(i)
+            }
+
+            const lineGeo = new LineSegmentsGeometry()
+            lineGeo.setPositions(positions)
+
+            const wireMat = new LineMaterial({
+              color: 0x00e5ff,
+              linewidth: 2,
+              transparent: true,
+              opacity: 0.85,
+              resolution: new THREE.Vector2(container.clientWidth, container.clientHeight),
+            })
+            wireframeObjects.push(new LineSegments2(lineGeo, wireMat))
+          }
         })
+        if (!meshGltf) setHasMesh(true)
       }
 
-      // Compute bounds from scene objects (point cloud already added above with rotation)
-      const boundsTarget = isPointCloud ? scene : model
+      // ── Function to switch between modes ──
+      function activateMode(mode) {
+        // Remove all objects
+        for (const obj of pointCloudObjects) scene.remove(obj)
+        if (meshModel) scene.remove(meshModel)
+        for (const obj of wireframeObjects) scene.remove(obj)
+        if (gridHelper) scene.remove(gridHelper)
+        collisionMeshes = []
+
+        if (mode === 'mesh' && meshModel) {
+          // Solid mesh with headlamp lighting
+          scene.add(meshModel)
+          meshModel.traverse(child => {
+            if (child.isMesh) collisionMeshes.push(child)
+          })
+          noclip = true
+          ambient.intensity = 0.3  // Low ambient — flashlight provides depth
+          flashlight.visible = true
+          flashlightOn = true
+          scene.fog = new THREE.FogExp2(0x050508, 0.04)
+          currentMode = 'mesh'
+        } else if (mode === 'wireframe' && wireframeObjects.length > 0) {
+          // Wireframe edges only
+          for (const obj of wireframeObjects) scene.add(obj)
+          noclip = true
+          ambient.intensity = 1.0
+          scene.fog = null
+          currentMode = 'wireframe'
+        } else {
+          // Point cloud mode
+          for (const obj of pointCloudObjects) scene.add(obj)
+          if (gridHelper) scene.add(gridHelper)
+          noclip = true
+          ambient.intensity = 0.0
+          scene.fog = null
+          currentMode = 'points'
+        }
+      }
+
+      // Expose toggle for the button
+      viewToggleRef.current = (mode) => {
+        activateMode(mode)
+        setViewMode(mode)
+      }
+
+      // Default: show point cloud if available, otherwise mesh
+      const startMode = pointCloudObjects.length > 0 ? 'points' : 'mesh'
+      activateMode(startMode)
+      setViewMode(startMode)
+
+      // Compute bounds
+      const boundsTarget = currentMode === 'points' ? scene : meshModel
       const box = new THREE.Box3().setFromObject(boundsTarget)
       const center = box.getCenter(new THREE.Vector3())
       fallbackFloorY = box.min.y - 0.5
 
-      // ── Horizontal reference plane (oriented to true horizontal via gravity correction) ──
-      if (isPointCloud) {
-        // Use a reasonable plane size (based on keyframe extent, not outlier-inflated bounds)
+      // ── Horizontal reference plane (point cloud mode) ──
+      if (pointCloudObjects.length > 0) {
         const planeSize = 60
-
-        // Determine true up direction
         const hasGravity = !!spawnData?.gravity_correction?.true_up
         const trueUp = hasGravity
           ? new THREE.Vector3(...spawnData.gravity_correction.true_up).normalize()
           : new THREE.Vector3(0, 1, 0)
 
-        console.log('Reference plane — gravity data:', hasGravity, 'trueUp:', trueUp.toArray(), 'center:', center.toArray())
-
-        // Grid — GridHelper is already horizontal (XZ plane, normal = +Y)
-        // Rotate so its +Y aligns with trueUp
-        const gridHelper = new THREE.GridHelper(planeSize, 30, 0x00ccff, 0x00ccff)
+        gridHelper = new THREE.GridHelper(planeSize, 30, 0x00ccff, 0x00ccff)
         gridHelper.material.transparent = true
         gridHelper.material.opacity = 0.15
         gridHelper.position.copy(center)
         gridHelper.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), trueUp)
-        scene.add(gridHelper)
+        if (currentMode === 'points') scene.add(gridHelper)
       }
 
-      if (isPointCloud) {
-        // Point cloud: use raw SLAM coordinates (no coord swap — data is Y-up compatible)
+      // ── Camera spawn ──
+      if (currentMode === 'points') {
         if (spawnData) {
           const p = spawnData.spawn.position
           camera.position.set(p[0], p[1], p[2])
         } else {
           camera.position.copy(center)
         }
-        // Face toward center of cloud
         camera.lookAt(center)
       } else {
         if (spawnData) {
@@ -348,7 +436,7 @@ export default function CaveExplorer({ caveId }) {
         const floorY = findFloor(camera.position)
         camera.position.y = floorY + PLAYER_HEIGHT
       }
-      onGround = !isPointCloud
+      onGround = currentMode !== 'points'
       verticalVelocity = 0
     }
 
@@ -559,6 +647,10 @@ export default function CaveExplorer({ caveId }) {
       camera.aspect = w / h
       camera.updateProjectionMatrix()
       renderer.setSize(w, h)
+      // Update fat line resolution
+      for (const obj of wireframeObjects) {
+        if (obj.material?.resolution) obj.material.resolution.set(w, h)
+      }
     })
     ro.observe(container)
 
@@ -601,6 +693,32 @@ export default function CaveExplorer({ caveId }) {
       >
         Click to enter — WASD move, Q/E roll, Mouse look, F flashlight, V noclip
       </div>
+
+      {/* Layer toggle: Points / Wireframe / Mesh */}
+      {hasMesh && (
+        <div style={{
+          position: 'absolute', top: 12, right: 12, zIndex: 10,
+          display: 'flex', gap: 2, background: 'rgba(0,0,0,0.7)',
+          borderRadius: 6, padding: 2, border: '1px solid rgba(0,229,255,0.3)',
+        }}>
+          {['points', 'wireframe', 'mesh'].map(mode => (
+            <button
+              key={mode}
+              onClick={(e) => { e.stopPropagation(); viewToggleRef.current?.(mode) }}
+              style={{
+                padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer',
+                fontSize: 13, fontFamily: 'Ubuntu, sans-serif', fontWeight: 600,
+                background: viewMode === mode ? 'rgba(0,229,255,0.25)' : 'transparent',
+                color: viewMode === mode ? '#00e5ff' : '#8892a4',
+                transition: 'all 0.2s',
+                textTransform: 'capitalize',
+              }}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

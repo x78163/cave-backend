@@ -601,7 +601,7 @@ def cave_media_file(request, cave_id, filename):
     from django.core.files.storage import default_storage
     from django.http import FileResponse, HttpResponseNotFound
 
-    ALLOWED = {'cave_pointcloud.glb', 'spawn.json', 'trajectory.json'}
+    ALLOWED = {'cave_pointcloud.glb', 'cave_mesh.glb', 'cave_wireframe.glb', 'spawn.json', 'trajectory.json'}
     is_glb = filename.endswith('.glb')
     if filename not in ALLOWED and not is_glb:
         return HttpResponseNotFound()
@@ -1738,6 +1738,15 @@ def _publish_merged_glb(request, cave, cave_id):
     if not cave.has_map:
         cave.has_map = True
         cave.save(update_fields=['has_map', 'updated_at'])
+
+    # Trigger background mesh generation
+    import threading
+    from reconstruction.mesh_from_glb import generate_mesh_for_cave
+    threading.Thread(
+        target=generate_mesh_for_cave,
+        args=(str(cave_id),),
+        daemon=True,
+    ).start()
 
 
 def _delete_project_geometry_files(cave_id, project_id, project_state):

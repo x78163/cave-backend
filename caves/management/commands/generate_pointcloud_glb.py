@@ -481,6 +481,15 @@ class Command(BaseCommand):
             cave.save(update_fields=['has_map', 'updated_at'])
             self.stdout.write('Set has_map=True')
 
+        # Generate mesh from point cloud
+        self.stdout.write('Generating mesh from point cloud...')
+        try:
+            from reconstruction.mesh_from_glb import generate_mesh_for_cave
+            generate_mesh_for_cave(str(cave.id))
+            self.stdout.write('Mesh generation complete.')
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f'Mesh generation failed: {e}'))
+
         self.stdout.write(self.style.SUCCESS('Done'))
 
 
