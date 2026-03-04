@@ -615,3 +615,27 @@ class SurfaceAnnotation(models.Model):
 
     def __str__(self):
         return f'{self.label or "Polygon"} — {self.cave.name}'
+
+
+class EditorProject(models.Model):
+    """A saved 3D Point Cloud Editor project associated with a cave."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cave = models.ForeignKey(
+        'Cave', on_delete=models.CASCADE, related_name='editor_projects'
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='editor_projects',
+    )
+    name = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # Serialized cloud metadata (transforms, visibility, source refs, geometry file names)
+    project_state = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'{self.name} — {self.cave.name}'

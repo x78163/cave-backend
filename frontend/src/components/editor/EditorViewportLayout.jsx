@@ -108,7 +108,7 @@ function DragRectOverlay({ rect }) {
   )
 }
 
-const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, pickedPoints, selectedIndices }, ref) {
+const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, pickedPoints, selectedIndices, trajectory, pois }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const stateRef = useRef(null) // holds all Three.js state
@@ -229,7 +229,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
     // Key tracking for WASD fly mode
     const keysDown = new Set()
 
-    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown, pickMarkers: [], stashedColors: null, selectionOverlay: null }
+    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown, pickMarkers: [], stashedColors: null, selectionOverlay: null, trajectoryLine: null, poiMarkers: [] }
 
     // Resize observer
     const ro = new ResizeObserver(entries => {
@@ -371,6 +371,18 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
         stateRef.current.selectionOverlay.geometry.dispose()
         stateRef.current.selectionOverlay.material.dispose()
       }
+      // Cleanup trajectory line
+      if (stateRef.current?.trajectoryLine) {
+        scene.remove(stateRef.current.trajectoryLine)
+        stateRef.current.trajectoryLine.geometry.dispose()
+        stateRef.current.trajectoryLine.material.dispose()
+      }
+      // Cleanup POI markers
+      for (const obj of (stateRef.current?.poiMarkers || [])) {
+        scene.remove(obj)
+        if (obj.geometry) obj.geometry.dispose()
+        if (obj.material) obj.material.dispose()
+      }
       stateRef.current = null
     }
   }, []) // mount once
@@ -403,6 +415,10 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
         // Update existing object in-place
         pts.visible = cloud.visible
         pts.material.color.set(cloud.color)
+        // Update geometry if it changed (e.g. after point deletion)
+        if (pts.geometry !== cloud.geometry) {
+          pts.geometry = cloud.geometry
+        }
         // Skip transform update if this object is actively being dragged
         const isDragging = (s.transformControlsArr || []).some(tc => tc.object === pts && tc.dragging)
         if (!isDragging) {
@@ -815,6 +831,65 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
     }
   }, [activeTool])
 
+  // ── POI placement click handler ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+    if (activeTool !== 'poi') return
+
+    const raycaster = new THREE.Raycaster()
+    raycaster.params.Points.threshold = 0.3
+
+    function handlePoiClick(vpIndex, e) {
+      const state = useEditorStore.getState()
+      if (state.activeTool !== 'poi') return
+
+      const el = vpDivRefs.current[vpIndex]
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      )
+
+      const cam = s.cameras[vpIndex]
+      raycaster.setFromCamera(ndc, cam)
+
+      // Raycast against all visible clouds
+      let closestHit = null
+      for (const pts of s.pointObjects) {
+        if (!pts.visible) continue
+        const hits = raycaster.intersectObject(pts)
+        if (hits.length > 0) {
+          if (!closestHit || hits[0].distance < closestHit.distance) {
+            closestHit = hits[0]
+          }
+        }
+      }
+
+      if (closestHit) {
+        state.addPoi(closestHit.point)
+      }
+    }
+
+    const handlers = []
+    for (let i = 0; i < 4; i++) {
+      const el = vpDivRefs.current[i]
+      if (!el) continue
+      const idx = i
+      const handler = (e) => handlePoiClick(idx, e)
+      el.addEventListener('click', handler)
+      handlers.push([el, handler])
+    }
+
+    return () => {
+      for (const [el, handler] of handlers) {
+        el.removeEventListener('click', handler)
+      }
+    }
+  }, [activeTool])
+
   // ── Sync pick markers to scene ──
   useEffect(() => {
     const s = stateRef.current
@@ -877,6 +952,103 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
       }
     }
   }, [pickedPoints, sourceCloudId, targetCloudId])
+
+  // ── Sync trajectory line to scene ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+
+    // Remove old trajectory
+    if (s.trajectoryLine) {
+      s.scene.remove(s.trajectoryLine)
+      s.trajectoryLine.geometry.dispose()
+      s.trajectoryLine.material.dispose()
+      s.trajectoryLine = null
+    }
+
+    if (!trajectory?.positions || trajectory.positions.length < 2) return
+    const visible = useEditorStore.getState().trajectoryVisible
+
+    const points = trajectory.positions.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+    const geo = new THREE.BufferGeometry().setFromPoints(points)
+    const mat = new THREE.LineBasicMaterial({ color: 0xfbbf24, linewidth: 2, depthTest: false })
+    const line = new THREE.Line(geo, mat)
+    line.renderOrder = 998
+    line.visible = visible
+    s.scene.add(line)
+    s.trajectoryLine = line
+  }, [trajectory])
+
+  // ── Toggle trajectory visibility ──
+  const trajectoryVisible = useEditorStore(s => s.trajectoryVisible)
+  useEffect(() => {
+    const s = stateRef.current
+    if (s?.trajectoryLine) s.trajectoryLine.visible = trajectoryVisible
+  }, [trajectoryVisible])
+
+  // ── Sync POI markers to scene ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+
+    // Remove old markers
+    for (const obj of s.poiMarkers) {
+      s.scene.remove(obj)
+      if (obj.geometry) obj.geometry.dispose()
+      if (obj.material) obj.material.dispose()
+    }
+    s.poiMarkers = []
+
+    if (!pois || pois.length === 0) return
+
+    const selectedPoiId = useEditorStore.getState().selectedPoiId
+
+    for (const poi of pois) {
+      // Sphere marker
+      const geo = new THREE.SphereGeometry(0.25, 12, 12)
+      const mat = new THREE.MeshBasicMaterial({
+        color: poi.color || '#f472b6',
+        depthTest: false,
+        transparent: true,
+        opacity: poi.id === selectedPoiId ? 1.0 : 0.8,
+      })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.position.set(poi.position[0], poi.position[1], poi.position[2])
+      mesh.renderOrder = 997
+      mesh.userData.poiId = poi.id
+      s.scene.add(mesh)
+      s.poiMarkers.push(mesh)
+
+      // Vertical line from marker downward for visibility
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(poi.position[0], poi.position[1], poi.position[2]),
+        new THREE.Vector3(poi.position[0], poi.position[1] - 1.5, poi.position[2]),
+      ])
+      const lineMat = new THREE.LineBasicMaterial({ color: poi.color || '#f472b6', depthTest: false })
+      const line = new THREE.Line(lineGeo, lineMat)
+      line.renderOrder = 997
+      s.scene.add(line)
+      s.poiMarkers.push(line)
+
+      // Selection ring for selected POI
+      if (poi.id === selectedPoiId) {
+        const ringGeo = new THREE.RingGeometry(0.35, 0.45, 24)
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0x00e5ff,
+          side: THREE.DoubleSide,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.8,
+        })
+        const ring = new THREE.Mesh(ringGeo, ringMat)
+        ring.position.set(poi.position[0], poi.position[1], poi.position[2])
+        ring.renderOrder = 998
+        // Always face camera — billboard in render loop isn't needed for basic visibility
+        s.scene.add(ring)
+        s.poiMarkers.push(ring)
+      }
+    }
+  }, [pois])
 
   // ── Overlap visualization (distance-based coloring) ──
   useEffect(() => {

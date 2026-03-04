@@ -1,18 +1,21 @@
 """
-Generate a gravity-corrected point cloud GLB from SLAM keyframe data.
+Generate a point cloud GLB for the 3D explorer.
 
-Uses barometric altitude from the QWIIC IMU to correct SLAM vertical drift,
-then exports a binary glTF 2.0 (.glb) point cloud for the 3D explorer.
-
-Correction strategy:
-  1. Global tilt correction: best-fit rotation to align SLAM Y with barometric
-     vertical change along the travel axis
-  2. Per-keyframe residual correction: interpolate remaining Y error between
-     keyframes and apply to each point
+Supports two source modes:
+  1. Keyframe mode (--source-dir): loads per-keyframe .npy clouds + JSON metadata,
+     applies gravity correction using barometric altitude
+  2. PCD mode (--pcd): loads a SLAM-optimized .pcd file directly (already in world
+     coordinates with loop closure applied) — no gravity correction needed
 
 Usage:
+    # From keyframes with gravity correction:
     python manage.py generate_pointcloud_glb \\
         --source-dir "/path/to/keyframe/session" \\
+        --cave "Big Cave"
+
+    # From PCD file (SLAM-optimized):
+    python manage.py generate_pointcloud_glb \\
+        --pcd "/path/to/slam_map.pcd" \\
         --cave "Big Cave"
 """
 
@@ -26,6 +29,26 @@ import numpy as np
 from django.core.management.base import BaseCommand
 
 from caves.models import Cave
+
+
+def load_pcd_file(pcd_path):
+    """
+    Load a .pcd file using Open3D and extract positions + colors.
+    PCD files from SLAM are already in world coordinates.
+    Returns (positions_Nx3, colors_Nx3) as float32 arrays.
+    """
+    import open3d as o3d
+
+    pcd = o3d.io.read_point_cloud(pcd_path)
+    positions = np.asarray(pcd.points, dtype=np.float32)
+
+    if pcd.has_colors():
+        colors = np.asarray(pcd.colors, dtype=np.float32)
+    else:
+        # No colors — use grayscale based on intensity if available, else default
+        colors = np.full((len(positions), 3), 0.7, dtype=np.float32)
+
+    return positions, colors
 
 
 def load_keyframes(source_dir):
@@ -293,20 +316,24 @@ def generate_spawn_json(keyframes, R, residuals):
 
 
 class Command(BaseCommand):
-    help = 'Generate gravity-corrected point cloud GLB from SLAM keyframe data'
+    help = 'Generate point cloud GLB from SLAM keyframe data or PCD file'
 
     def add_arguments(self, parser):
-        parser.add_argument('--source-dir', required=True,
+        source = parser.add_mutually_exclusive_group(required=True)
+        source.add_argument('--source-dir',
                             help='Path to keyframe session directory')
+        source.add_argument('--pcd',
+                            help='Path to .pcd file (SLAM-optimized, already in world coords)')
         parser.add_argument('--cave', required=True,
                             help='Cave name or UUID')
+        parser.add_argument('--keyframe-dir',
+                            help='Path to keyframe directory for trajectory (used with --pcd)')
         parser.add_argument('--no-correction', action='store_true',
-                            help='Skip gravity correction (raw SLAM coordinates)')
+                            help='Skip gravity correction (keyframe mode only)')
         parser.add_argument('--downsample', type=float, default=0,
                             help='Voxel size for downsampling (0 = no downsampling)')
 
     def handle(self, *args, **options):
-        source_dir = options['source_dir']
         cave_query = options['cave']
 
         # Find cave
@@ -321,47 +348,60 @@ class Command(BaseCommand):
             return
 
         self.stdout.write(f'Cave: {cave.name} ({cave.id})')
-        self.stdout.write(f'Source: {source_dir}')
 
-        # Load keyframes
-        keyframes = load_keyframes(source_dir)
-        self.stdout.write(f'Loaded {len(keyframes)} keyframes')
-
-        if not keyframes:
-            self.stderr.write('No keyframes found')
-            return
-
-        # Compute gravity correction
-        if options['no_correction']:
-            R = np.eye(3)
-            residuals = np.zeros(len(keyframes))
-            self.stdout.write('Gravity correction: DISABLED')
+        if options['pcd']:
+            # ── PCD mode: load directly, no gravity correction needed ──
+            pcd_path = options['pcd']
+            self.stdout.write(f'Source PCD: {pcd_path}')
+            self.stdout.write('Loading PCD file...')
+            positions, colors = load_pcd_file(pcd_path)
+            self.stdout.write(f'Total points: {len(positions):,}')
+            # Optionally load keyframes for trajectory
+            if options.get('keyframe_dir'):
+                keyframes = load_keyframes(options['keyframe_dir'])
+                self.stdout.write(f'Loaded {len(keyframes)} keyframes for trajectory')
+            else:
+                keyframes = None
         else:
-            R, residuals = compute_gravity_correction(keyframes)
+            # ── Keyframe mode: load keyframes + apply gravity correction ──
+            source_dir = options['source_dir']
+            self.stdout.write(f'Source: {source_dir}')
 
-            # Report correction stats
-            positions = np.array([kf['position'] for kf in keyframes])
-            baro_delta = np.array([kf['relative_altitude'] for kf in keyframes])
-            baro_delta = baro_delta - baro_delta[0]
+            keyframes = load_keyframes(source_dir)
+            self.stdout.write(f'Loaded {len(keyframes)} keyframes')
 
-            slam_y = positions[:, 1]
-            rotated = (R @ positions.T).T
-            corrected_y = rotated[:, 1] + residuals
+            if not keyframes:
+                self.stderr.write('No keyframes found')
+                return
 
-            theta = math.acos(np.clip(R[0, 0], -1, 1))
-            # More accurate: extract angle from rotation matrix
-            angle = math.acos(np.clip((np.trace(R) - 1) / 2, -1, 1))
+            # Compute gravity correction
+            if options['no_correction']:
+                R = np.eye(3)
+                residuals = np.zeros(len(keyframes))
+                self.stdout.write('Gravity correction: DISABLED')
+            else:
+                R, residuals = compute_gravity_correction(keyframes)
 
-            self.stdout.write(f'Global tilt correction: {math.degrees(angle):.1f}°')
-            self.stdout.write(f'SLAM Y range: {slam_y.min():.1f} to {slam_y.max():.1f}m')
-            self.stdout.write(f'Baro delta range: {baro_delta.min():.1f} to {baro_delta.max():.1f}m')
-            self.stdout.write(f'RMS before correction: {np.sqrt(np.mean((slam_y - baro_delta)**2)):.2f}m')
-            self.stdout.write(f'RMS after correction:  {np.sqrt(np.mean((corrected_y - baro_delta)**2)):.2f}m')
+                # Report correction stats
+                positions = np.array([kf['position'] for kf in keyframes])
+                baro_delta = np.array([kf['relative_altitude'] for kf in keyframes])
+                baro_delta = baro_delta - baro_delta[0]
 
-        # Load and correct points
-        self.stdout.write('Loading point clouds...')
-        positions, colors = load_and_correct_points(source_dir, keyframes, R, residuals)
-        self.stdout.write(f'Total points: {len(positions):,}')
+                slam_y = positions[:, 1]
+                rotated = (R @ positions.T).T
+                corrected_y = rotated[:, 1] + residuals
+
+                angle = math.acos(np.clip((np.trace(R) - 1) / 2, -1, 1))
+
+                self.stdout.write(f'Global tilt correction: {math.degrees(angle):.1f}°')
+                self.stdout.write(f'SLAM Y range: {slam_y.min():.1f} to {slam_y.max():.1f}m')
+                self.stdout.write(f'Baro delta range: {baro_delta.min():.1f} to {baro_delta.max():.1f}m')
+                self.stdout.write(f'RMS before correction: {np.sqrt(np.mean((slam_y - baro_delta)**2)):.2f}m')
+                self.stdout.write(f'RMS after correction:  {np.sqrt(np.mean((corrected_y - baro_delta)**2)):.2f}m')
+
+            self.stdout.write('Loading point clouds...')
+            positions, colors = load_and_correct_points(source_dir, keyframes, R, residuals)
+            self.stdout.write(f'Total points: {len(positions):,}')
 
         # Optional downsampling
         if options['downsample'] > 0:
@@ -389,14 +429,51 @@ class Command(BaseCommand):
         default_storage.save(glb_path, ContentFile(glb_data))
         self.stdout.write(f'Saved: {glb_path}')
 
-        # Generate corrected spawn.json
-        spawn_data = generate_spawn_json(keyframes, R, residuals)
+        # Generate spawn.json
+        if keyframes:
+            R_spawn = R if not options['no_correction'] else np.eye(3)
+            res_spawn = residuals if not options['no_correction'] else np.zeros(len(keyframes))
+            spawn_data = generate_spawn_json(keyframes, R_spawn, res_spawn)
+        else:
+            # PCD mode: spawn at centroid of point cloud
+            centroid = positions.mean(axis=0).tolist()
+            spawn_data = {
+                'spawn': {
+                    'position': centroid,
+                    'orientation': [0, 0, 0, 1],  # identity quaternion
+                }
+            }
+
         spawn_json = json.dumps(spawn_data)
         spawn_path = f'{cave_dir}/spawn.json'
         if default_storage.exists(spawn_path):
             default_storage.delete(spawn_path)
         default_storage.save(spawn_path, ContentFile(spawn_json.encode()))
         self.stdout.write(f'Saved: {spawn_path}')
+
+        # Generate trajectory.json from keyframe positions
+        if keyframes:
+            if options.get('pcd'):
+                # PCD mode: keyframe positions are raw SLAM coords (no gravity correction)
+                traj_positions = [kf['position'] for kf in keyframes]
+            else:
+                # Keyframe mode: apply gravity correction + residuals
+                kf_positions = np.array([kf['position'] for kf in keyframes])
+                corrected = (R @ kf_positions.T).T
+                for i in range(len(keyframes)):
+                    corrected[i, 1] += residuals[i]
+                traj_positions = corrected.tolist()
+
+            trajectory_data = {
+                'positions': traj_positions,
+                'keyframe_ids': [kf['keyframe_id'] for kf in keyframes],
+            }
+            traj_json = json.dumps(trajectory_data)
+            traj_path = f'{cave_dir}/trajectory.json'
+            if default_storage.exists(traj_path):
+                default_storage.delete(traj_path)
+            default_storage.save(traj_path, ContentFile(traj_json.encode()))
+            self.stdout.write(f'Saved: {traj_path} ({len(keyframes)} points)')
 
         # Update cave has_map flag
         if not cave.has_map:

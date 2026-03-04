@@ -923,7 +923,7 @@ This project includes:
   - Profile.jsx: "My Events" tab; UserProfilePage.jsx: "Events" tab
   - PostCard.jsx: inline event pill rendering with color-coded capsule + cave pill ("Created event [pill] at [cave]")
   - ChatMessages.jsx: `[event:/events/{id}|{name}]` token rendered as clickable event pills
-- 3D Point Cloud Editor (`/editor` or `/editor/:caveId`) — map stitching tool (Phases 1-5 complete)
+- 3D Point Cloud Editor (`/editor` or `/editor/:caveId`) — map stitching tool (Phases 1-7 complete)
   - Quad-viewport layout: Top (XZ), Free Camera, Front (XY), Profile (ZY) with resizable dividers
   - Single WebGL renderer with scissor test, 4 cameras per frame
   - Multi-format import: GLB, PLY, PCD via Three.js loaders (file upload + cross-cave import)
@@ -938,6 +938,10 @@ This project includes:
   - Point deletion (Del/Backspace): geometry rebuild without selected indices
   - Point painting: color presets + custom picker, modifies vertex colors in-place
   - SelectionPanel: floating bottom bar with point count, paint colors, delete/clear buttons
+  - Save/Load projects: FormData multipart upload, auto-publish merged GLB to explorer, cache-busting
+  - Trajectory line: yellow THREE.Line from keyframe positions, toggle visibility in cloud panel
+  - POI tool (I key): place POIs on point cloud via raycast, 12 types matching database, 3D sphere markers
+  - POI database sync: import existing cave POIs (SLAM coords) on load, sync changes back on save (POST/PATCH/DELETE)
   - Zustand store (`editorStore.js`) for all state
   - Route `/editor`, `/editor/:caveId` (lazy-loaded)
 
@@ -1000,7 +1004,10 @@ This project includes:
 | `frontend/src/components/editor/AlignmentPanel.jsx` | Alignment sidebar: cloud selectors, point pairs, N-point registration, ICP fine-tune, overlap visualization |
 | `frontend/src/components/editor/SelectionPanel.jsx` | Floating bottom bar: selection count, paint color presets + custom picker, delete with confirmation, clear |
 | `frontend/src/components/editor/CloudImportModal.jsx` | Two-tab import: Upload File (GLB/PLY/PCD drag-drop) + From Cave (search caves with 3D maps) |
+| `frontend/src/components/editor/SaveProjectModal.jsx` | Project save dialog: name input, update vs save-as |
+| `frontend/src/components/editor/LoadProjectModal.jsx` | Project load dialog: list saved projects, load/delete |
 | `frontend/src/utils/alignmentMath.js` | Pure math: 3x3 SVD (Jacobi), Procrustes rigid registration, KD-tree, ICP, downsample |
+| `caves/management/commands/generate_pointcloud_glb.py` | PCD/keyframe → GLB conversion, trajectory.json generation |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
 | `survey/slam_survey.py` | SLAM-to-survey conversion: station selection, 2D raycasting for LRUD, lead detection, multi-level merging |
 | `survey/models.py` | CaveSurvey (source: manual/slam), SurveyStation, SurveyShot models |
@@ -1064,6 +1071,7 @@ This project includes:
 - 0016: public_land_name, public_land_type, public_land_owner, public_land_access on Cave (PAD-US)
 - 0017: SurfaceAnnotation model (polygon overlays on surface map)
 - 0018: Increase tpad_link max_length to 500 (PostgreSQL compatibility)
+- 0019: EditorProject model (UUID PK, cave FK, owner FK, name, project_state JSONField)
 
 ### Migrations (mapping app)
 - 0001: Initial PointOfInterest model

@@ -54,6 +54,13 @@ const PICK_TOOL = { id: 'pick', label: 'Pick Points', key: 'P', icon: (
   </svg>
 )}
 
+const POI_TOOL = { id: 'poi', label: 'Place POI', key: 'I', icon: (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+    <circle cx="12" cy="9" r="2.5" />
+  </svg>
+)}
+
 const FLY_MODE = { id: 'flyMode', label: 'Fly Mode (WASD)', key: 'G', icon: (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
     <circle cx="12" cy="12" r="2" />
@@ -156,6 +163,13 @@ export default function EditorToolbar({ onFitView }) {
         return
       }
 
+      // POI tool
+      if (key === POI_TOOL.key) {
+        e.preventDefault()
+        setActiveTool('poi')
+        return
+      }
+
       // Viewport tools
       const tool = TOOLS.find(t => t.key === key)
       if (tool) {
@@ -255,6 +269,20 @@ export default function EditorToolbar({ onFitView }) {
         }}
       >
         {BOX_SELECT.icon}
+      </button>
+
+      {/* POI tool */}
+      <button
+        onClick={() => setActiveTool('poi')}
+        title={`${POI_TOOL.label} (${POI_TOOL.key})`}
+        className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+        style={{
+          background: activeTool === 'poi' ? 'rgba(244,114,182,0.15)' : 'transparent',
+          color: activeTool === 'poi' ? '#f472b6' : 'var(--cyber-text-dim)',
+          border: activeTool === 'poi' ? '1px solid rgba(244,114,182,0.3)' : '1px solid transparent',
+        }}
+      >
+        {POI_TOOL.icon}
       </button>
 
       {/* Fly Mode toggle */}

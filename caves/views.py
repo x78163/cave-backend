@@ -20,6 +20,7 @@ from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
     SurveyMap, CaveDocument, CaveVideoLink, SurfaceAnnotation,
+    EditorProject,
 )
 from .serializers import (
     CaveListSerializer, CaveDetailSerializer,
@@ -28,7 +29,7 @@ from .serializers import (
     CavePermissionSerializer, CaveShareLinkSerializer,
     LandOwnerSerializer, CaveRequestSerializer,
     SurveyMapSerializer, CaveDocumentSerializer, CaveVideoLinkSerializer,
-    SurfaceAnnotationSerializer,
+    SurfaceAnnotationSerializer, EditorProjectSerializer,
 )
 
 
@@ -600,8 +601,9 @@ def cave_media_file(request, cave_id, filename):
     from django.core.files.storage import default_storage
     from django.http import FileResponse, HttpResponseNotFound
 
-    ALLOWED = {'cave_pointcloud.glb', 'spawn.json'}
-    if filename not in ALLOWED:
+    ALLOWED = {'cave_pointcloud.glb', 'spawn.json', 'trajectory.json'}
+    is_glb = filename.endswith('.glb')
+    if filename not in ALLOWED and not is_glb:
         return HttpResponseNotFound()
 
     path = f'caves/{cave_id}/{filename}'
@@ -609,11 +611,12 @@ def cave_media_file(request, cave_id, filename):
         return HttpResponseNotFound()
 
     content_types = {
-        'cave_pointcloud.glb': 'model/gltf-binary',
         'spawn.json': 'application/json',
+        'trajectory.json': 'application/json',
     }
     f = default_storage.open(path, 'rb')
-    return FileResponse(f, content_type=content_types.get(filename, 'application/octet-stream'))
+    ct = content_types.get(filename, 'model/gltf-binary' if is_glb else 'application/octet-stream')
+    return FileResponse(f, content_type=ct)
 
 
 @api_view(['GET'])
@@ -1577,3 +1580,191 @@ def annotation_detail(request, cave_id, annotation_id):
 
     serializer.save(area_sqm=area)
     return Response(SurfaceAnnotationSerializer(annotation).data)
+
+
+# ── Editor Projects ──────────────────────────────────────────────
+
+@api_view(['GET', 'POST'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def editor_project_list_create(request, cave_id):
+    """List or create editor projects for a cave."""
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    is_owner = request.user.id == cave.owner_id or request.user.is_staff
+    if not is_owner:
+        return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        projects = EditorProject.objects.filter(cave=cave)
+        serializer = EditorProjectSerializer(projects, many=True)
+        return Response(serializer.data)
+
+    # POST — create new project
+    from django.core.files.storage import default_storage
+    from django.core.files.base import ContentFile
+
+    name = request.data.get('name', '').strip()
+    if not name:
+        return Response({'error': 'Name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    state_json = request.data.get('project_state', '{}')
+    if isinstance(state_json, str):
+        try:
+            project_state = json.loads(state_json)
+        except json.JSONDecodeError:
+            return Response({'error': 'Invalid project_state JSON'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        project_state = state_json
+
+    project = EditorProject.objects.create(
+        cave=cave,
+        owner=request.user,
+        name=name,
+        project_state=project_state,
+    )
+
+    # Save geometry files
+    _save_project_geometry_files(request, cave_id, project.id, project_state)
+
+    # Publish merged GLB to cave explorer if included
+    _publish_merged_glb(request, cave, cave_id)
+
+    serializer = EditorProjectSerializer(project)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def editor_project_detail(request, cave_id, project_id):
+    """Get, update, or delete an editor project."""
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        project = EditorProject.objects.get(id=project_id, cave=cave)
+    except EditorProject.DoesNotExist:
+        return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    is_owner = request.user.id == cave.owner_id or request.user.is_staff
+    if not is_owner:
+        return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        serializer = EditorProjectSerializer(project)
+        return Response(serializer.data)
+
+    if request.method == 'DELETE':
+        # Cleanup geometry files
+        _delete_project_geometry_files(cave_id, project.id, project.project_state)
+        project.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH — update project
+    from django.core.files.storage import default_storage
+    from django.core.files.base import ContentFile
+
+    name = request.data.get('name')
+    if name is not None:
+        project.name = name.strip()
+
+    state_json = request.data.get('project_state')
+    if state_json is not None:
+        if isinstance(state_json, str):
+            try:
+                project_state = json.loads(state_json)
+            except json.JSONDecodeError:
+                return Response({'error': 'Invalid project_state JSON'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            project_state = state_json
+
+        # Delete old geometry files before saving new ones
+        _delete_project_geometry_files(cave_id, project.id, project.project_state)
+        project.project_state = project_state
+        _save_project_geometry_files(request, cave_id, project.id, project_state)
+
+    project.save()
+
+    # Publish merged GLB to cave explorer if included
+    _publish_merged_glb(request, cave, cave_id)
+
+    serializer = EditorProjectSerializer(project)
+    return Response(serializer.data)
+
+
+def _save_project_geometry_files(request, cave_id, project_id, project_state):
+    """Save uploaded cloud geometry files to storage."""
+    from django.core.files.storage import default_storage
+    from django.core.files.base import ContentFile
+
+    clouds = project_state.get('clouds', [])
+    for cloud in clouds:
+        geo_file = cloud.get('geometryFile')
+        if not geo_file:
+            continue
+        # Look for uploaded file matching this cloud
+        file_key = f'cloud_{cloud["id"]}'
+        uploaded = request.FILES.get(file_key)
+        if uploaded:
+            path = f'caves/{cave_id}/editor/{project_id}/{geo_file}'
+            if default_storage.exists(path):
+                default_storage.delete(path)
+            default_storage.save(path, ContentFile(uploaded.read()))
+
+
+def _publish_merged_glb(request, cave, cave_id):
+    """If a merged_glb file is in the request, save it as the cave's explorer point cloud."""
+    merged = request.FILES.get('merged_glb')
+    if not merged:
+        return
+    from django.core.files.storage import default_storage
+    from django.core.files.base import ContentFile
+
+    glb_path = f'caves/{cave_id}/cave_pointcloud.glb'
+    if default_storage.exists(glb_path):
+        default_storage.delete(glb_path)
+    default_storage.save(glb_path, ContentFile(merged.read()))
+
+    if not cave.has_map:
+        cave.has_map = True
+        cave.save(update_fields=['has_map', 'updated_at'])
+
+
+def _delete_project_geometry_files(cave_id, project_id, project_state):
+    """Delete all geometry files for a project from storage."""
+    from django.core.files.storage import default_storage
+
+    clouds = (project_state or {}).get('clouds', [])
+    for cloud in clouds:
+        geo_file = cloud.get('geometryFile')
+        if geo_file:
+            path = f'caves/{cave_id}/editor/{project_id}/{geo_file}'
+            if default_storage.exists(path):
+                default_storage.delete(path)
+
+
+def editor_project_file(request, cave_id, project_id, filename):
+    """Serve an editor project geometry file from storage."""
+    from django.core.files.storage import default_storage
+    from django.http import FileResponse, HttpResponseNotFound
+
+    # Only allow .glb files
+    if not filename.endswith('.glb'):
+        return HttpResponseNotFound()
+
+    path = f'caves/{cave_id}/editor/{project_id}/{filename}'
+    if not default_storage.exists(path):
+        return HttpResponseNotFound()
+
+    f = default_storage.open(path, 'rb')
+    return FileResponse(f, content_type='model/gltf-binary')

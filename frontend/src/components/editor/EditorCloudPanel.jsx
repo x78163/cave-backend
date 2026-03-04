@@ -1,4 +1,5 @@
-import useEditorStore, { CLOUD_COLORS } from '../../stores/editorStore'
+import { useState } from 'react'
+import useEditorStore, { CLOUD_COLORS, POI_TYPES } from '../../stores/editorStore'
 
 function formatPointCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -16,6 +17,16 @@ export default function EditorCloudPanel() {
   const deleteCloud = useEditorStore(s => s.deleteCloud)
   const setImportModalOpen = useEditorStore(s => s.setImportModalOpen)
   const loading = useEditorStore(s => s.loading)
+  const trajectory = useEditorStore(s => s.trajectory)
+  const trajectoryVisible = useEditorStore(s => s.trajectoryVisible)
+  const toggleTrajectoryVisible = useEditorStore(s => s.toggleTrajectoryVisible)
+  const pois = useEditorStore(s => s.pois)
+  const selectedPoiId = useEditorStore(s => s.selectedPoiId)
+  const setSelectedPoi = useEditorStore(s => s.setSelectedPoi)
+  const updatePoi = useEditorStore(s => s.updatePoi)
+  const deletePoi = useEditorStore(s => s.deletePoi)
+  const [editingPoiId, setEditingPoiId] = useState(null)
+  const [editName, setEditName] = useState('')
 
   const cycleColor = (cloudId, currentColor) => {
     const idx = CLOUD_COLORS.indexOf(currentColor)
@@ -67,6 +78,40 @@ export default function EditorCloudPanel() {
           <p className="text-xs text-center py-4" style={{ color: 'var(--cyber-text-dim)' }}>
             No clouds loaded
           </p>
+        )}
+
+        {/* Trajectory toggle */}
+        {trajectory?.positions?.length > 0 && (
+          <div
+            onClick={toggleTrajectoryVisible}
+            className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-all"
+            style={{
+              background: trajectoryVisible ? 'rgba(251,191,36,0.08)' : 'transparent',
+              border: '1px solid transparent',
+            }}
+          >
+            <button
+              className="w-5 h-5 flex items-center justify-center rounded flex-shrink-0"
+              style={{ color: trajectoryVisible ? '#fbbf24' : 'var(--cyber-text-dim)' }}
+            >
+              {trajectoryVisible ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M1 1l22 22" />
+                </svg>
+              )}
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium" style={{ color: '#fbbf24' }}>Trajectory</p>
+              <p className="text-[10px]" style={{ color: 'var(--cyber-text-dim)' }}>
+                {trajectory.positions.length} keyframes
+              </p>
+            </div>
+          </div>
         )}
 
         {clouds.map(cloud => (
@@ -159,6 +204,107 @@ export default function EditorCloudPanel() {
           </div>
         ))}
       </div>
+
+      {/* POIs section */}
+      {pois.length > 0 && (
+        <>
+          <div
+            className="flex items-center justify-between px-3 py-2"
+            style={{ borderTop: '1px solid var(--cyber-border)' }}
+          >
+            <span className="text-xs font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--cyber-text-dim)' }}>
+              POIs ({pois.length})
+            </span>
+          </div>
+
+          <div className="overflow-y-auto px-2 pb-2 space-y-1" style={{ maxHeight: 200 }}>
+            {pois.map(poi => (
+              <div
+                key={poi.id}
+                onClick={() => setSelectedPoi(poi.id)}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all"
+                style={{
+                  background: selectedPoiId === poi.id ? 'rgba(244,114,182,0.08)' : 'transparent',
+                  border: selectedPoiId === poi.id ? '1px solid rgba(244,114,182,0.2)' : '1px solid transparent',
+                }}
+              >
+                {/* Color dot */}
+                <div
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: poi.color || '#f472b6' }}
+                />
+
+                {/* Name (editable on double-click) */}
+                <div className="flex-1 min-w-0">
+                  {editingPoiId === poi.id ? (
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      onBlur={() => {
+                        if (editName.trim()) updatePoi(poi.id, { name: editName.trim() })
+                        setEditingPoiId(null)
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') e.target.blur()
+                        if (e.key === 'Escape') setEditingPoiId(null)
+                      }}
+                      autoFocus
+                      className="w-full text-xs bg-transparent outline-none"
+                      style={{
+                        color: 'var(--cyber-text)',
+                        borderBottom: '1px solid var(--cyber-cyan)',
+                      }}
+                    />
+                  ) : (
+                    <p
+                      className="text-xs truncate"
+                      style={{ color: 'var(--cyber-text)' }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation()
+                        setEditingPoiId(poi.id)
+                        setEditName(poi.name)
+                      }}
+                    >
+                      {poi.name}
+                    </p>
+                  )}
+
+                  {/* Type selector */}
+                  <select
+                    value={poi.type}
+                    onChange={e => {
+                      const newType = e.target.value
+                      const typeObj = POI_TYPES.find(t => t.value === newType)
+                      updatePoi(poi.id, { type: newType, color: typeObj?.color || poi.color })
+                    }}
+                    onClick={e => e.stopPropagation()}
+                    className="text-[10px] bg-transparent outline-none cursor-pointer"
+                    style={{ color: 'var(--cyber-text-dim)' }}
+                  >
+                    {POI_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Delete */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); deletePoi(poi.id) }}
+                  title="Delete POI"
+                  className="w-5 h-5 flex items-center justify-center rounded hover:text-red-400 transition-colors flex-shrink-0"
+                  style={{ color: 'var(--cyber-text-dim)' }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }

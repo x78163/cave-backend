@@ -3,10 +3,13 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js'
 import { PCDLoader } from 'three/addons/loaders/PCDLoader.js'
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
+import { apiFetch } from '../hooks/useApi'
 
 const gltfLoader = new GLTFLoader()
 const plyLoader = new PLYLoader()
 const pcdLoader = new PCDLoader()
+const gltfExporter = new GLTFExporter()
 
 const CLOUD_COLORS = ['#00e5ff', '#ff6b6b', '#4ade80', '#fbbf24', '#c084fc', '#f472b6', '#fb923c', '#38bdf8']
 
@@ -61,6 +64,174 @@ function parseFileBuffer(buffer, ext) {
   return Promise.reject(new Error(`Unsupported format: .${ext}`))
 }
 
+async function exportGeometryToGlb(geometry) {
+  // Wrap geometry in a Points mesh for GLTFExporter
+  const material = new THREE.PointsMaterial({ vertexColors: true })
+  const points = new THREE.Points(geometry.clone(), material)
+  const glb = await gltfExporter.parseAsync(points, { binary: true })
+  material.dispose()
+  points.geometry.dispose()
+  return new Blob([glb], { type: 'model/gltf-binary' })
+}
+
+function mergeCloudGeometries(clouds) {
+  // Merge all visible clouds into a single geometry with transforms applied
+  const visibleClouds = clouds.filter(c => c.visible && c.geometry)
+  if (visibleClouds.length === 0) return null
+
+  let totalPoints = 0
+  for (const cloud of visibleClouds) {
+    totalPoints += cloud.geometry.getAttribute('position').count
+  }
+
+  const mergedPos = new Float32Array(totalPoints * 3)
+  const mergedCol = new Float32Array(totalPoints * 3)
+  let offset = 0
+
+  for (const cloud of visibleClouds) {
+    const posAttr = cloud.geometry.getAttribute('position')
+    const colAttr = cloud.geometry.getAttribute('color')
+    const count = posAttr.count
+
+    // Apply transform to each point
+    const v = new THREE.Vector3()
+    for (let i = 0; i < count; i++) {
+      v.set(posAttr.array[i * 3], posAttr.array[i * 3 + 1], posAttr.array[i * 3 + 2])
+      v.applyMatrix4(cloud.transform)
+      mergedPos[(offset + i) * 3] = v.x
+      mergedPos[(offset + i) * 3 + 1] = v.y
+      mergedPos[(offset + i) * 3 + 2] = v.z
+    }
+
+    // Copy colors directly
+    if (colAttr) {
+      mergedCol.set(colAttr.array.subarray(0, count * 3), offset * 3)
+    } else {
+      mergedCol.fill(0.7, offset * 3, (offset + count) * 3)
+    }
+
+    offset += count
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(mergedPos, 3))
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(mergedCol, 3))
+  return geo
+}
+
+async function fetchTrajectory(caveId) {
+  const urls = [
+    `/api/caves/${caveId}/media/trajectory.json`,
+    `/media/caves/${caveId}/trajectory.json`,
+  ]
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url)
+      if (!resp.ok) continue
+      return await resp.json()
+    } catch { /* try next */ }
+  }
+  return null
+}
+
+const POI_TYPES = [
+  { value: 'entrance', label: 'Entrance', color: '#4ade80' },
+  { value: 'junction', label: 'Junction', color: '#8b5cf6' },
+  { value: 'squeeze', label: 'Squeeze', color: '#ef4444' },
+  { value: 'water', label: 'Water', color: '#38bdf8' },
+  { value: 'formation', label: 'Formation', color: '#fbbf24' },
+  { value: 'hazard', label: 'Hazard', color: '#ff6b6b' },
+  { value: 'biology', label: 'Biology', color: '#10b981' },
+  { value: 'camp', label: 'Camp', color: '#f97316' },
+  { value: 'survey_station', label: 'Survey Station', color: '#6366f1' },
+  { value: 'transition', label: 'Transition', color: '#ec4899' },
+  { value: 'marker', label: 'Marker', color: '#a1a1aa' },
+  { value: 'waypoint', label: 'Waypoint', color: '#fb923c' },
+]
+
+function poiTypeColor(type) {
+  return POI_TYPES.find(t => t.value === type)?.color || '#f472b6'
+}
+
+async function fetchCavePois(caveId) {
+  try {
+    const data = await apiFetch(`/mapping/caves/${caveId}/pois/`)
+    const poiList = data.pois || data || []
+    // Only import POIs with SLAM coordinates
+    return poiList
+      .filter(p => p.slam_x != null && p.slam_y != null && p.slam_z != null)
+      .map(p => ({
+        id: p.id,
+        name: p.label || `${(POI_TYPES.find(t => t.value === p.poi_type)?.label || 'POI')}`,
+        type: p.poi_type || 'marker',
+        position: [p.slam_x, p.slam_y, p.slam_z],
+        color: poiTypeColor(p.poi_type),
+        dbId: p.id, // track database origin for sync
+        latitude: p.latitude,
+        longitude: p.longitude,
+        description: p.description || '',
+        source: p.source || 'mapping',
+      }))
+  } catch {
+    return []
+  }
+}
+
+async function syncPoisToDatabase(caveId, pois, originalDbIds) {
+  const currentDbIds = new Set(pois.filter(p => p.dbId).map(p => p.dbId))
+  const updatedPois = [...pois]
+
+  // DELETE: original dbIds that are no longer in the editor
+  for (const dbId of originalDbIds) {
+    if (!currentDbIds.has(dbId)) {
+      try {
+        await apiFetch(`/mapping/caves/${caveId}/pois/${dbId}/`, { method: 'DELETE' })
+      } catch { /* already deleted or not found — ok */ }
+    }
+  }
+
+  // CREATE or UPDATE each POI
+  for (let i = 0; i < updatedPois.length; i++) {
+    const poi = updatedPois[i]
+    const payload = {
+      label: poi.name || '',
+      poi_type: poi.type || 'marker',
+      description: poi.description || '',
+      slam_x: poi.position[0],
+      slam_y: poi.position[1],
+      slam_z: poi.position[2],
+      source: poi.source || 'editor',
+    }
+    // Preserve GPS coords if they exist
+    if (poi.latitude != null) payload.latitude = poi.latitude
+    if (poi.longitude != null) payload.longitude = poi.longitude
+
+    try {
+      if (poi.dbId) {
+        // UPDATE existing
+        await apiFetch(`/mapping/caves/${caveId}/pois/${poi.dbId}/`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } else {
+        // CREATE new
+        const created = await apiFetch(`/mapping/caves/${caveId}/pois/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        // Store the new dbId so future saves update instead of re-creating
+        updatedPois[i] = { ...poi, dbId: created.id }
+      }
+    } catch (err) {
+      console.warn(`POI sync failed for "${poi.name}":`, err)
+    }
+  }
+
+  return updatedPois
+}
+
 const useEditorStore = create((set, get) => ({
   caveId: null,
   caveName: '',
@@ -89,6 +260,21 @@ const useEditorStore = create((set, get) => ({
   icpProgress: null,
   overlapVisActive: false,
   icpSampleSize: 5000,
+
+  // Project persistence state
+  projectId: null,
+  projectName: '',
+  saving: false,
+  lastSavedAt: null,
+
+  // Trajectory state
+  trajectory: null, // { positions: [[x,y,z], ...] } or null
+  trajectoryVisible: true,
+
+  // POI state
+  pois: [], // [{ id, name, type, position: [x,y,z], color, dbId?, ... }]
+  selectedPoiId: null,
+  _originalPoiDbIds: [], // dbIds loaded at start, for detecting deletions on save
 
   // Selection + painting state
   selectedIndices: {}, // { [cloudId]: number[] }
@@ -140,6 +326,7 @@ const useEditorStore = create((set, get) => ({
         locked: false,
         pointCount,
         color: CLOUD_COLORS[0],
+        modified: false,
       }
 
       set(state => ({
@@ -147,6 +334,18 @@ const useEditorStore = create((set, get) => ({
         loading: false,
         selectedCloudId: cloud.id,
       }))
+
+      // Fetch trajectory and existing POIs in background (non-blocking)
+      fetchTrajectory(caveId).then(traj => {
+        if (traj) set({ trajectory: traj })
+      }).catch(() => {})
+
+      fetchCavePois(caveId).then(cavePois => {
+        if (cavePois.length > 0) {
+          const dbIds = cavePois.filter(p => p.dbId).map(p => p.dbId)
+          set({ pois: cavePois, _originalPoiDbIds: dbIds })
+        }
+      }).catch(() => {})
 
       return cloud
     } catch (err) {
@@ -177,6 +376,7 @@ const useEditorStore = create((set, get) => ({
         locked: false,
         pointCount,
         color: CLOUD_COLORS[colorIdx],
+        modified: true, // file uploads always need geometry saved
       }
 
       set(state => ({
@@ -225,6 +425,7 @@ const useEditorStore = create((set, get) => ({
         locked: false,
         pointCount,
         color: CLOUD_COLORS[colorIdx],
+        modified: false,
       }
 
       set(state => ({
@@ -274,6 +475,40 @@ const useEditorStore = create((set, get) => ({
       selectedCloudId: state.selectedCloudId === cloudId ? null : state.selectedCloudId,
     })
   },
+
+  // ── Trajectory actions ──
+  setTrajectory: (traj) => set({ trajectory: traj }),
+  toggleTrajectoryVisible: () => set(state => ({ trajectoryVisible: !state.trajectoryVisible })),
+
+  // ── POI actions ──
+  addPoi: (position) => {
+    const poi = {
+      id: crypto.randomUUID(),
+      name: `POI ${get().pois.length + 1}`,
+      type: 'marker',
+      position: [position.x, position.y, position.z],
+      color: poiTypeColor('marker'),
+    }
+    set(state => ({
+      pois: [...state.pois, poi],
+      selectedPoiId: poi.id,
+      isDirty: true,
+    }))
+    return poi
+  },
+
+  updatePoi: (poiId, updates) => set(state => ({
+    pois: state.pois.map(p => p.id === poiId ? { ...p, ...updates } : p),
+    isDirty: true,
+  })),
+
+  deletePoi: (poiId) => set(state => ({
+    pois: state.pois.filter(p => p.id !== poiId),
+    selectedPoiId: state.selectedPoiId === poiId ? null : state.selectedPoiId,
+    isDirty: true,
+  })),
+
+  setSelectedPoi: (id) => set({ selectedPoiId: id }),
 
   // ── Alignment actions ──
   enterAlignmentMode: () => {
@@ -450,7 +685,7 @@ const useEditorStore = create((set, get) => ({
       newGeo.setAttribute('color', new THREE.Float32BufferAttribute(newCol, 3))
 
       oldGeo.dispose()
-      return { ...cloud, geometry: newGeo, pointCount: newCount }
+      return { ...cloud, geometry: newGeo, pointCount: newCount, modified: true }
     })
 
     set({ clouds: newClouds, selectedIndices: {}, isDirty: true })
@@ -467,6 +702,7 @@ const useEditorStore = create((set, get) => ({
     const g = parseInt(hex.substring(2, 4), 16) / 255
     const b = parseInt(hex.substring(4, 6), 16) / 255
 
+    const modifiedCloudIds = new Set()
     for (const [cloudId, indices] of entries) {
       const cloud = state.clouds.find(c => c.id === cloudId)
       if (!cloud?.geometry) continue
@@ -479,12 +715,205 @@ const useEditorStore = create((set, get) => ({
         colorAttr.array[i * 3 + 2] = b
       }
       colorAttr.needsUpdate = true
+      modifiedCloudIds.add(cloudId)
     }
 
-    set({ isDirty: true })
+    set(prev => ({
+      clouds: prev.clouds.map(c =>
+        modifiedCloudIds.has(c.id) ? { ...c, modified: true } : c
+      ),
+      isDirty: true,
+    }))
   },
 
   setPaintColor: (color) => set({ paintColor: color }),
+
+  // ── Project persistence actions ──
+  setProjectId: (id) => set({ projectId: id }),
+  setProjectName: (name) => set({ projectName: name }),
+
+  saveProject: async (name) => {
+    const state = get()
+    if (!state.caveId) throw new Error('No cave loaded')
+    set({ saving: true, error: null })
+
+    try {
+      const formData = new FormData()
+      formData.append('name', name)
+
+      // Build cloud metadata and export geometry files
+      const cloudsMeta = []
+      for (const cloud of state.clouds) {
+        const needsGeometry = cloud.modified || cloud.sourceType === 'file'
+        const geoFileName = needsGeometry ? `cloud_${cloud.id.slice(0, 8)}.glb` : null
+
+        cloudsMeta.push({
+          id: cloud.id,
+          name: cloud.name,
+          sourceType: cloud.sourceType,
+          sourceCaveId: cloud.sourceCaveId,
+          transform: cloud.transform.toArray(),
+          visible: cloud.visible,
+          locked: cloud.locked,
+          pointCount: cloud.pointCount,
+          color: cloud.color,
+          geometryFile: geoFileName,
+          isModified: needsGeometry,
+        })
+
+        if (needsGeometry && cloud.geometry) {
+          const blob = await exportGeometryToGlb(cloud.geometry)
+          formData.append(`cloud_${cloud.id}`, blob, geoFileName)
+        }
+      }
+
+      const projectState = { version: 1, clouds: cloudsMeta, pois: state.pois }
+      formData.append('project_state', JSON.stringify(projectState))
+
+      // Merge all visible clouds and publish as cave's explorer point cloud
+      const mergedGeo = mergeCloudGeometries(state.clouds)
+      if (mergedGeo) {
+        const mergedBlob = await exportGeometryToGlb(mergedGeo)
+        mergedGeo.dispose()
+        formData.append('merged_glb', mergedBlob, 'merged.glb')
+      }
+
+      const isUpdate = !!state.projectId
+      const url = isUpdate
+        ? `/caves/${state.caveId}/editor-projects/${state.projectId}/`
+        : `/caves/${state.caveId}/editor-projects/`
+
+      const result = await apiFetch(url, {
+        method: isUpdate ? 'PATCH' : 'POST',
+        body: formData,
+      })
+
+      set({
+        saving: false,
+        projectId: result.id,
+        projectName: result.name,
+        lastSavedAt: new Date().toISOString(),
+        isDirty: false,
+      })
+
+      // Sync POIs back to the mapping database (fire-and-forget)
+      const syncState = get()
+      if (syncState.caveId) {
+        syncPoisToDatabase(syncState.caveId, syncState.pois, syncState._originalPoiDbIds)
+          .then(updatedPois => {
+            if (updatedPois) {
+              const dbIds = updatedPois.filter(p => p.dbId).map(p => p.dbId)
+              set({ pois: updatedPois, _originalPoiDbIds: dbIds })
+            }
+          })
+          .catch(err => console.warn('POI sync failed:', err))
+      }
+
+      return result
+    } catch (err) {
+      set({ saving: false, error: err.message || 'Save failed' })
+      throw err
+    }
+  },
+
+  loadProject: async (caveId, projectId) => {
+    set({ loading: true, error: null })
+    try {
+      const project = await apiFetch(`/caves/${caveId}/editor-projects/${projectId}/`)
+      const state = project.project_state
+      if (!state?.clouds) throw new Error('Invalid project data')
+
+      // Dispose existing clouds
+      const current = get()
+      for (const c of current.clouds) {
+        if (c.geometry) c.geometry.dispose()
+      }
+
+      // Load each cloud
+      const loadedClouds = []
+      for (const meta of state.clouds) {
+        let geometry = null
+
+        if (meta.geometryFile) {
+          // Fetch saved geometry file
+          const url = `/api/caves/${caveId}/editor-projects/${projectId}/file/${meta.geometryFile}`
+          const gltf = await loadGlb(url)
+          geometry = extractPointCloud(gltf)
+        } else if (meta.sourceType === 'cave_glb' && meta.sourceCaveId) {
+          // Re-fetch from original cave
+          const urls = [
+            `/api/caves/${meta.sourceCaveId}/media/cave_pointcloud.glb`,
+            `/media/caves/${meta.sourceCaveId}/cave_pointcloud.glb`,
+          ]
+          for (const url of urls) {
+            try {
+              const gltf = await loadGlb(url)
+              geometry = extractPointCloud(gltf)
+              if (geometry) break
+            } catch { /* try next */ }
+          }
+        }
+
+        if (!geometry) {
+          console.warn(`Could not load geometry for cloud "${meta.name}"`)
+          continue
+        }
+        ensureColors(geometry)
+
+        loadedClouds.push({
+          id: meta.id,
+          name: meta.name,
+          sourceType: meta.sourceType,
+          sourceCaveId: meta.sourceCaveId,
+          geometry,
+          transform: new THREE.Matrix4().fromArray(meta.transform),
+          visible: meta.visible,
+          locked: meta.locked,
+          pointCount: geometry.getAttribute('position').count,
+          color: meta.color,
+          modified: false,
+        })
+      }
+
+      const savedPois = state.pois || []
+
+      set({
+        clouds: loadedClouds,
+        loading: false,
+        projectId: project.id,
+        projectName: project.name,
+        lastSavedAt: project.updated_at,
+        isDirty: false,
+        selectedCloudId: loadedClouds.length > 0 ? loadedClouds[0].id : null,
+        pois: savedPois,
+        _originalPoiDbIds: savedPois.filter(p => p.dbId).map(p => p.dbId),
+      })
+
+      // Fetch trajectory and merge fresh cave POIs in background
+      fetchTrajectory(caveId).then(traj => {
+        if (traj) set({ trajectory: traj })
+      }).catch(() => {})
+
+      // Merge fresh cave POIs — add any new ones not already in saved project
+      fetchCavePois(caveId).then(freshPois => {
+        const current = get()
+        const existingDbIds = new Set(current.pois.filter(p => p.dbId).map(p => p.dbId))
+        const newPois = freshPois.filter(p => p.dbId && !existingDbIds.has(p.dbId))
+        if (newPois.length > 0) {
+          const allDbIds = [...current._originalPoiDbIds, ...newPois.map(p => p.dbId)]
+          set({
+            pois: [...current.pois, ...newPois],
+            _originalPoiDbIds: allDbIds,
+          })
+        }
+      }).catch(() => {})
+
+      return project
+    } catch (err) {
+      set({ loading: false, error: err.message || 'Load failed' })
+      throw err
+    }
+  },
 
   clearAll: () => {
     const { clouds } = get()
@@ -518,9 +947,18 @@ const useEditorStore = create((set, get) => ({
       overlapVisActive: false,
       selectedIndices: {},
       paintColor: '#ff6b6b',
+      trajectory: null,
+      trajectoryVisible: true,
+      pois: [],
+      selectedPoiId: null,
+      _originalPoiDbIds: [],
+      projectId: null,
+      projectName: '',
+      saving: false,
+      lastSavedAt: null,
     })
   },
 }))
 
-export { CLOUD_COLORS }
+export { CLOUD_COLORS, POI_TYPES }
 export default useEditorStore

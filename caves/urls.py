@@ -32,4 +32,7 @@ urlpatterns = [
     path('<uuid:cave_id>/video-links/<uuid:video_id>/', views.cave_video_link_detail, name='cave_video_link_detail'),
     path('<uuid:cave_id>/annotations/', views.annotation_list_create, name='annotation_list_create'),
     path('<uuid:cave_id>/annotations/<uuid:annotation_id>/', views.annotation_detail, name='annotation_detail'),
+    path('<uuid:cave_id>/editor-projects/', views.editor_project_list_create, name='editor_project_list_create'),
+    path('<uuid:cave_id>/editor-projects/<uuid:project_id>/', views.editor_project_detail, name='editor_project_detail'),
+    path('<uuid:cave_id>/editor-projects/<uuid:project_id>/file/<str:filename>', views.editor_project_file, name='editor_project_file'),
 ]

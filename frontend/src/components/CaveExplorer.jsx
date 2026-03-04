@@ -211,9 +211,11 @@ export default function CaveExplorer({ caveId }) {
       }
 
       // Try loading point cloud GLB (API proxy first, then local path)
+      // Cache-bust to pick up editor saves
+      const cacheBust = `?t=${Date.now()}`
       const pcUrls = [
-        ...(caveId ? [`/api/caves/${caveId}/media/cave_pointcloud.glb`] : []),
-        ...(caveId ? [`/media/caves/${caveId}/cave_pointcloud.glb`] : []),
+        ...(caveId ? [`/api/caves/${caveId}/media/cave_pointcloud.glb${cacheBust}`] : []),
+        ...(caveId ? [`/media/caves/${caveId}/cave_pointcloud.glb${cacheBust}`] : []),
       ]
       for (const pcUrl of pcUrls) {
         try {

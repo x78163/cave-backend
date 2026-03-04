@@ -5,6 +5,7 @@ from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
     CavePermission, CaveShareLink, LandOwner, CaveRequest,
     SurveyMap, CaveDocument, CaveVideoLink, SurfaceAnnotation,
+    EditorProject,
 )
 
 
@@ -407,3 +408,27 @@ class CaveRequestSerializer(serializers.ModelSerializer):
             'resolved_by', 'resolved_by_username', 'resolved_at',
             'created_at',
         ]
+
+
+class EditorProjectSerializer(serializers.ModelSerializer):
+    cloud_count = serializers.SerializerMethodField()
+    owner_username = serializers.CharField(
+        source='owner.username', read_only=True,
+    )
+
+    class Meta:
+        model = EditorProject
+        fields = [
+            'id', 'cave', 'owner', 'owner_username', 'name',
+            'project_state', 'cloud_count',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'cave', 'owner', 'owner_username',
+            'created_at', 'updated_at',
+        ]
+
+    def get_cloud_count(self, obj):
+        state = obj.project_state or {}
+        clouds = state.get('clouds', [])
+        return len(clouds)

@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import useAuthStore from '../stores/authStore'
 import useEditorStore from '../stores/editorStore'
@@ -9,6 +9,8 @@ import EditorCloudPanel from '../components/editor/EditorCloudPanel'
 import AlignmentPanel from '../components/editor/AlignmentPanel'
 import SelectionPanel from '../components/editor/SelectionPanel'
 import CloudImportModal from '../components/editor/CloudImportModal'
+import SaveProjectModal from '../components/editor/SaveProjectModal'
+import LoadProjectModal from '../components/editor/LoadProjectModal'
 
 function MobileGuard() {
   return (
@@ -48,6 +50,7 @@ function MobileGuard() {
 
 export default function PointCloudEditor() {
   const { caveId } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { user } = useAuthStore()
 
@@ -63,10 +66,17 @@ export default function PointCloudEditor() {
   const alignmentMode = useEditorStore(s => s.alignmentMode)
   const pickedPoints = useEditorStore(s => s.pickedPoints)
   const selectedIndices = useEditorStore(s => s.selectedIndices)
+  const isDirty = useEditorStore(s => s.isDirty)
+  const projectName = useEditorStore(s => s.projectName)
+  const saving = useEditorStore(s => s.saving)
+  const trajectory = useEditorStore(s => s.trajectory)
+  const pois = useEditorStore(s => s.pois)
 
   const [cave, setCave] = useState(null)
   const [authError, setAuthError] = useState(null)
   const [isMobile, setIsMobile] = useState(false)
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [loadModalOpen, setLoadModalOpen] = useState(false)
   const layoutRef = useRef(null)
 
   // Mobile detection
@@ -94,13 +104,16 @@ export default function PointCloudEditor() {
           return
         }
 
-        // Load the point cloud
-        if (data.has_map) {
+        // Load from saved project if query param present, otherwise load cave cloud
+        const projectParam = searchParams.get('project')
+        if (projectParam) {
+          useEditorStore.getState().loadProject(caveId, projectParam)
+        } else if (data.has_map) {
           loadCaveCloud(caveId)
         }
       })
       .catch(() => setAuthError('Cave not found.'))
-  }, [caveId, user, setCaveId, setCaveName, loadCaveCloud])
+  }, [caveId, user, setCaveId, setCaveName, loadCaveCloud, searchParams])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -124,7 +137,7 @@ export default function PointCloudEditor() {
     navigate(`/caves/${caveId}`)
   }, [navigate, caveId])
 
-  // Escape key to close (unless import modal is open)
+  // Escape key to close (unless a modal is open)
   useEffect(() => {
     function onKey(e) {
       if (e.key === 'Escape') {
@@ -132,12 +145,14 @@ export default function PointCloudEditor() {
           useEditorStore.getState().setImportModalOpen(false)
           return
         }
+        if (saveModalOpen) { setSaveModalOpen(false); return }
+        if (loadModalOpen) { setLoadModalOpen(false); return }
         handleClose()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleClose])
+  }, [handleClose, saveModalOpen, loadModalOpen])
 
   if (isMobile) return <MobileGuard />
 
@@ -192,6 +207,21 @@ export default function PointCloudEditor() {
           <span className="text-xs font-medium" style={{ color: 'var(--cyber-cyan)' }}>
             Editor
           </span>
+          {projectName && (
+            <>
+              <span className="text-xs" style={{ color: 'var(--cyber-border)' }}>/</span>
+              <span className="text-xs truncate" style={{ color: 'var(--cyber-text-dim)' }}>
+                {projectName}
+              </span>
+            </>
+          )}
+          {isDirty && (
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{ background: '#fbbf24' }}
+              title="Unsaved changes"
+            />
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -211,6 +241,38 @@ export default function PointCloudEditor() {
               {clouds.reduce((sum, c) => sum + c.pointCount, 0).toLocaleString()} points
             </span>
           )}
+
+          <div className="w-px h-4" style={{ background: 'var(--cyber-border)' }} />
+
+          {/* Load Project */}
+          <button
+            onClick={() => setLoadModalOpen(true)}
+            title="Load Project"
+            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[rgba(255,255,255,0.05)]"
+            style={{ color: 'var(--cyber-text-dim)' }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+
+          {/* Save Project */}
+          <button
+            onClick={() => setSaveModalOpen(true)}
+            disabled={saving || clouds.length === 0}
+            title="Save Project"
+            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[rgba(255,255,255,0.05)]"
+            style={{
+              color: isDirty ? 'var(--cyber-cyan)' : 'var(--cyber-text-dim)',
+              opacity: clouds.length === 0 ? 0.3 : 1,
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -221,7 +283,7 @@ export default function PointCloudEditor() {
 
         {/* Center viewport layout */}
         <div className="relative flex-1 flex min-h-0">
-          <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} selectedIndices={selectedIndices} />
+          <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} selectedIndices={selectedIndices} trajectory={trajectory} pois={pois} />
           <SelectionPanel />
         </div>
 
@@ -235,6 +297,14 @@ export default function PointCloudEditor() {
           onClose={() => setImportModalOpen(false)}
           excludeCaveId={caveId}
         />
+      )}
+
+      {/* Save/Load modals */}
+      {saveModalOpen && (
+        <SaveProjectModal onClose={() => setSaveModalOpen(false)} />
+      )}
+      {loadModalOpen && (
+        <LoadProjectModal caveId={caveId} onClose={() => setLoadModalOpen(false)} />
       )}
     </div>
   )
