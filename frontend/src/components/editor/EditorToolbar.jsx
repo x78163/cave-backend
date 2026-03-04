@@ -61,6 +61,13 @@ const POI_TOOL = { id: 'poi', label: 'Place POI', key: 'I', icon: (
   </svg>
 )}
 
+const POI_MOVE_TOOL = { id: 'poiMove', label: 'Move POI', key: 'M', icon: (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+    <path d="M9 9h6M12 6v6" />
+  </svg>
+)}
+
 const FLY_MODE = { id: 'flyMode', label: 'Fly Mode (WASD)', key: 'G', icon: (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
     <circle cx="12" cy="12" r="2" />
@@ -167,6 +174,13 @@ export default function EditorToolbar({ onFitView }) {
       if (key === POI_TOOL.key) {
         e.preventDefault()
         setActiveTool('poi')
+        return
+      }
+
+      // POI Move tool
+      if (key === POI_MOVE_TOOL.key) {
+        e.preventDefault()
+        setActiveTool('poiMove')
         return
       }
 
@@ -283,6 +297,20 @@ export default function EditorToolbar({ onFitView }) {
         }}
       >
         {POI_TOOL.icon}
+      </button>
+
+      {/* POI Move tool */}
+      <button
+        onClick={() => setActiveTool('poiMove')}
+        title={`${POI_MOVE_TOOL.label} (${POI_MOVE_TOOL.key})`}
+        className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+        style={{
+          background: activeTool === 'poiMove' ? 'rgba(244,114,182,0.15)' : 'transparent',
+          color: activeTool === 'poiMove' ? '#f472b6' : 'var(--cyber-text-dim)',
+          border: activeTool === 'poiMove' ? '1px solid rgba(244,114,182,0.3)' : '1px solid transparent',
+        }}
+      >
+        {POI_MOVE_TOOL.icon}
       </button>
 
       {/* Fly Mode toggle */}

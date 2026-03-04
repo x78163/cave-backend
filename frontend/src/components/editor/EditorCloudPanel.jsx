@@ -287,6 +287,15 @@ export default function EditorCloudPanel() {
                       <option key={t.value} value={t.value}>{t.label}</option>
                     ))}
                   </select>
+                  {/* Parent cloud indicator */}
+                  {poi.cloudId && (() => {
+                    const parent = clouds.find(c => c.id === poi.cloudId)
+                    return parent ? (
+                      <p className="text-[9px] truncate" style={{ color: 'var(--cyber-text-dim)', opacity: 0.6 }}>
+                        on {parent.name}
+                      </p>
+                    ) : null
+                  })()}
                 </div>
 
                 {/* Delete */}

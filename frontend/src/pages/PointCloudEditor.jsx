@@ -70,6 +70,7 @@ export default function PointCloudEditor() {
   const projectName = useEditorStore(s => s.projectName)
   const saving = useEditorStore(s => s.saving)
   const trajectory = useEditorStore(s => s.trajectory)
+  const trajectoryCloudId = useEditorStore(s => s.trajectoryCloudId)
   const pois = useEditorStore(s => s.pois)
 
   const [cave, setCave] = useState(null)
@@ -283,7 +284,7 @@ export default function PointCloudEditor() {
 
         {/* Center viewport layout */}
         <div className="relative flex-1 flex min-h-0">
-          <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} selectedIndices={selectedIndices} trajectory={trajectory} pois={pois} />
+          <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} selectedIndices={selectedIndices} trajectory={trajectory} trajectoryCloudId={trajectoryCloudId} pois={pois} />
           <SelectionPanel />
         </div>
 

@@ -270,9 +270,10 @@ const useEditorStore = create((set, get) => ({
   // Trajectory state
   trajectory: null, // { positions: [[x,y,z], ...] } or null
   trajectoryVisible: true,
+  trajectoryCloudId: null, // which cloud the trajectory belongs to
 
-  // POI state
-  pois: [], // [{ id, name, type, position: [x,y,z], color, dbId?, ... }]
+  // POI state — positions stored in cloud-local coordinates
+  pois: [], // [{ id, name, type, position: [x,y,z], color, cloudId, dbId?, ... }]
   selectedPoiId: null,
   _originalPoiDbIds: [], // dbIds loaded at start, for detecting deletions on save
 
@@ -336,14 +337,18 @@ const useEditorStore = create((set, get) => ({
       }))
 
       // Fetch trajectory and existing POIs in background (non-blocking)
+      // Associate with this cloud so they transform together
+      const loadedCloudId = cloud.id
       fetchTrajectory(caveId).then(traj => {
-        if (traj) set({ trajectory: traj })
+        if (traj) set({ trajectory: traj, trajectoryCloudId: loadedCloudId })
       }).catch(() => {})
 
       fetchCavePois(caveId).then(cavePois => {
         if (cavePois.length > 0) {
-          const dbIds = cavePois.filter(p => p.dbId).map(p => p.dbId)
-          set({ pois: cavePois, _originalPoiDbIds: dbIds })
+          // Tag each POI with the parent cloud ID
+          const tagged = cavePois.map(p => ({ ...p, cloudId: loadedCloudId }))
+          const dbIds = tagged.filter(p => p.dbId).map(p => p.dbId)
+          set({ pois: tagged, _originalPoiDbIds: dbIds })
         }
       }).catch(() => {})
 
@@ -481,13 +486,14 @@ const useEditorStore = create((set, get) => ({
   toggleTrajectoryVisible: () => set(state => ({ trajectoryVisible: !state.trajectoryVisible })),
 
   // ── POI actions ──
-  addPoi: (position) => {
+  addPoi: (localPosition, cloudId) => {
     const poi = {
       id: crypto.randomUUID(),
       name: `POI ${get().pois.length + 1}`,
       type: 'marker',
-      position: [position.x, position.y, position.z],
+      position: [localPosition.x, localPosition.y, localPosition.z],
       color: poiTypeColor('marker'),
+      cloudId: cloudId || null,
     }
     set(state => ({
       pois: [...state.pois, poi],
@@ -496,6 +502,14 @@ const useEditorStore = create((set, get) => ({
     }))
     return poi
   },
+
+  updatePoiPosition: (poiId, localPosition) => set(state => ({
+    pois: state.pois.map(p => p.id === poiId
+      ? { ...p, position: [localPosition.x, localPosition.y, localPosition.z] }
+      : p
+    ),
+    isDirty: true,
+  })),
 
   updatePoi: (poiId, updates) => set(state => ({
     pois: state.pois.map(p => p.id === poiId ? { ...p, ...updates } : p),
@@ -889,16 +903,23 @@ const useEditorStore = create((set, get) => ({
         _originalPoiDbIds: savedPois.filter(p => p.dbId).map(p => p.dbId),
       })
 
+      // Determine the primary cloud for trajectory/POI association
+      // Prefer the cave's own cloud, fall back to first loaded cloud
+      const primaryCloudId = loadedClouds.find(c => c.sourceCaveId === caveId)?.id
+        || (loadedClouds.length > 0 ? loadedClouds[0].id : null)
+
       // Fetch trajectory and merge fresh cave POIs in background
       fetchTrajectory(caveId).then(traj => {
-        if (traj) set({ trajectory: traj })
+        if (traj) set({ trajectory: traj, trajectoryCloudId: primaryCloudId })
       }).catch(() => {})
 
       // Merge fresh cave POIs — add any new ones not already in saved project
       fetchCavePois(caveId).then(freshPois => {
         const current = get()
         const existingDbIds = new Set(current.pois.filter(p => p.dbId).map(p => p.dbId))
-        const newPois = freshPois.filter(p => p.dbId && !existingDbIds.has(p.dbId))
+        const newPois = freshPois
+          .filter(p => p.dbId && !existingDbIds.has(p.dbId))
+          .map(p => ({ ...p, cloudId: p.cloudId || primaryCloudId }))
         if (newPois.length > 0) {
           const allDbIds = [...current._originalPoiDbIds, ...newPois.map(p => p.dbId)]
           set({
@@ -949,6 +970,7 @@ const useEditorStore = create((set, get) => ({
       paintColor: '#ff6b6b',
       trajectory: null,
       trajectoryVisible: true,
+      trajectoryCloudId: null,
       pois: [],
       selectedPoiId: null,
       _originalPoiDbIds: [],

@@ -354,6 +354,80 @@ export default function CaveExplorer({ caveId }) {
 
     loadAll().catch(err => console.error('CaveExplorer load failed:', err))
 
+    // ── Load POIs from database and render as 3D markers ──
+    if (caveId) {
+      const token = localStorage.getItem('access_token')
+      const poiHeaders = token ? { Authorization: `Bearer ${token}` } : {}
+      fetch(`/api/mapping/caves/${caveId}/pois/`, { headers: poiHeaders })
+        .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        .then(data => {
+          const poiList = data.pois || data || []
+          const slamPois = poiList.filter(p => p.slam_x != null && p.slam_y != null && p.slam_z != null)
+
+          const POI_COLORS = {
+            entrance: 0x4ade80, junction: 0x8b5cf6, squeeze: 0xef4444, water: 0x38bdf8,
+            formation: 0xfbbf24, hazard: 0xff6b6b, biology: 0x10b981, camp: 0xf97316,
+            survey_station: 0x6366f1, transition: 0xec4899, marker: 0xa1a1aa, waypoint: 0xfb923c,
+          }
+
+          for (const poi of slamPois) {
+            const color = POI_COLORS[poi.poi_type] || 0xf472b6
+
+            // Sphere marker (large enough to be visible at cave scale)
+            const geo = new THREE.SphereGeometry(0.6, 16, 16)
+            const mat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.85 })
+            const mesh = new THREE.Mesh(geo, mat)
+            mesh.position.set(poi.slam_x, poi.slam_y, poi.slam_z)
+            mesh.renderOrder = 999
+            scene.add(mesh)
+
+            // Pulsing ring around sphere for visibility
+            const ringGeo = new THREE.RingGeometry(0.8, 1.0, 24)
+            const ringMat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: 0.5 })
+            const ring = new THREE.Mesh(ringGeo, ringMat)
+            ring.position.set(poi.slam_x, poi.slam_y, poi.slam_z)
+            ring.renderOrder = 999
+            scene.add(ring)
+
+            // Vertical line below marker
+            const lineGeo = new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(poi.slam_x, poi.slam_y, poi.slam_z),
+              new THREE.Vector3(poi.slam_x, poi.slam_y - 2.0, poi.slam_z),
+            ])
+            const lineMat = new THREE.LineBasicMaterial({ color, depthTest: false })
+            const line = new THREE.Line(lineGeo, lineMat)
+            line.renderOrder = 999
+            scene.add(line)
+
+            // Text sprite label (larger)
+            const label = poi.label || poi.poi_type || 'POI'
+            const canvas = document.createElement('canvas')
+            const ctx = canvas.getContext('2d')
+            canvas.width = 512
+            canvas.height = 128
+            ctx.font = 'bold 48px Ubuntu, sans-serif'
+            ctx.strokeStyle = '#000000'
+            ctx.lineWidth = 4
+            ctx.textAlign = 'center'
+            ctx.strokeText(label, 256, 80)
+            ctx.fillStyle = '#' + color.toString(16).padStart(6, '0')
+            ctx.fillText(label, 256, 80)
+
+            const texture = new THREE.CanvasTexture(canvas)
+            const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true })
+            const sprite = new THREE.Sprite(spriteMat)
+            sprite.position.set(poi.slam_x, poi.slam_y + 1.5, poi.slam_z)
+            sprite.scale.set(4.0, 1.0, 1)
+            sprite.renderOrder = 1000
+            scene.add(sprite)
+
+            console.log(`Explorer POI: "${label}" at (${poi.slam_x.toFixed(1)}, ${poi.slam_y.toFixed(1)}, ${poi.slam_z.toFixed(1)})`)
+          }
+          console.log(`Explorer: loaded ${slamPois.length} POIs with SLAM coords`)
+        })
+        .catch(err => console.warn('Failed to load explorer POIs:', err))
+    }
+
     // ── Click to lock ──
     const onClick = () => container.requestPointerLock()
     container.addEventListener('click', onClick)

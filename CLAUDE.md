@@ -940,7 +940,10 @@ This project includes:
   - SelectionPanel: floating bottom bar with point count, paint colors, delete/clear buttons
   - Save/Load projects: FormData multipart upload, auto-publish merged GLB to explorer, cache-busting
   - Trajectory line: yellow THREE.Line from keyframe positions, toggle visibility in cloud panel
-  - POI tool (I key): place POIs on point cloud via raycast, 12 types matching database, 3D sphere markers
+  - Place POI tool (I key): place POIs on point cloud via raycast, 12 types matching database, 3D sphere markers
+  - Move POI tool (M key): select and drag existing POIs with TransformControls gizmo
+  - POI-cloud parenting: POIs stored in cloud-local coordinates, move with parent cloud, independently movable
+  - POI rendering in 3D Cave Explorer: spheres + rings + labels via direct fetch with JWT auth
   - POI database sync: import existing cave POIs (SLAM coords) on load, sync changes back on save (POST/PATCH/DELETE)
   - Zustand store (`editorStore.js`) for all state
   - Route `/editor`, `/editor/:caveId` (lazy-loaded)
