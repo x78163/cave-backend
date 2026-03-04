@@ -1748,8 +1748,8 @@ def _publish_merged_glb(request, cave, cave_id):
             args=(str(cave_id),),
             daemon=True,
         ).start()
-    except ImportError:
-        logger.warning("open3d not available — skipping mesh generation for cave %s", cave_id)
+    except (ImportError, Exception):
+        pass  # open3d not available on this server
 
 
 def _delete_project_geometry_files(cave_id, project_id, project_state):
