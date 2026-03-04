@@ -1739,14 +1739,17 @@ def _publish_merged_glb(request, cave, cave_id):
         cave.has_map = True
         cave.save(update_fields=['has_map', 'updated_at'])
 
-    # Trigger background mesh generation
-    import threading
-    from reconstruction.mesh_from_glb import generate_mesh_for_cave
-    threading.Thread(
-        target=generate_mesh_for_cave,
-        args=(str(cave_id),),
-        daemon=True,
-    ).start()
+    # Trigger background mesh generation (requires open3d — skip if not installed)
+    try:
+        from reconstruction.mesh_from_glb import generate_mesh_for_cave
+        import threading
+        threading.Thread(
+            target=generate_mesh_for_cave,
+            args=(str(cave_id),),
+            daemon=True,
+        ).start()
+    except ImportError:
+        logger.warning("open3d not available — skipping mesh generation for cave %s", cave_id)
 
 
 def _delete_project_geometry_files(cave_id, project_id, project_state):
