@@ -177,9 +177,15 @@ async function fetchCavePois(caveId) {
   }
 }
 
-async function syncPoisToDatabase(caveId, pois, originalDbIds) {
+async function syncPoisToDatabase(caveId, pois, originalDbIds, clouds) {
   const currentDbIds = new Set(pois.filter(p => p.dbId).map(p => p.dbId))
   const updatedPois = [...pois]
+
+  // Build cloud transform lookup
+  const cloudMap = new Map()
+  if (clouds) {
+    for (const c of clouds) cloudMap.set(c.id, c.transform)
+  }
 
   // DELETE: original dbIds that are no longer in the editor
   for (const dbId of originalDbIds) {
@@ -193,13 +199,20 @@ async function syncPoisToDatabase(caveId, pois, originalDbIds) {
   // CREATE or UPDATE each POI
   for (let i = 0; i < updatedPois.length; i++) {
     const poi = updatedPois[i]
+    // Apply cloud transform to convert from cloud-local to world coordinates
+    let wx = poi.position[0], wy = poi.position[1], wz = poi.position[2]
+    if (poi.cloudId && cloudMap.has(poi.cloudId)) {
+      const v = new THREE.Vector3(wx, wy, wz)
+      v.applyMatrix4(cloudMap.get(poi.cloudId))
+      wx = v.x; wy = v.y; wz = v.z
+    }
     const payload = {
       label: poi.name || '',
       poi_type: poi.type || 'marker',
       description: poi.description || '',
-      slam_x: poi.position[0],
-      slam_y: poi.position[1],
-      slam_z: poi.position[2],
+      slam_x: wx,
+      slam_y: wy,
+      slam_z: wz,
       source: poi.source || 'editor',
     }
     // Preserve GPS coords if they exist
@@ -813,7 +826,7 @@ const useEditorStore = create((set, get) => ({
       // Sync POIs back to the mapping database (fire-and-forget)
       const syncState = get()
       if (syncState.caveId) {
-        syncPoisToDatabase(syncState.caveId, syncState.pois, syncState._originalPoiDbIds)
+        syncPoisToDatabase(syncState.caveId, syncState.pois, syncState._originalPoiDbIds, syncState.clouds)
           .then(updatedPois => {
             if (updatedPois) {
               const dbIds = updatedPois.filter(p => p.dbId).map(p => p.dbId)
