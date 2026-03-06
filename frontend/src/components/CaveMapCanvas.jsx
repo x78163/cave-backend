@@ -1,10 +1,11 @@
-import { useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react'
+import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react'
 import {
   drawSurveyGrid, drawSurveyPassageWalls, drawSurveyCenterline,
   drawSurveyStations, drawSurveySymbols, loadSymbolImages,
   drawNorthArrow, drawBranchLegend, drawSymbolLegend,
   drawSurveyScaleBar, combineBounds,
 } from '../utils/surveyCanvasRenderers'
+import { SYMBOLS, symbolToDataURL } from '../utils/surveySymbols'
 
 const POI_COLORS = {
   entrance: '#4ade80',
@@ -18,6 +19,21 @@ const POI_COLORS = {
   survey_station: '#94a3b8',
   transition: '#a78bfa',
   marker: '#e2e8f0',
+}
+
+// Map POI types to NSS cave cartography symbols
+const POI_TYPE_SYMBOLS = {
+  entrance: 'entrance_dripline',
+  junction: 'natural_bridge',
+  squeeze: 'too_tight',
+  water: 'pools',
+  formation: 'stalactites',
+  hazard: 'breakdown',
+  biology: 'guano',
+  camp: null,            // no good NSS equivalent — fallback to circle
+  survey_station: 'survey_station',
+  transition: null,      // custom diamond rendering
+  marker: null,          // fallback to circle
 }
 
 /**
@@ -35,9 +51,11 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   mode = 'quick',
   onPoiTap,
   onMapTap,
+  onPickPhoto,               // (poiId) => open photo picker for this POI
   crosshairMode = false,
   compact = true,
   selectedPoiId = null,
+  hoveredPoiId = null,
   routeOverlay = null,       // { path, waypoints, junctions, instructions, activeInstruction }
   surveyRenderData = null,   // Traditional survey computed data
   showSurvey = true,         // Toggle survey layer visibility
@@ -47,6 +65,8 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   const viewportRef = useRef({ x: 0, y: 0, scale: 1 })
   const initialFitDone = useRef(false)
   const symbolImgCacheRef = useRef({})
+  const pulseRef = useRef(0)         // animation phase for hover pulse
+  const pulseRafRef = useRef(null)
   const touchRef = useRef({
     dragging: false,
     startX: 0, startY: 0,
@@ -60,6 +80,21 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   })
   const rafRef = useRef(null)
   const heatmapCacheRef = useRef(null)
+  const poiSymbolImgRef = useRef({})  // poi_type → Image (pre-rendered NSS icons)
+  const [popupPoi, setPopupPoi] = useState(null)     // { poi, screenX, screenY }
+
+  // Convert world coords to screen (CSS) coords for popup positioning
+  const worldToScreen = useCallback((worldX, worldY) => {
+    const canvas = canvasRef.current
+    if (!canvas) return { x: 0, y: 0 }
+    const dpr = window.devicePixelRatio || 1
+    const cx = canvas.width / 2
+    const cy = canvas.height / 2
+    const vp = viewportRef.current
+    const px = (worldX * vp.scale + vp.x + cx) / dpr
+    const py = (-worldY * vp.scale + vp.y + cy) / dpr
+    return { x: px, y: py }
+  }, [])
 
 
   // Transform coordinates to map 2D using a {matrix, offset} transform.
@@ -209,6 +244,19 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       loadSymbolImages(surveyRenderData.shot_annotations, symbolImgCacheRef.current)
     }
   }, [surveyRenderData])
+
+  // Pre-load POI type NSS symbol images
+  useEffect(() => {
+    for (const [poiType, symbolKey] of Object.entries(POI_TYPE_SYMBOLS)) {
+      if (!symbolKey || poiSymbolImgRef.current[poiType]) continue
+      const svg = SYMBOLS[symbolKey]
+      if (!svg) continue
+      const color = POI_COLORS[poiType] || '#e2e8f0'
+      const img = new Image()
+      img.src = symbolToDataURL(svg, color)
+      poiSymbolImgRef.current[poiType] = img
+    }
+  }, [])
 
   // Render
   const render = useCallback(() => {
@@ -516,6 +564,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
     for (const poi of levelPois) {
       const color = POI_COLORS[poi.poi_type] || POI_COLORS.marker
       const isSelected = poi.id === selectedPoiId
+      const isHovered = poi.id === hoveredPoiId
       const isTransition = poi.poi_type === 'transition'
 
       if (isTransition) {
@@ -551,45 +600,92 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
         ctx.fillText('\u21C5', poi.slam_x, -poi.slam_y)
         ctx.restore()
 
+        // Hover pulse ring for transitions
+        if (isHovered) {
+          const pulse = 0.5 + 0.5 * Math.sin(pulseRef.current)
+          const pulseR = sz * (2.0 + pulse * 0.8)
+          ctx.beginPath()
+          ctx.arc(poi.slam_x, poi.slam_y, pulseR, 0, Math.PI * 2)
+          ctx.strokeStyle = color
+          ctx.lineWidth = 2 / vp.scale
+          ctx.globalAlpha = 0.3 + pulse * 0.5
+          ctx.stroke()
+          ctx.globalAlpha = 1
+        }
+
         // Label always visible for transitions
         if (poi.label) {
+          const fontSize = Math.max(10, 12) / vp.scale
+          const labelY = -poi.slam_y - sz - 4 / vp.scale
           ctx.save()
           ctx.scale(1, -1)
-          ctx.fillStyle = color
-          ctx.font = `bold ${Math.max(10, 12) / vp.scale}px system-ui`
+          ctx.font = `bold ${fontSize}px system-ui`
           ctx.textAlign = 'center'
-          ctx.fillText(poi.label, poi.slam_x, -poi.slam_y - sz - 4 / vp.scale)
+          ctx.strokeStyle = '#0a0a14'
+          ctx.lineWidth = 3 / vp.scale
+          ctx.lineJoin = 'round'
+          ctx.strokeText(poi.label, poi.slam_x, labelY)
+          ctx.fillStyle = '#ffffff'
+          ctx.fillText(poi.label, poi.slam_x, labelY)
           ctx.restore()
         }
       } else {
-        // Standard POI: colored circle
+        // Standard POI: NSS symbol icon or fallback circle
+        const symbolImg = poiSymbolImgRef.current[poi.poi_type]
+        const iconSize = (isSelected ? poiRadius * 3.6 : poiRadius * 3.0)
 
-        // Outer glow for selected
-        if (isSelected) {
-          ctx.fillStyle = color + '40'
-          ctx.beginPath()
-          ctx.arc(poi.slam_x, poi.slam_y, poiRadius * 2.5, 0, Math.PI * 2)
-          ctx.fill()
-        }
-
-        // Marker circle
-        ctx.fillStyle = color
+        // Glow backdrop for contrast against dark background
+        ctx.fillStyle = color + (isSelected || isHovered ? '50' : '28')
         ctx.beginPath()
-        ctx.arc(poi.slam_x, poi.slam_y, isSelected ? poiRadius * 1.3 : poiRadius, 0, Math.PI * 2)
+        ctx.arc(poi.slam_x, poi.slam_y, iconSize * 1.1, 0, Math.PI * 2)
         ctx.fill()
 
-        // Border
-        ctx.strokeStyle = '#0a0a14'
-        ctx.lineWidth = 1.5 / vp.scale
-        ctx.stroke()
+        if (symbolImg && symbolImg.complete && symbolImg.naturalWidth > 0) {
+          // Draw NSS SVG icon centered on POI
+          ctx.save()
+          ctx.translate(poi.slam_x, poi.slam_y)
+          ctx.scale(1, -1) // flip Y for image rendering
+          ctx.drawImage(symbolImg, -iconSize / 2, -iconSize / 2, iconSize, iconSize)
+          ctx.restore()
+        } else {
+          // Fallback: colored circle with bright border
+          ctx.fillStyle = color
+          ctx.beginPath()
+          ctx.arc(poi.slam_x, poi.slam_y, isSelected ? poiRadius * 1.3 : poiRadius, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.strokeStyle = '#ffffffa0'
+          ctx.lineWidth = 1.5 / vp.scale
+          ctx.stroke()
+        }
 
-        // Label at high zoom
-        if (vp.scale > labelMinScale && poi.label) {
+        // Hover pulse ring
+        if (isHovered) {
+          const pulse = 0.5 + 0.5 * Math.sin(pulseRef.current)
+          const pulseR = iconSize * (1.3 + pulse * 0.6)
+          ctx.beginPath()
+          ctx.arc(poi.slam_x, poi.slam_y, pulseR, 0, Math.PI * 2)
+          ctx.strokeStyle = color
+          ctx.lineWidth = 2 / vp.scale
+          ctx.globalAlpha = 0.3 + pulse * 0.5
+          ctx.stroke()
+          ctx.globalAlpha = 1
+        }
+
+        // Floating label above POI (always visible)
+        if (poi.label) {
+          const fontSize = Math.max(10, 11) / vp.scale
           ctx.save()
           ctx.scale(1, -1)
-          ctx.fillStyle = color
-          ctx.font = `bold ${11 / vp.scale}px system-ui`
-          ctx.fillText(poi.label, poi.slam_x + poiRadius * 1.8, -poi.slam_y + 4 / vp.scale)
+          ctx.font = `bold ${fontSize}px system-ui`
+          const labelY = -poi.slam_y - iconSize - 3 / vp.scale
+          // Text shadow for contrast
+          ctx.strokeStyle = '#0a0a14'
+          ctx.lineWidth = 3 / vp.scale
+          ctx.lineJoin = 'round'
+          ctx.textAlign = 'center'
+          ctx.strokeText(poi.label, poi.slam_x, labelY)
+          ctx.fillStyle = '#ffffff'
+          ctx.fillText(poi.label, poi.slam_x, labelY)
           ctx.restore()
         }
       }
@@ -613,7 +709,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       drawBranchLegend(ctx, surveyRenderData, canvas)
       drawSymbolLegend(ctx, surveyRenderData, symbolImgCacheRef.current, canvas, surveyUsedKeys)
     }
-  }, [mapData, selectedLevel, mode, getLevelPois, crosshairMode, selectedPoiId, surveyRenderData, showSurvey])
+  }, [mapData, selectedLevel, mode, getLevelPois, crosshairMode, selectedPoiId, hoveredPoiId, surveyRenderData, showSurvey])
 
   // Schedule render (cancels pending to ensure latest render closure is used)
   const scheduleRender = useCallback(() => {
@@ -623,6 +719,11 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       render()
     })
   }, [render])
+
+  // Dismiss popup when selection changes externally
+  useEffect(() => {
+    if (!selectedPoiId) setPopupPoi(null)
+  }, [selectedPoiId])
 
   // Expose control methods to parent via ref
   useImperativeHandle(ref, () => ({
@@ -650,6 +751,26 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
 
   // Re-render when visual props change (no viewport reset)
   useEffect(() => { scheduleRender() }, [selectedLevel, crosshairMode, selectedPoiId, pois, showSurvey, scheduleRender])
+
+  // Pulse animation loop when a POI is hovered
+  useEffect(() => {
+    if (!hoveredPoiId) {
+      if (pulseRafRef.current) cancelAnimationFrame(pulseRafRef.current)
+      pulseRafRef.current = null
+      pulseRef.current = 0
+      scheduleRender() // clear stale pulse ring
+      return
+    }
+    let running = true
+    const animate = () => {
+      if (!running) return
+      pulseRef.current = (pulseRef.current + 0.04) % (Math.PI * 2)
+      render()
+      pulseRafRef.current = requestAnimationFrame(animate)
+    }
+    pulseRafRef.current = requestAnimationFrame(animate)
+    return () => { running = false; if (pulseRafRef.current) cancelAnimationFrame(pulseRafRef.current) }
+  }, [hoveredPoiId, render])
 
   // --- Touch / pointer handlers ---
 
@@ -717,7 +838,10 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
     const dx = (sx - t.startX) * dpr
     const dy = (sy - t.startY) * dpr
 
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) t.moved = true
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      t.moved = true
+      if (popupPoi) setPopupPoi(null)
+    }
 
     viewportRef.current = {
       ...viewportRef.current,
@@ -725,7 +849,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       y: t.startVpY + dy,
     }
     scheduleRender()
-  }, [scheduleRender])
+  }, [scheduleRender, popupPoi])
 
   const handlePointerUp = useCallback((e) => {
     const t = touchRef.current
@@ -742,10 +866,13 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
         onMapTap(world)
       } else {
         const poi = hitTestPoi(sx, sy)
-        if (poi && onPoiTap) {
-          onPoiTap(poi)
-        } else if (onPoiTap) {
-          onPoiTap(null)  // deselect
+        if (poi) {
+          const screen = worldToScreen(poi.slam_x, poi.slam_y)
+          setPopupPoi({ poi, screenX: screen.x, screenY: screen.y })
+          if (onPoiTap) onPoiTap(poi)
+        } else {
+          setPopupPoi(null)
+          if (onPoiTap) onPoiTap(null)  // deselect
         }
       }
     }
@@ -806,6 +933,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   // Scroll wheel zoom
   const handleWheel = useCallback((e) => {
     e.preventDefault()
+    if (popupPoi) setPopupPoi(null)
     const factor = e.deltaY < 0 ? 1.15 : 0.87
     const vp = viewportRef.current
 
@@ -825,7 +953,7 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       scale: newScale,
     }
     scheduleRender()
-  }, [scheduleRender])
+  }, [scheduleRender, popupPoi])
 
   return (
     <div ref={containerRef} className={`w-full ${compact ? 'h-[450px]' : 'flex-1'} relative`}>
@@ -841,6 +969,82 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
         onTouchEnd={handleTouchEnd}
         onWheel={handleWheel}
       />
+
+      {/* POI detail popup */}
+      {popupPoi && (() => {
+        const { poi, screenX, screenY } = popupPoi
+        const color = POI_COLORS[poi.poi_type] || POI_COLORS.marker
+        const typeLabel = poi.poi_type?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        const photoUrl = poi.cave_photo_url || poi.photo || null
+        const symbolKey = POI_TYPE_SYMBOLS[poi.poi_type]
+        const symbolSvg = symbolKey ? SYMBOLS[symbolKey] : null
+        // Position popup above the POI, clamped to container bounds
+        const container = containerRef.current
+        const cw = container?.clientWidth || 300
+        const ch = container?.clientHeight || 300
+        const popupW = 220
+        let left = Math.max(8, Math.min(cw - popupW - 8, screenX - popupW / 2))
+        let top = screenY - 16  // above the marker
+        const above = top > 120 // enough room above?
+        if (!above) top = screenY + 24 // below instead
+        return (
+          <div
+            className="absolute z-20 pointer-events-auto"
+            style={{ left, top: above ? undefined : top, bottom: above ? (ch - top) : undefined, width: popupW }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-[var(--cyber-surface)] border border-[var(--cyber-border)] rounded-xl shadow-lg
+              shadow-black/40 overflow-hidden">
+              {photoUrl && (
+                <img src={photoUrl} alt="" className="w-full h-28 object-cover" />
+              )}
+              <div className="p-2.5">
+                <div className="flex items-center gap-2 mb-1">
+                  {symbolSvg ? (
+                    <span className="w-5 h-5 flex-shrink-0"
+                      style={{ color }}
+                      dangerouslySetInnerHTML={{ __html: symbolSvg }} />
+                  ) : (
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: color }} />
+                  )}
+                  <span className="text-white text-sm font-semibold truncate">
+                    {poi.label || 'Unnamed POI'}
+                  </span>
+                </div>
+                <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold mb-1"
+                  style={{ color, background: color + '18', border: `1px solid ${color}40` }}>
+                  {typeLabel}
+                </span>
+                {poi.description && (
+                  <p className="text-[var(--cyber-text-dim)] text-xs mt-1 line-clamp-3">
+                    {poi.description}
+                  </p>
+                )}
+                {/* Photo action */}
+                {onPickPhoto && !photoUrl && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onPickPhoto(poi.id) }}
+                    className="mt-1.5 text-[var(--cyber-text-dim)] text-[10px] hover:text-[var(--cyber-cyan)]
+                      transition-colors flex items-center gap-1"
+                  >
+                    <span className="text-xs">&#x1F4F7;</span> Attach Photo
+                  </button>
+                )}
+              </div>
+            </div>
+            {/* Arrow pointer */}
+            <div className="absolute left-1/2 -translate-x-1/2"
+              style={{
+                [above ? 'bottom' : 'top']: -6,
+                width: 0, height: 0,
+                borderLeft: '6px solid transparent',
+                borderRight: '6px solid transparent',
+                [above ? 'borderTop' : 'borderBottom']: '6px solid var(--cyber-border)',
+              }}
+            />
+          </div>
+        )
+      })()}
 
       {/* Zoom controls */}
       <div className="absolute bottom-3 left-3 flex flex-col gap-1.5 z-10">

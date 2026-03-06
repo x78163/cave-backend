@@ -63,6 +63,7 @@ export default function CaveMapSection({
   const [routePlacedPoint, setRoutePlacedPoint] = useState(null)
   const [savedRoutes, setSavedRoutes] = useState([])
   const [savedRoutesLoading, setSavedRoutesLoading] = useState(false)
+  const [hoveredPoiId, setHoveredPoiId] = useState(null)
   const canvasRef = useRef(null)
   const poiListRef = useRef(null)
 
@@ -137,6 +138,38 @@ export default function CaveMapSection({
     fetchMapData(mode)
   }, [currentMode, fetchMapData])
 
+  // Invert world_to_map transform: map-space (mx, my) + known z → SLAM-space (x, y)
+  const invertMapTransform = useCallback((mx, my, z) => {
+    const t = mapData?.world_to_map
+    if (!t) return { x: mx, y: my, z }
+    const m = t.matrix
+    const o = t.offset
+    // Subtract z contribution and offset
+    const rhs0 = mx - o[0] - m[0][2] * z
+    const rhs1 = my - o[1] - m[1][2] * z
+    // Solve 2x2 system via Cramer's rule
+    const det = m[0][0] * m[1][1] - m[0][1] * m[1][0]
+    if (Math.abs(det) < 1e-12) return { x: mx, y: my, z }
+    return {
+      x: (rhs0 * m[1][1] - rhs1 * m[0][1]) / det,
+      y: (m[0][0] * rhs1 - m[1][0] * rhs0) / det,
+      z,
+    }
+  }, [mapData])
+
+  // Apply world_to_map transform: SLAM-space → map-space
+  const applyMapTransform = useCallback((sx, sy, sz) => {
+    const t = mapData?.world_to_map
+    if (!t) return { x: sx, y: sy }
+    const m = t.matrix
+    const o = t.offset
+    const z = sz ?? 0
+    return {
+      x: m[0][0] * sx + m[0][1] * sy + m[0][2] * z + o[0],
+      y: m[1][0] * sx + m[1][1] * sy + m[1][2] * z + o[1],
+    }
+  }, [mapData])
+
   // Handle map tap (crosshair mode -> place POI or route waypoint)
   const handleMapTap = useCallback((world) => {
     if (!mapData) return
@@ -146,9 +179,12 @@ export default function CaveMapSection({
     }
     if (!crosshairMode) return
     const level = mapData.levels[selectedLevel]
-    setAddPoiCoords({ x: world.x, y: world.y, z: level ? level.z_center : 0 })
+    const z = level ? level.z_center : 0
+    // world coords are in map-space; invert to SLAM-space for storage
+    const slam = invertMapTransform(world.x, world.y, z)
+    setAddPoiCoords({ x: slam.x, y: slam.y, z: slam.z })
     setCrosshairMode(false)
-  }, [crosshairMode, routePlaceMode, mapData, selectedLevel])
+  }, [crosshairMode, routePlaceMode, mapData, selectedLevel, invertMapTransform])
 
   // Route builder callbacks
   const handleRouteComputed = useCallback((routeData) => {
@@ -209,11 +245,12 @@ export default function CaveMapSection({
     if (poiLevel !== selectedLevel) {
       setSelectedLevel(poiLevel)
     }
-    // Center map on POI
+    // Center map on POI (transform SLAM coords to map-space)
     if (canvasRef.current && poi.slam_x != null) {
-      canvasRef.current.centerOn(poi.slam_x, poi.slam_y, ONE_METER_SCALE)
+      const mapped = applyMapTransform(poi.slam_x, poi.slam_y, poi.slam_z)
+      canvasRef.current.centerOn(mapped.x, mapped.y, ONE_METER_SCALE)
     }
-  }, [getPoiLevel, selectedLevel])
+  }, [getPoiLevel, selectedLevel, applyMapTransform])
 
   // Submit new POI
   const submitPoi = useCallback(async (poiData) => {
@@ -448,9 +485,11 @@ export default function CaveMapSection({
           mode={currentMode}
           onPoiTap={surveyOnly ? undefined : handlePoiTap}
           onMapTap={surveyOnly ? undefined : handleMapTap}
+          onPickPhoto={surveyOnly ? undefined : (poiId) => setPhotoPickerPoiId(poiId)}
           crosshairMode={!surveyOnly && (crosshairMode || routePlaceMode)}
           compact={!fullscreen}
           selectedPoiId={selectedPoi?.id}
+          hoveredPoiId={hoveredPoiId}
           routeOverlay={routeOverlay}
           surveyRenderData={surveyRenderData}
           showSurvey={showSurvey}
@@ -549,6 +588,7 @@ export default function CaveMapSection({
                         onDelete={deletePoi}
                         onPickPhoto={() => setPhotoPickerPoiId(poi.id)}
                         onDetachPhoto={() => detachPoiPhoto(poi.id)}
+                        onHover={(hovered) => setHoveredPoiId(hovered ? poi.id : null)}
                         levelName={mapData && mapData.levels.length > 1
                           ? mapData.levels[getPoiLevel(poi)]?.name
                           : null}
@@ -568,7 +608,7 @@ export default function CaveMapSection({
 
 // --- Sub-components ---
 
-function PoiCard({ poi, isSelected, onClick, onUpdate, onDelete, onPickPhoto, onDetachPhoto, levelName }) {
+function PoiCard({ poi, isSelected, onClick, onUpdate, onDelete, onPickPhoto, onDetachPhoto, onHover, levelName }) {
   const [editing, setEditing] = useState(false)
   const [editLabel, setEditLabel] = useState('')
   const [editDesc, setEditDesc] = useState('')
@@ -596,6 +636,8 @@ function PoiCard({ poi, isSelected, onClick, onUpdate, onDelete, onPickPhoto, on
     <div
       id={`poi-card-${poi.id}`}
       onClick={onClick}
+      onMouseEnter={() => onHover?.(true)}
+      onMouseLeave={() => onHover?.(false)}
       className={`rounded-2xl border p-3 transition-all cursor-pointer
         ${isSelected
           ? 'bg-[var(--cyber-surface)] border-[var(--cyber-cyan)] shadow-[0_0_12px_rgba(0,229,255,0.15)]'
