@@ -433,6 +433,10 @@ def cave_detail(request, cave_id):
                             PointOfInterest.objects.bulk_update(
                                 entrance_pois, ['latitude', 'longitude'],
                             )
+            # Sync to wiki if publish_to_wiki was in the update
+            if 'publish_to_wiki' in request.data:
+                from wiki.cave_sync import sync_cave_to_wiki
+                sync_cave_to_wiki(cave, editor_user=request.user)
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -545,6 +549,10 @@ def cave_description(request, cave_id):
 
         cave.description = content
         cave.save(update_fields=['description', 'updated_at'])
+
+        # Sync description to Knowledge Center wiki article
+        from wiki.cave_sync import sync_cave_to_wiki
+        sync_cave_to_wiki(cave, editor_user=request.user if request.user.is_authenticated else None)
 
         serializer = DescriptionRevisionSerializer(revision)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -659,6 +667,20 @@ def cave_map_data(request, cave_id):
             data['available_modes'] = sorted(available_modes) if available_modes else ['standard']
             data['mode'] = mode or data.get('mode', 'standard')
             return Response(data)
+
+    # No pre-existing map data — try generating from mesh
+    mesh_path = f'caves/{cave_id}/cave_mesh.glb'
+    traj_path = f'caves/{cave_id}/trajectory.json'
+    if default_storage.exists(mesh_path) and default_storage.exists(traj_path):
+        try:
+            from reconstruction.map_from_mesh import generate_map_data as gen_map
+            data = gen_map(str(cave_id))
+            if data:
+                data['available_modes'] = ['standard']
+                data['mode'] = mode or 'standard'
+                return Response(data)
+        except Exception:
+            pass
 
     return Response({'error': 'Map data file not found'}, status=status.HTTP_404_NOT_FOUND)
 

@@ -257,6 +257,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     user_has_contact_access = serializers.SerializerMethodField()
     pointcloud_url = serializers.SerializerMethodField()
     spawn_url = serializers.SerializerMethodField()
+    wiki_article_slug = serializers.SerializerMethodField()
 
     class Meta:
         model = Cave
@@ -283,6 +284,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'public_land_name', 'public_land_type', 'public_land_owner', 'public_land_access',
             'pointcloud_url', 'spawn_url',
             'visibility', 'collaboration_setting',
+            'publish_to_wiki', 'wiki_article_slug',
             'owner', 'origin_device',
             'created_at', 'updated_at',
         ]
@@ -300,6 +302,12 @@ class CaveDetailSerializer(serializers.ModelSerializer):
         if rev:
             return DescriptionRevisionSerializer(rev).data
         return None
+
+    def get_wiki_article_slug(self, obj):
+        try:
+            return obj.wiki_article.slug
+        except Exception:
+            return None
 
     def get_pending_request_count(self, obj):
         request = self.context.get('request')

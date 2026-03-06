@@ -62,6 +62,7 @@ urlpatterns = [
     path('api/caves/', include('survey.urls')),
     path('api/chat/', include('chat.urls')),
     path('api/events/', include('events.urls')),
+    path('api/wiki/', include('wiki.urls')),
 ]
 
 if settings.DEBUG:

@@ -366,7 +366,17 @@ def generate_slam_survey(request, cave_id):
     from django.core.files.storage import default_storage
     storage_path = f'caves/{cave_id}/map_data.json'
     if not default_storage.exists(storage_path):
-        return Response({'error': 'No map data available for this cave'}, status=status.HTTP_400_BAD_REQUEST)
+        # Try auto-generating from mesh
+        mesh_path = f'caves/{cave_id}/cave_mesh.glb'
+        traj_path = f'caves/{cave_id}/trajectory.json'
+        if default_storage.exists(mesh_path) and default_storage.exists(traj_path):
+            try:
+                from reconstruction.map_from_mesh import generate_map_data as gen_map
+                gen_map(str(cave_id))
+            except Exception:
+                pass
+        if not default_storage.exists(storage_path):
+            return Response({'error': 'No map data available for this cave'}, status=status.HTTP_400_BAD_REQUEST)
 
     with default_storage.open(storage_path, 'r') as f:
         map_data = json.load(f)

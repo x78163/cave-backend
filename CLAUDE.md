@@ -845,7 +845,10 @@ This project includes:
     - Combined mode: survey layers drawn between SLAM trajectory and POIs, survey toggle button in toolbar
     - Offscreen canvas compositing for uniform alpha passage wall fills
     - Combined bounding box calculation (`combineBounds`) for fitToView across both datasets
-  - 3D cave explorer (Three.js point cloud viewer)
+  - 3D cave explorer (Three.js) with 3-mode toggle: Points / Wireframe / Mesh
+    - BPA mesh + wireframe auto-generated server-side when point cloud is saved (`reconstruction/mesh_from_glb.py`)
+    - Wireframe: pre-built LINES GLB with fat lines (LineSegments2), cyberpunk cyan
+    - Mesh: solid BPA mesh with vertex colors, flashlight lighting, fog depth
   - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs), coordinate change cascades delta to all entrance POIs
   - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), nearby cave markers (purple), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay, map tools toolbar, coordinate readout)
   - GPS "My Location" button on all map viewports (Explore, CaveDetail, FineTuneMapModal, EventDetail): browser Geolocation API, pulsing blue dot + accuracy ring, real-time position tracking, toggle between user location and cave/home center
@@ -1010,7 +1013,8 @@ This project includes:
 | `frontend/src/components/editor/SaveProjectModal.jsx` | Project save dialog: name input, update vs save-as |
 | `frontend/src/components/editor/LoadProjectModal.jsx` | Project load dialog: list saved projects, load/delete |
 | `frontend/src/utils/alignmentMath.js` | Pure math: 3x3 SVD (Jacobi), Procrustes rigid registration, KD-tree, ICP, downsample |
-| `caves/management/commands/generate_pointcloud_glb.py` | PCD/keyframe → GLB conversion, trajectory.json generation |
+| `caves/management/commands/generate_pointcloud_glb.py` | PCD/keyframe → GLB conversion, trajectory.json generation, triggers mesh generation |
+| `reconstruction/mesh_from_glb.py` | Standalone BPA mesh + wireframe generation from point cloud GLB (no ReconstructionJob dependency) |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
 | `survey/slam_survey.py` | SLAM-to-survey conversion: station selection, 2D raycasting for LRUD, lead detection, multi-level merging |
 | `survey/models.py` | CaveSurvey (source: manual/slam), SurveyStation, SurveyShot models |

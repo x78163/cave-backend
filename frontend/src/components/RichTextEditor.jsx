@@ -41,7 +41,7 @@ function markdownToHtml(md) {
   return html
 }
 
-function RichTextEditor({ content, onChange, placeholder, caveId }) {
+function RichTextEditor({ content, onChange, placeholder, caveId, articleSlug }) {
   const fileInputRef = useRef(null)
 
   const editor = useEditor({
@@ -86,19 +86,39 @@ function RichTextEditor({ content, onChange, placeholder, caveId }) {
 
   const handleImageUpload = useCallback(async (e) => {
     const file = e.target.files?.[0]
-    if (!file || !editor || !caveId) return
+    if (!file || !editor) return
 
-    // Upload to server as a cave photo, then insert URL
-    const formData = new FormData()
-    formData.append('image', file)
-    formData.append('caption', 'Inline description image')
-    formData.append('tags', 'description')
+    // Determine upload endpoint
+    const uploadUrl = caveId
+      ? `/caves/${caveId}/photos/`
+      : articleSlug
+        ? `/wiki/articles/${articleSlug}/images/`
+        : null
 
-    try {
-      const res = await api.post(`/caves/${caveId}/photos/`, formData)
-      editor.chain().focus().setImage({ src: res.data.image, alt: file.name }).run()
-    } catch (err) {
-      // Fallback: embed as base64
+    if (uploadUrl) {
+      const formData = new FormData()
+      formData.append('image', file)
+      if (caveId) {
+        formData.append('caption', 'Inline description image')
+        formData.append('tags', 'description')
+      } else {
+        formData.append('caption', file.name)
+      }
+
+      try {
+        const res = await api.post(uploadUrl, formData)
+        const src = res.data.image
+        editor.chain().focus().setImage({ src, alt: file.name }).run()
+      } catch (err) {
+        // Fallback: embed as base64
+        const reader = new FileReader()
+        reader.onload = () => {
+          editor.chain().focus().setImage({ src: reader.result, alt: file.name }).run()
+        }
+        reader.readAsDataURL(file)
+      }
+    } else {
+      // No server endpoint — embed as base64
       const reader = new FileReader()
       reader.onload = () => {
         editor.chain().focus().setImage({ src: reader.result, alt: file.name }).run()
@@ -107,7 +127,7 @@ function RichTextEditor({ content, onChange, placeholder, caveId }) {
     }
 
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }, [editor, caveId])
+  }, [editor, caveId, articleSlug])
 
   const addLink = useCallback(() => {
     if (!editor) return

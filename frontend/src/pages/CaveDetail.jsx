@@ -765,20 +765,67 @@ export default function CaveDetail() {
         {/* Description - Wiki style with markdown */}
         <div className="px-4 py-3">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-white font-semibold">Description</h3>
-            <div className="flex gap-2">
-              {cave.revision_count > 0 && (
-                <button onClick={fetchHistory}
-                  className="text-[#555570] text-xs hover:text-[var(--cyber-text-dim)]">
-                  History ({cave.revision_count})
-                </button>
+            <div className="flex items-center gap-3">
+              <h3 className="text-white font-semibold">Description</h3>
+              {cave.wiki_article_slug && (
+                <a
+                  href={`/wiki/${cave.wiki_article_slug}`}
+                  className="text-xs no-underline px-2 py-0.5 rounded-full"
+                  style={{
+                    background: 'rgba(0, 232, 255, 0.1)',
+                    color: 'var(--cyber-cyan)',
+                    border: '1px solid rgba(0, 232, 255, 0.2)',
+                  }}
+                >
+                  Knowledge Center
+                </a>
               )}
-              {!editingDesc && (
-                <button onClick={startEditDesc}
-                  className="text-[var(--cyber-cyan)] text-sm hover:underline">
-                  Edit
-                </button>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Publish to Knowledge Center toggle — owner/admin only */}
+              {canManage && (
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <div
+                    className="relative w-8 h-4 rounded-full transition-colors"
+                    style={{
+                      background: cave.publish_to_wiki
+                        ? 'var(--cyber-cyan)'
+                        : 'var(--cyber-border)',
+                    }}
+                    onClick={async () => {
+                      try {
+                        await apiFetch(`/caves/${caveId}/`, {
+                          method: 'PATCH',
+                          body: { publish_to_wiki: !cave.publish_to_wiki },
+                        })
+                        fetchCave()
+                      } catch (err) { console.error('Failed to toggle wiki publish:', err) }
+                    }}
+                  >
+                    <div
+                      className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
+                      style={{ left: cave.publish_to_wiki ? '1.05rem' : '0.15rem' }}
+                    />
+                  </div>
+                  <span className="text-xs" style={{ color: 'var(--cyber-text-dim)' }}>
+                    Publish
+                  </span>
+                </label>
               )}
+              <div className="flex gap-2">
+                {cave.revision_count > 0 && (
+                  <button onClick={fetchHistory}
+                    className="text-[#555570] text-xs hover:text-[var(--cyber-text-dim)]">
+                    History ({cave.revision_count})
+                  </button>
+                )}
+                {!editingDesc && (
+                  <button onClick={startEditDesc}
+                    className="text-[var(--cyber-cyan)] text-sm hover:underline">
+                    Edit
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

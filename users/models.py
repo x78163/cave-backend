@@ -30,6 +30,9 @@ class UserProfile(AbstractUser):
     allow_dms = models.BooleanField(
         default=True, help_text='Allow direct messages from other users',
     )
+    is_wiki_editor = models.BooleanField(
+        default=False, help_text='Can publish wiki edits directly without review',
+    )
 
     invited_by = models.ForeignKey(
         'self', on_delete=models.SET_NULL,

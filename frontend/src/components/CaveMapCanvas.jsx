@@ -62,12 +62,27 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
   const heatmapCacheRef = useRef(null)
 
 
+  // Transform coordinates to map 2D using a {matrix, offset} transform.
+  // POIs use world_to_map (editor transform already baked into slam coords).
+  const applyTransform = useCallback((t, x, y, z) => {
+    if (!t) return [x, y]
+    const m = t.matrix
+    const o = t.offset
+    const zz = z ?? 0
+    return [
+      m[0][0] * x + m[0][1] * y + m[0][2] * zz + o[0],
+      m[1][0] * x + m[1][1] * y + m[1][2] * zz + o[1],
+    ]
+  }, [])
+
   // Get POIs belonging to the currently selected level.
   // Each POI is assigned to the level with the closest z_center.
+  // Uses world_to_map (not slam_to_map) because POI slam_x/y/z already
+  // have the editor transform baked in from the editor save.
   const getLevelPois = useCallback(() => {
     if (!mapData || !mapData.levels[selectedLevel]) return []
     const levels = mapData.levels
-    return pois.filter(p => {
+    const filtered = pois.filter(p => {
       if (p.slam_x == null || p.slam_y == null) return false
       if (p.slam_z == null) return true  // no Z info — show on all levels
       // Assign to level with closest z_center
@@ -82,7 +97,16 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
       }
       return bestLevel === selectedLevel
     })
-  }, [mapData, pois, selectedLevel])
+    // Apply world_to_map transform if available (PCA projection only)
+    const t = mapData.world_to_map
+    if (t) {
+      return filtered.map(p => {
+        const [mx, my] = applyTransform(t, p.slam_x, p.slam_y, p.slam_z)
+        return { ...p, slam_x: mx, slam_y: my }
+      })
+    }
+    return filtered
+  }, [mapData, pois, selectedLevel, applyTransform])
 
   // Fit map to canvas view (combines SLAM + survey bounds when both present)
   const fitToView = useCallback(() => {
@@ -310,13 +334,15 @@ const CaveMapCanvas = forwardRef(function CaveMapCanvas({
         for (let i = 1; i < polyline.length; i++) {
           ctx.lineTo(polyline[i][0], polyline[i][1])
         }
-        ctx.closePath()
+        if (mapData.source !== 'mesh_projection') ctx.closePath()
         ctx.stroke()
       }
     }
 
-    // Draw trajectory
-    if (level.trajectory && level.trajectory.length > 1) {
+    // Draw trajectory (skip for mesh_projection — sparse keyframes create
+    // misleading straight lines that cut through walls)
+    if (level.trajectory && level.trajectory.length > 1
+        && mapData.source !== 'mesh_projection') {
       ctx.strokeStyle = mode === 'heatmap'
         ? 'rgba(255, 255, 255, 0.3)'
         : 'rgba(0, 229, 255, 0.25)'

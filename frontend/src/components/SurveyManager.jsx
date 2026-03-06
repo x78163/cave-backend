@@ -553,8 +553,10 @@ export default function SurveyManager({ caveId, hasMap, onRenderData }) {
     setBranchFromStation({ from: stationName, suggestedTo: nextPrefix + '1' })
   }, [renderData])
 
+  const [generateError, setGenerateError] = useState(null)
   const handleGenerateFromMap = useCallback(async () => {
     setGenerating(true)
+    setGenerateError(null)
     try {
       const result = await apiFetch(`/caves/${caveId}/generate-slam-survey/`, {
         method: 'POST',
@@ -568,6 +570,8 @@ export default function SurveyManager({ caveId, hasMap, onRenderData }) {
       }
     } catch (err) {
       console.error('Generate SLAM survey failed:', err)
+      const msg = err?.error || err?.detail || err?.message || 'Generation failed'
+      setGenerateError(msg)
     } finally {
       setGenerating(false)
     }
@@ -588,14 +592,19 @@ export default function SurveyManager({ caveId, hasMap, onRenderData }) {
             </h3>
             <div className="flex gap-2">
               {hasMap && !surveys.some(s => s.source === 'slam') && (
-                <button
-                  onClick={handleGenerateFromMap}
-                  disabled={generating}
-                  className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs disabled:opacity-50"
-                  style={{ borderColor: 'var(--cyber-magenta)', color: 'var(--cyber-magenta)' }}
-                >
-                  {generating ? 'Generating...' : 'Generate from Map'}
-                </button>
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    onClick={handleGenerateFromMap}
+                    disabled={generating}
+                    className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs disabled:opacity-50"
+                    style={{ borderColor: 'var(--cyber-magenta)', color: 'var(--cyber-magenta)' }}
+                  >
+                    {generating ? 'Generating...' : 'Generate from Map'}
+                  </button>
+                  {generateError && (
+                    <span className="text-xs" style={{ color: 'var(--cyber-red, #ef4444)' }}>{generateError}</span>
+                  )}
+                </div>
               )}
               <button
                 onClick={() => setCreating(true)}

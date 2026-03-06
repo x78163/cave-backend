@@ -125,6 +125,10 @@ class Cave(models.Model):
         max_length=20, choices=CollaborationSetting.choices,
         default=CollaborationSetting.READ_ONLY
     )
+    publish_to_wiki = models.BooleanField(
+        default=True,
+        help_text='Sync cave description to Knowledge Center wiki article',
+    )
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='owned_caves'

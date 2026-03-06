@@ -61,14 +61,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name',
             'bio', 'avatar', 'avatar_preset', 'location',
             'specialties', 'onboarding_complete', 'allow_dms',
-            'is_staff',
+            'is_staff', 'is_wiki_editor',
             'caves_explored', 'total_mapping_distance', 'expeditions_count',
             'date_joined', 'updated_at',
         ]
         read_only_fields = [
             'id', 'username', 'email', 'date_joined', 'updated_at',
             'caves_explored', 'total_mapping_distance', 'expeditions_count',
-            'is_staff',
+            'is_staff', 'is_wiki_editor',
         ]
 
     def validate_specialties(self, value):
