@@ -64,6 +64,7 @@ export default function CaveMapSection({
   const [savedRoutes, setSavedRoutes] = useState([])
   const [savedRoutesLoading, setSavedRoutesLoading] = useState(false)
   const [hoveredPoiId, setHoveredPoiId] = useState(null)
+  const [hasPreviousMap, setHasPreviousMap] = useState(false)
   const canvasRef = useRef(null)
   const poiListRef = useRef(null)
 
@@ -77,6 +78,7 @@ export default function CaveMapSection({
       setMapData(data)
       setAvailableModes(data.available_modes || [])
       setCurrentMode(data.mode || mode || 'quick')
+      setHasPreviousMap(!!data.has_previous_map)
       return true
     } catch { /* ignore */ }
     return false
@@ -137,6 +139,15 @@ export default function CaveMapSection({
     if (mode === currentMode) return
     fetchMapData(mode)
   }, [currentMode, fetchMapData])
+
+  const revertMap = useCallback(async () => {
+    try {
+      await apiFetch(`/caves/${caveId}/map-data/revert/`, { method: 'POST' })
+      await fetchMapData(null)
+    } catch (e) {
+      console.error('Failed to revert map:', e)
+    }
+  }, [caveId, fetchMapData])
 
   // Invert world_to_map transform: map-space (mx, my) + known z → SLAM-space (x, y)
   const invertMapTransform = useCallback((mx, my, z) => {
@@ -406,6 +417,17 @@ export default function CaveMapSection({
                   }`}
               >
                 {crosshairMode ? 'Cancel' : '+ POI'}
+              </button>
+            )}
+            {hasPreviousMap && (
+              <button
+                onClick={revertMap}
+                className="px-3 py-1 rounded-full text-xs bg-[var(--cyber-surface-2)]
+                  text-[var(--cyber-text-dim)] border border-[var(--cyber-border)]
+                  hover:border-orange-500 hover:text-orange-400 transition-all"
+                title="Switch to previous map version"
+              >
+                ↩ Revert
               </button>
             )}
             {!fullscreen && (

@@ -464,14 +464,6 @@ def generate_map_data(cave_id):
     """
     logger.info("Generating map data from mesh for cave %s", cave_id)
 
-    try:
-        mesh = _load_mesh(cave_id)
-    except Exception as e:
-        logger.error("Failed to load mesh for cave %s: %s", cave_id, e)
-        return None
-
-    logger.info("Mesh: %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
-
     # ── Work in raw SLAM space (Z = gravity-aligned up from IMU) ──
     # Do NOT apply editor transform to mesh/point cloud for projection.
     # The editor transform rotates SLAM space arbitrarily and destroys
@@ -483,58 +475,63 @@ def generate_map_data(cave_id):
     # Load trajectory (raw SLAM space)
     raw_positions = _load_trajectory(cave_id)
 
-    # ── PCA on raw SLAM vertices ──
-    # In SLAM space, Z is roughly vertical (IMU gravity).
-    # PCA finds the horizontal orientation (which way the cave extends).
-    R, center = _find_pca_basis(mesh.vertices, floor_hint=raw_positions)
+    # Load point cloud (preferred) and/or mesh
+    pc_verts = _load_pointcloud_vertices(cave_id)
+    mesh = None
+    try:
+        mesh = _load_mesh(cave_id)
+        logger.info("Mesh: %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
+    except Exception as e:
+        logger.warning("Could not load mesh for cave %s: %s", cave_id, e)
 
-    # ── Project mesh onto floor plane (raw SLAM space) ──
-    verts_2d = _project_to_2d(mesh.vertices, R, center)
+    if pc_verts is None and mesh is None:
+        logger.error("No point cloud or mesh found for cave %s", cave_id)
+        return None
 
-    # Choose cell size based on mesh extent
-    extent = verts_2d.max(axis=0) - verts_2d.min(axis=0)
+    # ── PCA on point cloud vertices (or mesh if no point cloud) ──
+    # Use point cloud for PCA since it always reflects the latest save,
+    # while the mesh may be stale (regenerated asynchronously).
+    pca_source = pc_verts if pc_verts is not None else mesh.vertices
+    R, center = _find_pca_basis(pca_source, floor_hint=raw_positions)
+
+    # ── Build raster from point cloud or mesh ──
+    if pc_verts is not None:
+        source_2d = _project_to_2d(pc_verts, R, center)
+    else:
+        source_2d = _project_to_2d(mesh.vertices, R, center)
+
+    # Choose cell size based on extent
+    extent = source_2d.max(axis=0) - source_2d.min(axis=0)
     max_extent = max(extent[0], extent[1])
-    # Target ~2000 cells across the longest dimension
     cell_size = max(0.05, max_extent / 2000.0)
     logger.info("2D extent: %.1f x %.1f m, cell_size=%.3fm",
                 extent[0], extent[1], cell_size)
 
-    # ── Build primary raster from point cloud (full coverage) ──
-    # The point cloud has complete cave coverage unlike the BPA mesh which
-    # may have holes.  Use point cloud as the primary source, then filter
-    # exterior noise by keeping only the largest connected component.
-    pc_verts = _load_pointcloud_vertices(cave_id)
     if pc_verts is not None:
-        pc_2d = _project_to_2d(pc_verts, R, center)  # raw SLAM space
+        # Point cloud rasterization (full coverage)
+        gx_min = float(source_2d[:, 0].min()) - cell_size
+        gy_min = float(source_2d[:, 1].min()) - cell_size
+        gx_max = float(source_2d[:, 0].max()) + cell_size
+        gy_max = float(source_2d[:, 1].max()) + cell_size
+        gc = int(math.ceil((gx_max - gx_min) / cell_size)) + 1
+        gr = int(math.ceil((gy_max - gy_min) / cell_size)) + 1
 
-        # Compute grid bounds from point cloud (wider than mesh)
-        pc_extent = pc_2d.max(axis=0) - pc_2d.min(axis=0)
-        pc_x_min = float(pc_2d[:, 0].min()) - cell_size
-        pc_y_min = float(pc_2d[:, 1].min()) - cell_size
-        pc_x_max = float(pc_2d[:, 0].max()) + cell_size
-        pc_y_max = float(pc_2d[:, 1].max()) + cell_size
-        pc_cols = int(math.ceil((pc_x_max - pc_x_min) / cell_size)) + 1
-        pc_rows = int(math.ceil((pc_y_max - pc_y_min) / cell_size)) + 1
-
-        # Clamp grid size
         max_dim = 4000
-        if pc_cols > max_dim or pc_rows > max_dim:
-            scale = max(pc_cols, pc_rows) / max_dim
+        if gc > max_dim or gr > max_dim:
+            scale = max(gc, gr) / max_dim
             cell_size = cell_size * scale
-            pc_cols = int(math.ceil((pc_x_max - pc_x_min) / cell_size)) + 1
-            pc_rows = int(math.ceil((pc_y_max - pc_y_min) / cell_size)) + 1
+            gc = int(math.ceil((gx_max - gx_min) / cell_size)) + 1
+            gr = int(math.ceil((gy_max - gy_min) / cell_size)) + 1
 
-        grid = np.zeros((pc_rows, pc_cols), dtype=bool)
-        ci = np.clip(((pc_2d[:, 0] - pc_x_min) / cell_size).astype(int), 0, pc_cols - 1)
-        ri = np.clip(((pc_2d[:, 1] - pc_y_min) / cell_size).astype(int), 0, pc_rows - 1)
+        grid = np.zeros((gr, gc), dtype=bool)
+        ci = np.clip(((source_2d[:, 0] - gx_min) / cell_size).astype(int), 0, gc - 1)
+        ri = np.clip(((source_2d[:, 1] - gy_min) / cell_size).astype(int), 0, gr - 1)
         grid[ri, ci] = True
-        gx_min, gy_min = pc_x_min, pc_y_min
-        logger.info("Point cloud grid: %dx%d, %d cells",
-                     pc_cols, pc_rows, grid.sum())
+        logger.info("Point cloud grid: %dx%d, %d cells", gc, gr, grid.sum())
     else:
         # Fallback: mesh-only rasterization
         grid, gx_min, gy_min, cell_size = _rasterize_mesh(
-            verts_2d, mesh.faces, cell_size=cell_size,
+            source_2d, mesh.faces, cell_size=cell_size,
         )
         logger.info("Grid (mesh only): %dx%d, %d cells",
                      grid.shape[1], grid.shape[0], grid.sum())
@@ -618,7 +615,7 @@ def generate_map_data(cave_id):
     heading = _compute_initial_heading(traj_2d) if traj_2d else None
 
     # ── Z range (in PCA space, for reference) ──
-    centered_raw = mesh.vertices - center
+    centered_raw = pca_source - center
     z_vals = (R @ centered_raw.T)[2, :]
     z_min = float(z_vals.min())
     z_max = float(z_vals.max())

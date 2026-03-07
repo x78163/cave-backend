@@ -12,7 +12,8 @@ from math import cos, radians
 from django.conf import settings as django_settings
 from django.db.models import Q
 from rest_framework import status
-from rest_framework.decorators import api_view, parser_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 
@@ -666,6 +667,7 @@ def cave_map_data(request, cave_id):
                 available_modes = ['standard']
             data['available_modes'] = sorted(available_modes) if available_modes else ['standard']
             data['mode'] = mode or data.get('mode', 'standard')
+            data['has_previous_map'] = default_storage.exists(f'{storage_dir}/map_data_previous.json')
             return Response(data)
 
     # No pre-existing map data — try generating from mesh
@@ -683,6 +685,37 @@ def cave_map_data(request, cave_id):
             pass
 
     return Response({'error': 'Map data file not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cave_map_revert(request, cave_id):
+    """Revert map_data.json to the previous version (before last editor publish)."""
+    from django.core.files.storage import default_storage
+
+    backup_path = f'caves/{cave_id}/map_data_previous.json'
+    main_path = f'caves/{cave_id}/map_data.json'
+
+    if not default_storage.exists(backup_path):
+        return Response({'error': 'No previous map data to revert to'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    with default_storage.open(backup_path, 'rb') as f:
+        backup_content = f.read()
+
+    # Save current as the new "previous" so user can toggle back
+    if default_storage.exists(main_path):
+        with default_storage.open(main_path, 'rb') as f:
+            current_content = f.read()
+        default_storage.delete(main_path)
+        default_storage.delete(backup_path)
+        default_storage.save(backup_path, ContentFile(current_content))
+    else:
+        default_storage.delete(backup_path)
+
+    default_storage.save(main_path, ContentFile(backup_content))
+
+    return Response({'status': 'reverted'})
 
 
 @api_view(['GET', 'PUT', 'PATCH'])
@@ -1761,17 +1794,43 @@ def _publish_merged_glb(request, cave, cave_id):
         cave.has_map = True
         cave.save(update_fields=['has_map', 'updated_at'])
 
-    # Trigger background mesh generation (requires open3d — skip if not installed)
+    # Back up existing map_data.json before replacing, so user can revert
+    main_map = f'caves/{cave_id}/map_data.json'
+    backup_map = f'caves/{cave_id}/map_data_previous.json'
+    if default_storage.exists(main_map):
+        with default_storage.open(main_map, 'rb') as f:
+            backup_content = f.read()
+        if default_storage.exists(backup_map):
+            default_storage.delete(backup_map)
+        default_storage.save(backup_map, ContentFile(backup_content))
+
+    # Delete stale map data so it gets regenerated from the new point cloud
+    for suffix in ['', '_standard', '_quick', '_detailed', '_raw_slice',
+                   '_heatmap', '_edges', '_points']:
+        stale = f'caves/{cave_id}/map_data{suffix}.json'
+        if default_storage.exists(stale):
+            default_storage.delete(stale)
+
+    # Trigger mesh + map generation in separate processes to avoid GIL contention
     try:
-        from reconstruction.mesh_from_glb import generate_mesh_for_cave
-        import threading
-        threading.Thread(
-            target=generate_mesh_for_cave,
-            args=(str(cave_id),),
-            daemon=True,
-        ).start()
-    except (ImportError, Exception):
-        pass  # open3d not available on this server
+        import subprocess
+        import sys
+        import os
+        manage_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'manage.py')
+        subprocess.Popen(
+            [sys.executable, manage_py, 'generate_mesh', str(cave_id)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        subprocess.Popen(
+            [sys.executable, manage_py, 'generate_map_from_mesh', str(cave_id)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
 
 
 def _delete_project_geometry_files(cave_id, project_id, project_state):
