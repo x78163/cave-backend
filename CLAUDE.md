@@ -1119,6 +1119,26 @@ This project includes:
 - 0002: meetup_instructions TextField on Event
 - 0003: chat_channel FK on Event (to chat.Channel)
 
+### In Development
+
+**Admin Dashboard** (Phase 1 — active):
+- Custom React admin panel on Profile page (admin tab, hidden for non-admins)
+- Cyberpunk-themed card-based layout with drill-down capability
+- Phase 1: Overview stats, user management (CRUD + content inheritance on delete), cave management, server monitoring (VPS + R2), invite codes
+- Phase 2: Audit trail (AuditLog model + middleware), traffic analytics (RequestLog middleware), performance monitoring, moderation system (ModerationRequest model + queue)
+- Phase 3: Delegated admin roles (AdminRole + AdminAssignment models), sub-admin appointment chain with permission inheritance
+- Backend: `admin_api/` Django app, all endpoints `IsAdminUser` gated
+- Server monitoring: `psutil` for VPS metrics, `boto3` for R2 stats, Daphne/WS connection tracking
+
+**OAuth + Email Verification** (planned):
+- django-allauth for Google, Facebook, LinkedIn, Apple OAuth providers
+- Email verification flow (send link, confirm, activate)
+- Coexists with current JWT auth
+
+**cavedragon.llc Email** (planned):
+- Officer email accounts (president@, etc.)
+- Cloudflare Email Routing or Zoho Mail
+
 ### Future Features (To Be Developed)
 
 **Property Sale Monitoring System**:

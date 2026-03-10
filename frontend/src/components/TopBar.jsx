@@ -4,7 +4,7 @@ import useAuthStore from '../stores/authStore'
 import useChatStore from '../stores/chatStore'
 import AvatarDisplay from './AvatarDisplay'
 
-const navItems = [
+const BASE_NAV = [
   { path: '/', label: 'Home' },
   { path: '/explore', label: 'Explore' },
   { path: '/groups', label: 'Groups' },
@@ -22,6 +22,10 @@ export default function TopBar() {
   const fetchUnreadCount = useChatStore(state => state.fetchUnreadCount)
   const pollRef = useRef(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  const navItems = user?.is_staff
+    ? [...BASE_NAV, { path: '/admin', label: 'Admin' }]
+    : BASE_NAV
 
   // Close mobile menu on route change
   useEffect(() => {

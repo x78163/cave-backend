@@ -63,6 +63,7 @@ urlpatterns = [
     path('api/chat/', include('chat.urls')),
     path('api/events/', include('events.urls')),
     path('api/wiki/', include('wiki.urls')),
+    path('api/admin/', include('admin_api.urls')),
 ]
 
 if settings.DEBUG:

@@ -23,6 +23,7 @@ const WikiPage = lazy(() => import('./pages/WikiPage'))
 const WikiArticle = lazy(() => import('./pages/WikiArticle'))
 const WikiEditor = lazy(() => import('./pages/WikiEditor'))
 const WikiHistory = lazy(() => import('./pages/WikiHistory'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -148,6 +149,7 @@ function AppContent() {
                 <Route path="/wiki/:slug/history" element={<WikiHistory />} />
                 <Route path="/wiki/:slug" element={<WikiArticle />} />
                 <Route path="/profile" element={<Profile />} />
+                <Route path="/admin" element={<AdminPage />} />
                 <Route path="/users/:userId" element={<UserProfilePage />} />
               </Routes>
             </Suspense>

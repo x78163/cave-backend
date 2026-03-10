@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'chat',
     'events',
     'wiki',
+    'admin_api',
 ]
 
 ASGI_APPLICATION = 'cave_backend.asgi.application'

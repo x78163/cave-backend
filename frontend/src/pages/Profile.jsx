@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, lazy, Suspense } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useApi, apiFetch } from '../hooks/useApi'
 import api from '../services/api'
@@ -8,6 +8,7 @@ import PostComposer from '../components/PostComposer'
 import AvatarDisplay from '../components/AvatarDisplay'
 import useAuthStore from '../stores/authStore'
 import { SPECIALTIES, AVATAR_PRESETS } from '../constants/profileOptions'
+
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -687,7 +688,7 @@ function ProfileEditPanel({ user, onSave, onCancel }) {
 
 // ── Profile Page ─────────────────────────────────────────────
 
-const TABS = [
+const BASE_TABS = [
   { key: 'wall', label: 'Wall' },
   { key: 'media', label: 'Media' },
   { key: 'routes', label: 'Routes' },
@@ -789,6 +790,7 @@ export default function Profile() {
   const { data: postsData } = useApi(userId ? `/social/posts/?user=${userId}&limit=1` : null)
   const { data: followersData } = useApi(userId ? `/social/users/${userId}/followers/` : null)
   const { data: followingData } = useApi(userId ? `/social/users/${userId}/following/` : null)
+  const TABS = BASE_TABS
   const routeCount = routeData?.total ?? 0
   const postCount = postsData?.total ?? 0
   const followerCount = Array.isArray(followersData) ? followersData.length : 0
@@ -863,16 +865,29 @@ export default function Profile() {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-1 mb-6">
+      <div className="flex gap-1 mb-6 flex-wrap">
         {TABS.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
               activeTab === tab.key
-                ? 'text-[var(--cyber-bg)] bg-[var(--cyber-cyan)]'
-                : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)]'
+                ? tab.color
+                  ? `text-[var(--cyber-bg)]`
+                  : 'text-[var(--cyber-bg)] bg-[var(--cyber-cyan)]'
+                : tab.color
+                  ? `hover:text-[${tab.color}]`
+                  : 'text-[var(--cyber-text-dim)] hover:text-[var(--cyber-cyan)]'
             }`}
+            style={
+              activeTab === tab.key && tab.color
+                ? { background: tab.color, color: 'var(--cyber-bg)' }
+                : activeTab !== tab.key && tab.color
+                  ? { color: tab.color, opacity: 0.7 }
+                  : activeTab !== tab.key
+                    ? { color: 'var(--cyber-text-dim)' }
+                    : undefined
+            }
           >
             {tab.label}
           </button>
