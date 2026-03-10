@@ -1,5 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import useEditorStore from '../../stores/editorStore'
+import useAuthStore from '../../stores/authStore'
+import { apiFetch } from '../../hooks/useApi'
 
 const TOOLS = [
   { id: 'select', label: 'Select', key: 'V', icon: (
@@ -68,6 +70,15 @@ const POI_MOVE_TOOL = { id: 'poiMove', label: 'Move POI', key: 'M', icon: (
   </svg>
 )}
 
+const MEASURE_TOOL = { id: 'measure', label: 'Measure', key: 'L', icon: (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+    <path d="M2 20L20 2" />
+    <path d="M6 20H2v-4" />
+    <path d="M18 4h4v4" />
+    <path d="M8 16l2-2M12 12l2-2" />
+  </svg>
+)}
+
 const FLY_MODE = { id: 'flyMode', label: 'Fly Mode (WASD)', key: 'G', icon: (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
     <circle cx="12" cy="12" r="2" />
@@ -90,7 +101,7 @@ const ALIGN_TOGGLE = { id: 'align', label: 'Align Clouds', key: 'A', icon: (
   </svg>
 )}
 
-export default function EditorToolbar({ onFitView }) {
+export default function EditorToolbar({ onFitView, stlProgress, onStlGenerate, onStlCancel, onStlDownload }) {
   const activeTool = useEditorStore(s => s.activeTool)
   const setActiveTool = useEditorStore(s => s.setActiveTool)
   const transformMode = useEditorStore(s => s.transformMode)
@@ -103,6 +114,27 @@ export default function EditorToolbar({ onFitView }) {
   const clearSelection = useEditorStore(s => s.clearSelection)
   const selectAllPoints = useEditorStore(s => s.selectAllPoints)
   const deleteSelectedPoints = useEditorStore(s => s.deleteSelectedPoints)
+  const caveId = useEditorStore(s => s.caveId)
+  const { user } = useAuthStore()
+  const isAdmin = user?.is_staff
+
+  // Confirmation dialog state
+  const [showConfirm, setShowConfirm] = useState(false)
+
+  const handleStlClick = useCallback(() => {
+    if (!stlProgress || stlProgress.status === 'failed') {
+      // No status or previous failure — show confirm
+      setShowConfirm(true)
+    } else if (stlProgress.status === 'available') {
+      onStlDownload?.()
+    }
+    // If generating, clicking does nothing (cancel is separate)
+  }, [stlProgress, onStlDownload])
+
+  const handleConfirmGenerate = useCallback(() => {
+    setShowConfirm(false)
+    onStlGenerate?.()
+  }, [onStlGenerate])
 
   useEffect(() => {
     function onKey(e) {
@@ -129,6 +161,7 @@ export default function EditorToolbar({ onFitView }) {
 
       // Escape: clear selection (before other Esc handlers)
       if (e.key === 'Escape') {
+        if (showConfirm) { setShowConfirm(false); return }
         const sel = useEditorStore.getState().selectedIndices
         const hasSelection = Object.values(sel).some(arr => arr.length > 0)
         if (hasSelection) {
@@ -184,6 +217,14 @@ export default function EditorToolbar({ onFitView }) {
         return
       }
 
+      // Measure tool
+      if (key === MEASURE_TOOL.key) {
+        if (useEditorStore.getState().flyMode) return
+        e.preventDefault()
+        setActiveTool('measure')
+        return
+      }
+
       // Viewport tools
       const tool = TOOLS.find(t => t.key === key)
       if (tool) {
@@ -208,7 +249,10 @@ export default function EditorToolbar({ onFitView }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setActiveTool, setTransformMode, toggleFlyMode, enterAlignmentMode, exitAlignmentMode, clearSelection, selectAllPoints, deleteSelectedPoints, onFitView])
+  }, [setActiveTool, setTransformMode, toggleFlyMode, enterAlignmentMode, exitAlignmentMode, clearSelection, selectAllPoints, deleteSelectedPoints, onFitView, showConfirm])
+
+  // Point count for confirmation dialog
+  const totalPoints = useEditorStore(s => s.clouds).reduce((sum, c) => sum + c.pointCount, 0)
 
   return (
     <div
@@ -285,6 +329,20 @@ export default function EditorToolbar({ onFitView }) {
         {BOX_SELECT.icon}
       </button>
 
+      {/* Measure tool */}
+      <button
+        onClick={() => setActiveTool('measure')}
+        title={`${MEASURE_TOOL.label} (${MEASURE_TOOL.key})`}
+        className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+        style={{
+          background: activeTool === 'measure' ? 'rgba(74,222,128,0.15)' : 'transparent',
+          color: activeTool === 'measure' ? '#4ade80' : 'var(--cyber-text-dim)',
+          border: activeTool === 'measure' ? '1px solid rgba(74,222,128,0.3)' : '1px solid transparent',
+        }}
+      >
+        {MEASURE_TOOL.icon}
+      </button>
+
       {/* POI tool */}
       <button
         onClick={() => setActiveTool('poi')}
@@ -356,6 +414,130 @@ export default function EditorToolbar({ onFitView }) {
       >
         {ALIGN_TOGGLE.icon}
       </button>
+
+      {/* STL Generation — admin only */}
+      {isAdmin && caveId && (
+        <>
+          <div className="flex-1" />
+          <div className="w-6 border-t border-[var(--cyber-border)] my-1" />
+
+          {stlProgress?.status === 'available' ? (
+            <button
+              onClick={onStlDownload}
+              title={`Download STL${stlProgress.size ? ` (${(stlProgress.size / 1e6).toFixed(1)} MB)` : ''}`}
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+              style={{
+                background: 'rgba(74,222,128,0.15)',
+                color: '#4ade80',
+                border: '1px solid rgba(74,222,128,0.3)',
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
+          ) : stlProgress?.status === 'generating' ? (
+            <button
+              onClick={onStlCancel}
+              title="Cancel STL Generation"
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+              style={{
+                background: 'rgba(255,107,107,0.15)',
+                color: '#ff6b6b',
+                border: '1px solid rgba(255,107,107,0.3)',
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+                <rect x="6" y="6" width="12" height="12" rx="1" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={handleStlClick}
+              title="Generate 3D-Printable STL"
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
+              style={{
+                color: 'var(--cyber-text-dim)',
+                background: 'transparent',
+                border: '1px solid transparent',
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            </button>
+          )}
+        </>
+      )}
+
+      {/* STL Confirmation Dialog */}
+      {showConfirm && (
+        <div
+          className="fixed inset-0 z-[3000] flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={() => setShowConfirm(false)}
+        >
+          <div
+            className="p-5 rounded-xl max-w-sm mx-4"
+            style={{
+              background: 'var(--cyber-surface)',
+              border: '1px solid var(--cyber-border)',
+              boxShadow: '0 0 30px rgba(0,229,255,0.1)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--cyber-text)' }}>
+              Generate 3D-Printable STL
+            </h3>
+            <div className="text-xs space-y-2 mb-4" style={{ color: 'var(--cyber-text-dim)' }}>
+              <p>
+                This will generate a hollow shell STL from the point cloud using Poisson surface reconstruction.
+              </p>
+              <p>
+                <span style={{ color: '#fbbf24' }}>Point count:</span>{' '}
+                {totalPoints.toLocaleString()} points
+              </p>
+              <p>
+                <span style={{ color: '#fbbf24' }}>Estimated time:</span>{' '}
+                {totalPoints < 100000 ? '1-2 minutes' :
+                 totalPoints < 500000 ? '2-5 minutes' :
+                 totalPoints < 1000000 ? '5-10 minutes' :
+                 '10+ minutes'}
+              </p>
+              <p style={{ color: '#ff6b6b' }}>
+                This is CPU-intensive. The process runs at lowest priority but may take several minutes on large point clouds.
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="px-4 py-1.5 rounded-lg text-xs font-medium"
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  color: 'var(--cyber-text-dim)',
+                  border: '1px solid var(--cyber-border)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmGenerate}
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold"
+                style={{
+                  background: 'linear-gradient(135deg, #00b8d4, #00e5ff)',
+                  color: '#0a0a12',
+                }}
+              >
+                Generate STL
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

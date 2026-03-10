@@ -257,6 +257,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     user_has_contact_access = serializers.SerializerMethodField()
     pointcloud_url = serializers.SerializerMethodField()
     spawn_url = serializers.SerializerMethodField()
+    has_stl = serializers.SerializerMethodField()
     wiki_article_slug = serializers.SerializerMethodField()
 
     class Meta:
@@ -282,7 +283,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'pending_request_count', 'user_pending_request',
             'user_has_contact_access',
             'public_land_name', 'public_land_type', 'public_land_owner', 'public_land_access',
-            'pointcloud_url', 'spawn_url',
+            'pointcloud_url', 'spawn_url', 'has_stl',
             'visibility', 'collaboration_setting',
             'publish_to_wiki', 'wiki_article_slug',
             'owner', 'origin_device',
@@ -350,6 +351,9 @@ class CaveDetailSerializer(serializers.ModelSerializer):
         if not obj.has_map:
             return None
         return default_storage.url(f'caves/{obj.id}/spawn.json')
+
+    def get_has_stl(self, obj):
+        return default_storage.exists(f'caves/{obj.id}/cave_printable.stl')
 
     def get_land_owner(self, obj):
         try:

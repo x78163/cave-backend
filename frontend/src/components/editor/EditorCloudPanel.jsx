@@ -25,6 +25,8 @@ export default function EditorCloudPanel() {
   const setSelectedPoi = useEditorStore(s => s.setSelectedPoi)
   const updatePoi = useEditorStore(s => s.updatePoi)
   const deletePoi = useEditorStore(s => s.deletePoi)
+  const pointSize = useEditorStore(s => s.pointSize)
+  const setPointSize = useEditorStore(s => s.setPointSize)
   const [editingPoiId, setEditingPoiId] = useState(null)
   const [editName, setEditName] = useState('')
 
@@ -204,6 +206,31 @@ export default function EditorCloudPanel() {
           </div>
         ))}
       </div>
+
+      {/* Point size slider */}
+      {clouds.length > 0 && (
+        <div
+          className="px-3 py-2 flex items-center gap-2"
+          style={{ borderTop: '1px solid var(--cyber-border)' }}
+        >
+          <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--cyber-text-dim)' }}>
+            Size
+          </span>
+          <input
+            type="range"
+            min="0.01"
+            max="0.30"
+            step="0.01"
+            value={pointSize}
+            onChange={e => setPointSize(parseFloat(e.target.value))}
+            className="flex-1 h-1 accent-[var(--cyber-cyan)]"
+            style={{ cursor: 'pointer' }}
+          />
+          <span className="text-[10px] w-7 text-right tabular-nums" style={{ color: 'var(--cyber-text-dim)' }}>
+            {pointSize.toFixed(2)}
+          </span>
+        </div>
+      )}
 
       {/* POIs section */}
       {pois.length > 0 && (

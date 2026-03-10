@@ -634,6 +634,24 @@ export default function CaveDetail() {
               </button>
             )}
 
+            {cave.has_stl && (
+              <a
+                href={`/api/caves/${caveId}/media/cave_printable.stl`}
+                download
+                className="inline-flex items-center gap-1.5 px-4 py-3 rounded-full font-semibold text-sm text-center transition-all
+                  bg-[var(--cyber-surface-2)] text-green-400 border border-green-800/30
+                  hover:border-green-600/50 active:scale-[0.97]"
+                title="Download 3D-printable STL"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                STL
+              </a>
+            )}
+
             <span
               className={`inline-flex items-center justify-center px-4 py-3 rounded-full text-sm font-medium
                 ${cave.visibility === 'public'

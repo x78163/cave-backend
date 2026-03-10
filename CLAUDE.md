@@ -323,10 +323,13 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `GET /api/events/my-events/` - Events user created or RSVPed to
 - `GET /api/events/user/{user_id}/` - Events a user is attending, invited to, or created
 
-### 3D Processing (Post-MVP)
+### 3D Processing
 - `POST /api/caves/{id}/generate-mesh/` - Trigger 3D generation
 - `GET /api/caves/{id}/mesh/` - Download mesh
 - `GET /api/caves/{id}/viewer/` - 3D viewer URL
+- `POST /api/caves/{id}/generate-stl/` - Trigger background STL generation (admin only)
+- `GET /api/caves/{id}/stl-progress/` - Poll STL generation progress
+- `GET /api/caves/{id}/media/cave_printable.stl` - Download printable STL
 
 ---
 
@@ -849,6 +852,8 @@ This project includes:
     - BPA mesh + wireframe auto-generated server-side when point cloud is saved (`reconstruction/mesh_from_glb.py`)
     - Wireframe: pre-built LINES GLB with fat lines (LineSegments2), cyberpunk cyan
     - Mesh: solid BPA mesh with vertex colors, flashlight lighting, fog depth
+    - 3D-printable STL export: BPA mesh → gap bridging (boundary edge proximity) → configurable scale → trimesh repair → largest connected component (removes floating fragments) → binary STL
+    - Background STL generation with progress polling, admin-only trigger, download with cave-named filename
   - Multi-entrance support: entrance POIs with GPS coordinates, green markers on surface map, entrance management UI (add/delete), multi-point SLAM registration (2D similarity transform from 2+ GPS+SLAM entrance pairs), coordinate change cascades delta to all entrance POIs
   - Surface map with Leaflet (cave markers, parcel polygon overlay, cave map overlay, survey map overlays, entrance markers (green), nearby cave markers (purple), center-on-cave button, zoom to level 21, multi-layer tile switcher, 3DEP LiDAR hillshade overlay, map tools toolbar, coordinate readout)
   - GPS "My Location" button on all map viewports (Explore, CaveDetail, FineTuneMapModal, EventDetail): browser Geolocation API, pulsing blue dot + accuracy ring, real-time position tracking, toggle between user location and cave/home center
@@ -948,6 +953,7 @@ This project includes:
   - POI-cloud parenting: POIs stored in cloud-local coordinates, move with parent cloud, independently movable
   - POI rendering in 3D Cave Explorer: spheres + rings + labels via direct fetch with JWT auth
   - POI database sync: import existing cave POIs (SLAM coords) on load, sync changes back on save (POST/PATCH/DELETE)
+  - STL export: "Export STL" toolbar button triggers background generation, progress bar with stage/percent polling, auto-download on completion
   - Zustand store (`editorStore.js`) for all state
   - Route `/editor`, `/editor/:caveId` (lazy-loaded)
 
@@ -1010,11 +1016,14 @@ This project includes:
 | `frontend/src/components/editor/AlignmentPanel.jsx` | Alignment sidebar: cloud selectors, point pairs, N-point registration, ICP fine-tune, overlap visualization |
 | `frontend/src/components/editor/SelectionPanel.jsx` | Floating bottom bar: selection count, paint color presets + custom picker, delete with confirmation, clear |
 | `frontend/src/components/editor/CloudImportModal.jsx` | Two-tab import: Upload File (GLB/PLY/PCD drag-drop) + From Cave (search caves with 3D maps) |
+| `frontend/src/components/editor/StlProgressBar.jsx` | STL generation progress bar with stage/percent display |
 | `frontend/src/components/editor/SaveProjectModal.jsx` | Project save dialog: name input, update vs save-as |
 | `frontend/src/components/editor/LoadProjectModal.jsx` | Project load dialog: list saved projects, load/delete |
 | `frontend/src/utils/alignmentMath.js` | Pure math: 3x3 SVD (Jacobi), Procrustes rigid registration, KD-tree, ICP, downsample |
 | `caves/management/commands/generate_pointcloud_glb.py` | PCD/keyframe → GLB conversion, trajectory.json generation, triggers mesh generation |
 | `reconstruction/mesh_from_glb.py` | Standalone BPA mesh + wireframe generation from point cloud GLB (no ReconstructionJob dependency) |
+| `reconstruction/stl_export.py` | 3D-printable STL generation: BPA mesh → bridge gaps → scale → repair → remove floating fragments → export |
+| `reconstruction/management/commands/generate_stl_bg.py` | Background STL generation management command with progress file reporting |
 | `frontend/src/components/PostCard.jsx` | Wall post card with soft delete, cave status badges, reactions, comments |
 | `survey/slam_survey.py` | SLAM-to-survey conversion: station selection, 2D raycasting for LRUD, lead detection, multi-level merging |
 | `survey/models.py` | CaveSurvey (source: manual/slam), SurveyStation, SurveyShot models |

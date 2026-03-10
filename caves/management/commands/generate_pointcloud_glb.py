@@ -145,7 +145,10 @@ def load_and_correct_points(source_dir, keyframes, R, residuals):
     kf_timestamps = np.array([kf['timestamp'] for kf in keyframes])
 
     for i, kf in enumerate(keyframes):
-        cloud_file = os.path.join(source_dir, kf.get('pointcloud_file', f'kf_{i:06d}_cloud.npy'))
+        pf = kf.get('pointcloud_file', f'kf_{i:06d}_cloud.npy')
+        if not pf:
+            continue
+        cloud_file = os.path.join(source_dir, pf)
         if not os.path.exists(cloud_file):
             continue
 
@@ -349,23 +352,41 @@ class Command(BaseCommand):
 
         self.stdout.write(f'Cave: {cave.name} ({cave.id})')
 
-        if options['pcd']:
+        # Determine PCD path — explicit --pcd, or auto-detect largest .pcd in --source-dir
+        pcd_path = options.get('pcd')
+        source_dir = options.get('source_dir')
+
+        if not pcd_path and source_dir:
+            # Auto-detect: find the largest .pcd file in the source directory
+            pcd_files = sorted(
+                glob.glob(os.path.join(source_dir, '*.pcd')),
+                key=os.path.getsize, reverse=True
+            )
+            if pcd_files:
+                pcd_path = pcd_files[0]
+                self.stdout.write(f'Auto-detected PCD: {os.path.basename(pcd_path)} ({os.path.getsize(pcd_path) / 1e6:.1f}MB)')
+
+        if pcd_path:
             # ── PCD mode: load directly, no gravity correction needed ──
-            pcd_path = options['pcd']
             self.stdout.write(f'Source PCD: {pcd_path}')
             self.stdout.write('Loading PCD file...')
             positions, colors = load_pcd_file(pcd_path)
             self.stdout.write(f'Total points: {len(positions):,}')
-            # Optionally load keyframes for trajectory
-            if options.get('keyframe_dir'):
-                keyframes = load_keyframes(options['keyframe_dir'])
-                self.stdout.write(f'Loaded {len(keyframes)} keyframes for trajectory')
+
+            # Load keyframes for trajectory (from --keyframe-dir or --source-dir)
+            kf_dir = options.get('keyframe_dir') or source_dir
+            if kf_dir:
+                keyframes = load_keyframes(kf_dir)
+                if keyframes:
+                    self.stdout.write(f'Loaded {len(keyframes)} keyframes for trajectory')
+                else:
+                    keyframes = None
             else:
                 keyframes = None
         else:
-            # ── Keyframe mode: load keyframes + apply gravity correction ──
-            source_dir = options['source_dir']
+            # ── Keyframe-only fallback (no .pcd found) ──
             self.stdout.write(f'Source: {source_dir}')
+            self.stdout.write('No PCD file found, falling back to keyframe clouds')
 
             keyframes = load_keyframes(source_dir)
             self.stdout.write(f'Loaded {len(keyframes)} keyframes')
@@ -430,7 +451,8 @@ class Command(BaseCommand):
         self.stdout.write(f'Saved: {glb_path}')
 
         # Generate spawn.json
-        if keyframes:
+        used_pcd = pcd_path is not None
+        if keyframes and not used_pcd:
             R_spawn = R if not options['no_correction'] else np.eye(3)
             res_spawn = residuals if not options['no_correction'] else np.zeros(len(keyframes))
             spawn_data = generate_spawn_json(keyframes, R_spawn, res_spawn)
@@ -453,7 +475,7 @@ class Command(BaseCommand):
 
         # Generate trajectory.json from keyframe positions
         if keyframes:
-            if options.get('pcd'):
+            if used_pcd:
                 # PCD mode: keyframe positions are raw SLAM coords (no gravity correction)
                 traj_positions = [kf['position'] for kf in keyframes]
             else:

@@ -11,6 +11,7 @@ import SelectionPanel from '../components/editor/SelectionPanel'
 import CloudImportModal from '../components/editor/CloudImportModal'
 import SaveProjectModal from '../components/editor/SaveProjectModal'
 import LoadProjectModal from '../components/editor/LoadProjectModal'
+import StlProgressBar from '../components/editor/StlProgressBar'
 
 function MobileGuard() {
   return (
@@ -65,10 +66,12 @@ export default function PointCloudEditor() {
   const setImportModalOpen = useEditorStore(s => s.setImportModalOpen)
   const alignmentMode = useEditorStore(s => s.alignmentMode)
   const pickedPoints = useEditorStore(s => s.pickedPoints)
+  const measurePoints = useEditorStore(s => s.measurePoints)
   const selectedIndices = useEditorStore(s => s.selectedIndices)
   const isDirty = useEditorStore(s => s.isDirty)
   const projectName = useEditorStore(s => s.projectName)
   const saving = useEditorStore(s => s.saving)
+  const lastSavedAt = useEditorStore(s => s.lastSavedAt)
   const trajectory = useEditorStore(s => s.trajectory)
   const trajectoryCloudId = useEditorStore(s => s.trajectoryCloudId)
   const pois = useEditorStore(s => s.pois)
@@ -78,6 +81,8 @@ export default function PointCloudEditor() {
   const [isMobile, setIsMobile] = useState(false)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [loadModalOpen, setLoadModalOpen] = useState(false)
+  const [stlProgress, setStlProgress] = useState(null) // { status, percent, stage, size, stale, pid }
+  const stlPollRef = useRef(null)
   const layoutRef = useRef(null)
 
   // Mobile detection
@@ -107,6 +112,8 @@ export default function PointCloudEditor() {
 
         // Load from saved project if query param present, otherwise load cave cloud
         const projectParam = searchParams.get('project')
+        const alreadyLoaded = useEditorStore.getState().clouds.length > 0
+        if (alreadyLoaded) return
         if (projectParam) {
           useEditorStore.getState().loadProject(caveId, projectParam)
         } else if (data.has_map) {
@@ -137,6 +144,76 @@ export default function PointCloudEditor() {
   const handleClose = useCallback(() => {
     navigate(`/caves/${caveId}`)
   }, [navigate, caveId])
+
+  // STL status polling
+  const checkStlStatus = useCallback(() => {
+    if (!caveId || !user?.is_staff) return
+    apiFetch(`/caves/${caveId}/stl-status/`)
+      .then(data => {
+        if (data.available) {
+          setStlProgress({ status: 'available', size: data.size })
+          if (stlPollRef.current) { clearInterval(stlPollRef.current); stlPollRef.current = null }
+        } else if (data.progress) {
+          const p = data.progress
+          if (p.percent === -1) {
+            // Failed or cancelled
+            setStlProgress({ status: 'failed', stage: p.stage })
+            if (stlPollRef.current) { clearInterval(stlPollRef.current); stlPollRef.current = null }
+          } else if (p.percent === 100) {
+            // Complete but STL not yet visible — keep polling
+            setStlProgress({ status: 'generating', percent: p.percent, stage: p.stage, stale: p.stale, pid: p.pid })
+          } else {
+            setStlProgress({ status: 'generating', percent: p.percent, stage: p.stage, stale: p.stale, pid: p.pid })
+          }
+        }
+      })
+      .catch(() => {})
+  }, [caveId, user])
+
+  // Initial STL status check
+  useEffect(() => {
+    checkStlStatus()
+    return () => { if (stlPollRef.current) clearInterval(stlPollRef.current) }
+  }, [checkStlStatus])
+
+  // Reset STL status when project is saved (point cloud changed → STL invalidated)
+  const prevSavedAt = useRef(lastSavedAt)
+  useEffect(() => {
+    if (lastSavedAt && lastSavedAt !== prevSavedAt.current) {
+      setStlProgress(null)
+      if (stlPollRef.current) { clearInterval(stlPollRef.current); stlPollRef.current = null }
+    }
+    prevSavedAt.current = lastSavedAt
+  }, [lastSavedAt])
+
+  const handleStlGenerate = useCallback(() => {
+    if (!caveId) return
+    setStlProgress({ status: 'generating', percent: 0, stage: 'Starting...' })
+    apiFetch(`/caves/${caveId}/generate-stl/`, { method: 'POST' })
+      .then(() => {
+        // Start polling every 3 seconds
+        if (stlPollRef.current) clearInterval(stlPollRef.current)
+        stlPollRef.current = setInterval(checkStlStatus, 3000)
+        // Stop polling after 15 minutes
+        setTimeout(() => { if (stlPollRef.current) { clearInterval(stlPollRef.current); stlPollRef.current = null } }, 900000)
+      })
+      .catch(() => setStlProgress(null))
+  }, [caveId, checkStlStatus])
+
+  const handleStlCancel = useCallback(() => {
+    if (!caveId) return
+    apiFetch(`/caves/${caveId}/cancel-stl/`, { method: 'POST' })
+      .then(() => {
+        setStlProgress(null)
+        if (stlPollRef.current) { clearInterval(stlPollRef.current); stlPollRef.current = null }
+      })
+      .catch(() => {})
+  }, [caveId])
+
+  const handleStlDownload = useCallback(() => {
+    if (!caveId) return
+    window.open(`/api/caves/${caveId}/media/cave_printable.stl`, '_blank')
+  }, [caveId])
 
   // Escape key to close (unless a modal is open)
   useEffect(() => {
@@ -277,14 +354,23 @@ export default function PointCloudEditor() {
         </div>
       </div>
 
+      {/* STL Progress Bar */}
+      <StlProgressBar progress={stlProgress} onCancel={handleStlCancel} />
+
       {/* Main content */}
       <div className="flex flex-1 min-h-0">
         {/* Left toolbar */}
-        <EditorToolbar onFitView={handleFitView} />
+        <EditorToolbar
+          onFitView={handleFitView}
+          stlProgress={stlProgress}
+          onStlGenerate={handleStlGenerate}
+          onStlCancel={handleStlCancel}
+          onStlDownload={handleStlDownload}
+        />
 
         {/* Center viewport layout */}
         <div className="relative flex-1 flex min-h-0">
-          <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} selectedIndices={selectedIndices} trajectory={trajectory} trajectoryCloudId={trajectoryCloudId} pois={pois} />
+          <EditorViewportLayout ref={layoutRef} clouds={clouds} pickedPoints={pickedPoints} measurePoints={measurePoints} selectedIndices={selectedIndices} trajectory={trajectory} trajectoryCloudId={trajectoryCloudId} pois={pois} />
           <SelectionPanel />
         </div>
 

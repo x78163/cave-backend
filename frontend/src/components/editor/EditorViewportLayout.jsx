@@ -108,7 +108,7 @@ function DragRectOverlay({ rect }) {
   )
 }
 
-const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, pickedPoints, selectedIndices, trajectory, trajectoryCloudId, pois }, ref) {
+const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, pickedPoints, selectedIndices, trajectory, trajectoryCloudId, pois, measurePoints }, ref) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const stateRef = useRef(null) // holds all Three.js state
@@ -128,6 +128,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
   const targetCloudId = useEditorStore(s => s.targetCloudId)
   const overlapVisActive = useEditorStore(s => s.overlapVisActive)
   const selectedPoiId = useEditorStore(s => s.selectedPoiId)
+  const pointSize = useEditorStore(s => s.pointSize)
 
   // Keep splitRef in sync with state
   useEffect(() => { splitRef.current = split }, [split])
@@ -246,7 +247,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
     // Key tracking for WASD fly mode
     const keysDown = new Set()
 
-    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown, pickMarkers: [], stashedColors: null, selectionOverlay: null, trajectoryLine: null, poiMarkers: [] }
+    stateRef.current = { scene, renderer, cameras, grids, axes, orbitControls, transformControlsArr, tcHelpers, pointObjects, groundPlane, keysDown, pickMarkers: [], measureMarkers: [], stashedColors: null, selectionOverlay: null, trajectoryLine: null, poiMarkers: [] }
 
     // Resize observer
     const ro = new ResizeObserver(entries => {
@@ -446,7 +447,7 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
         }
       } else {
         // Create new Points object with cloud color tint
-        const mat = new THREE.PointsMaterial({ size: 0.08, vertexColors: true, sizeAttenuation: true })
+        const mat = new THREE.PointsMaterial({ size: useEditorStore.getState().pointSize, vertexColors: true, sizeAttenuation: true })
         mat.color.set(cloud.color)
         pts = new THREE.Points(cloud.geometry, mat)
         pts.matrixAutoUpdate = true
@@ -979,6 +980,15 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
     }
   }, [activeTool])
 
+  // ── Update point size on all cloud materials ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+    for (const pts of s.pointObjects) {
+      if (pts.material) pts.material.size = pointSize
+    }
+  }, [pointSize])
+
   // ── Sync pick markers to scene ──
   useEffect(() => {
     const s = stateRef.current
@@ -1041,6 +1051,143 @@ const EditorViewportLayout = forwardRef(function EditorViewportLayout({ clouds, 
       }
     }
   }, [pickedPoints, sourceCloudId, targetCloudId])
+
+  // ── Measure tool click handler ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+    if (activeTool !== 'measure') return
+
+    const raycaster = new THREE.Raycaster()
+    raycaster.params.Points.threshold = 0.3
+
+    function handleMeasureClick(vpIndex, e) {
+      const state = useEditorStore.getState()
+      if (state.activeTool !== 'measure') return
+
+      const el = vpDivRefs.current[vpIndex]
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      )
+
+      const cam = s.cameras[vpIndex]
+      raycaster.setFromCamera(ndc, cam)
+
+      // Raycast against all visible clouds
+      let closestHit = null
+      for (const pts of s.pointObjects) {
+        if (!pts.visible) continue
+        const hits = raycaster.intersectObject(pts)
+        if (hits.length > 0) {
+          if (!closestHit || hits[0].distance < closestHit.distance) {
+            closestHit = hits[0]
+          }
+        }
+      }
+
+      if (closestHit) {
+        const p = closestHit.point
+        state.addMeasurePoint({ x: p.x, y: p.y, z: p.z })
+      }
+    }
+
+    const handlers = []
+    for (let i = 0; i < 4; i++) {
+      const el = vpDivRefs.current[i]
+      if (!el) continue
+      const idx = i
+      const handler = (e) => handleMeasureClick(idx, e)
+      el.addEventListener('click', handler)
+      handlers.push([el, handler])
+    }
+
+    return () => {
+      for (const [el, handler] of handlers) {
+        el.removeEventListener('click', handler)
+      }
+    }
+  }, [activeTool])
+
+  // ── Sync measure markers to scene ──
+  useEffect(() => {
+    const s = stateRef.current
+    if (!s) return
+
+    // Clean up existing measure markers
+    for (const obj of s.measureMarkers) {
+      s.scene.remove(obj)
+      if (obj.geometry) obj.geometry.dispose()
+      if (obj.material) {
+        if (obj.material.map) obj.material.map.dispose()
+        obj.material.dispose()
+      }
+    }
+    s.measureMarkers = []
+
+    if (!measurePoints || measurePoints.length === 0) return
+
+    // Render spheres at each point
+    for (const pt of measurePoints) {
+      const geo = new THREE.SphereGeometry(0.15, 8, 8)
+      const mat = new THREE.MeshBasicMaterial({ color: 0x4ade80, depthTest: false })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.position.set(pt.position.x, pt.position.y, pt.position.z)
+      mesh.renderOrder = 999
+      s.scene.add(mesh)
+      s.measureMarkers.push(mesh)
+    }
+
+    // If two points, draw line + distance label
+    if (measurePoints.length === 2) {
+      const a = measurePoints[0].position
+      const b = measurePoints[1].position
+
+      // Connecting line
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(a.x, a.y, a.z),
+        new THREE.Vector3(b.x, b.y, b.z),
+      ])
+      const lineMat = new THREE.LineBasicMaterial({ color: 0x4ade80, depthTest: false })
+      const line = new THREE.Line(lineGeo, lineMat)
+      line.renderOrder = 999
+      s.scene.add(line)
+      s.measureMarkers.push(line)
+
+      // Distance
+      const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      const distM = dist.toFixed(2)
+      const distFt = (dist * 3.28084).toFixed(2)
+
+      // Text sprite at midpoint
+      const canvas = document.createElement('canvas')
+      canvas.width = 256
+      canvas.height = 64
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = 'rgba(10, 10, 18, 0.85)'
+      ctx.beginPath()
+      ctx.roundRect(0, 0, 256, 64, 8)
+      ctx.fill()
+      ctx.fillStyle = '#4ade80'
+      ctx.font = 'bold 24px Ubuntu, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(`${distM}m / ${distFt}ft`, 128, 32)
+
+      const texture = new THREE.CanvasTexture(canvas)
+      const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false })
+      const sprite = new THREE.Sprite(spriteMat)
+      sprite.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2)
+      sprite.scale.set(2.5, 0.625, 1)
+      sprite.renderOrder = 1000
+      s.scene.add(sprite)
+      s.measureMarkers.push(sprite)
+    }
+  }, [measurePoints])
 
   // ── Sync trajectory line to scene ──
   useEffect(() => {

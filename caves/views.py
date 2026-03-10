@@ -610,7 +610,7 @@ def cave_media_file(request, cave_id, filename):
     from django.core.files.storage import default_storage
     from django.http import FileResponse, HttpResponseNotFound
 
-    ALLOWED = {'cave_pointcloud.glb', 'cave_mesh.glb', 'cave_wireframe.glb', 'spawn.json', 'trajectory.json'}
+    ALLOWED = {'cave_pointcloud.glb', 'cave_mesh.glb', 'cave_wireframe.glb', 'cave_printable.stl', 'spawn.json', 'trajectory.json'}
     is_glb = filename.endswith('.glb')
     if filename not in ALLOWED and not is_glb:
         return HttpResponseNotFound()
@@ -624,8 +624,26 @@ def cave_media_file(request, cave_id, filename):
         'trajectory.json': 'application/json',
     }
     f = default_storage.open(path, 'rb')
-    ct = content_types.get(filename, 'model/gltf-binary' if is_glb else 'application/octet-stream')
-    return FileResponse(f, content_type=ct)
+    if filename in content_types:
+        ct = content_types[filename]
+    elif is_glb:
+        ct = 'model/gltf-binary'
+    elif filename.endswith('.stl'):
+        ct = 'model/stl'
+    else:
+        ct = 'application/octet-stream'
+    resp = FileResponse(f, content_type=ct)
+    if filename.endswith('.stl'):
+        # Use cave name for the download filename
+        try:
+            cave = Cave.objects.get(id=cave_id)
+            import re
+            safe_name = re.sub(r'[^\w\s\-]', '', cave.name).strip().replace(' ', '_')
+            dl_name = f'{safe_name}.stl' if safe_name else filename
+        except Cave.DoesNotExist:
+            dl_name = filename
+        resp['Content-Disposition'] = f'attachment; filename="{dl_name}"'
+    return resp
 
 
 @api_view(['GET'])
@@ -716,6 +734,132 @@ def cave_map_revert(request, cave_id):
     default_storage.save(main_path, ContentFile(backup_content))
 
     return Response({'status': 'reverted'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cave_generate_stl(request, cave_id):
+    """Trigger background STL generation for a cave. Admin only."""
+    if not request.user.is_staff:
+        return Response({'error': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    from django.core.files.storage import default_storage
+    pc_path = f'caves/{cave_id}/cave_pointcloud.glb'
+    if not default_storage.exists(pc_path):
+        return Response({'error': 'No point cloud found'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Clear any stale progress file from a previous run
+    progress_path = f'caves/{cave_id}/stl_progress.json'
+    if default_storage.exists(progress_path):
+        default_storage.delete(progress_path)
+
+    # Spawn low-priority background subprocess
+    import subprocess
+    import sys
+    import os
+    manage_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'manage.py')
+    subprocess.Popen(
+        [sys.executable, manage_py, 'generate_stl_bg', str(cave_id)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    return Response({'status': 'generating', 'cave': str(cave_id)}, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(['GET'])
+def cave_stl_status(request, cave_id):
+    """Check STL availability and generation progress."""
+    import time as _time
+    from django.core.files.storage import default_storage
+
+    stl_path = f'caves/{cave_id}/cave_printable.stl'
+    progress_path = f'caves/{cave_id}/stl_progress.json'
+
+    exists = default_storage.exists(stl_path)
+    size = None
+    if exists:
+        try:
+            size = default_storage.size(stl_path)
+        except Exception:
+            pass
+
+    # Read progress file if it exists
+    progress = None
+    if default_storage.exists(progress_path):
+        try:
+            with default_storage.open(progress_path, 'rb') as f:
+                progress = json.loads(f.read().decode())
+            # Check if the process is stale (no update in 30 min — Poisson can take a while)
+            if progress and progress.get('updated_at'):
+                age = _time.time() - progress['updated_at']
+                progress['stale'] = age > 1800
+        except Exception:
+            pass
+
+    return Response({
+        'available': exists,
+        'size': size,
+        'progress': progress,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cave_cancel_stl(request, cave_id):
+    """Cancel a running STL generation by killing its process. Admin only."""
+    if not request.user.is_staff:
+        return Response({'error': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+
+    import os
+    import signal
+    from django.core.files.storage import default_storage
+
+    progress_path = f'caves/{cave_id}/stl_progress.json'
+    if not default_storage.exists(progress_path):
+        return Response({'error': 'No generation in progress'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        with default_storage.open(progress_path, 'rb') as f:
+            progress = json.loads(f.read().decode())
+    except Exception:
+        return Response({'error': 'Could not read progress'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    pid = progress.get('pid')
+    if not pid:
+        return Response({'error': 'No PID in progress file'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Try to kill the process
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass  # Already dead
+    except PermissionError:
+        return Response({'error': 'Permission denied killing process'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Update progress to reflect cancellation
+    from django.core.files.base import ContentFile
+    import time as _time
+    cancelled = json.dumps({
+        'stage': 'Cancelled',
+        'percent': -1,
+        'pid': pid,
+        'updated_at': _time.time(),
+    })
+    try:
+        if default_storage.exists(progress_path):
+            default_storage.delete(progress_path)
+        default_storage.save(progress_path, ContentFile(cancelled.encode()))
+    except Exception:
+        pass
+
+    return Response({'status': 'cancelled'})
 
 
 @api_view(['GET', 'PUT', 'PATCH'])
@@ -1803,6 +1947,12 @@ def _publish_merged_glb(request, cave, cave_id):
         if default_storage.exists(backup_map):
             default_storage.delete(backup_map)
         default_storage.save(backup_map, ContentFile(backup_content))
+
+    # Delete stale STL and progress so it must be regenerated
+    for stale_file in ['cave_printable.stl', 'stl_progress.json']:
+        stale_path = f'caves/{cave_id}/{stale_file}'
+        if default_storage.exists(stale_path):
+            default_storage.delete(stale_path)
 
     # Delete stale map data so it gets regenerated from the new point cloud
     for suffix in ['', '_standard', '_quick', '_detailed', '_raw_slice',

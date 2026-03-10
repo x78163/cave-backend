@@ -290,13 +290,24 @@ const useEditorStore = create((set, get) => ({
   selectedPoiId: null,
   _originalPoiDbIds: [], // dbIds loaded at start, for detecting deletions on save
 
+  // Measure tool state
+  measurePoints: [], // [{ position: {x,y,z} }] — max 2
+
+  // Display settings
+  pointSize: 0.08,
+
   // Selection + painting state
   selectedIndices: {}, // { [cloudId]: number[] }
   paintColor: '#ff6b6b',
 
   setCaveId: (id) => set({ caveId: id }),
   setCaveName: (name) => set({ caveName: name }),
-  setActiveTool: (tool) => set({ activeTool: tool, transformMode: null }),
+  setActiveTool: (tool) => {
+    const prev = get().activeTool
+    const updates = { activeTool: tool, transformMode: null }
+    if (prev === 'measure' && tool !== 'measure') updates.measurePoints = []
+    set(updates)
+  },
   setActiveViewport: (vp) => set({ activeViewport: vp }),
   setSelectedCloud: (id) => set({ selectedCloudId: id }),
   setImportModalOpen: (open) => set({ importModalOpen: open }),
@@ -309,6 +320,9 @@ const useEditorStore = create((set, get) => ({
   },
 
   loadCaveCloud: async (caveId) => {
+    // Skip if already loaded for this cave
+    if (get().clouds.some(c => c.sourceCaveId === caveId)) return null
+
     set({ loading: true, error: null })
     try {
       const urls = [
@@ -343,11 +357,11 @@ const useEditorStore = create((set, get) => ({
         modified: false,
       }
 
-      set(state => ({
-        clouds: [...state.clouds, cloud],
+      set({
+        clouds: [cloud],
         loading: false,
         selectedCloudId: cloud.id,
-      }))
+      })
 
       // Fetch trajectory and existing POIs in background (non-blocking)
       // Associate with this cloud so they transform together
@@ -755,6 +769,19 @@ const useEditorStore = create((set, get) => ({
 
   setPaintColor: (color) => set({ paintColor: color }),
 
+  // ── Measure tool actions ──
+  addMeasurePoint: (position) => {
+    const pts = get().measurePoints
+    if (pts.length >= 2) {
+      // Third click resets — start new measurement
+      set({ measurePoints: [{ position }] })
+    } else {
+      set({ measurePoints: [...pts, { position }] })
+    }
+  },
+  clearMeasurePoints: () => set({ measurePoints: [] }),
+  setPointSize: (size) => set({ pointSize: size }),
+
   // ── Project persistence actions ──
   setProjectId: (id) => set({ projectId: id }),
   setProjectName: (name) => set({ projectName: name }),
@@ -981,6 +1008,8 @@ const useEditorStore = create((set, get) => ({
       overlapVisActive: false,
       selectedIndices: {},
       paintColor: '#ff6b6b',
+      pointSize: 0.08,
+      measurePoints: [],
       trajectory: null,
       trajectoryVisible: true,
       trajectoryCloudId: null,
