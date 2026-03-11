@@ -128,16 +128,36 @@ def event_detail(request, event_id):
         return Response({'detail': 'Permission denied.'}, status=http_status.HTTP_403_FORBIDDEN)
 
     if request.method == 'DELETE':
+        # Capture attendee data before deletion (task runs async after event is gone)
+        from notifications.tasks import send_event_update_email
+        attendee_ids = list(
+            event.rsvps.filter(status='going').values_list('user_id', flat=True)
+        )
+        event_name = event.name
+
         # Delete associated chat channel
         if event.chat_channel_id:
             event.chat_channel.delete()
         event.delete()
+
+        # Dispatch after deletion — passes pre-captured data so task doesn't need DB
+        if attendee_ids:
+            send_event_update_email.delay(
+                str(event.id), 'cancelled',
+                event_name=event_name,
+                attendee_user_ids=attendee_ids,
+            )
         return Response(status=http_status.HTTP_204_NO_CONTENT)
 
     # PATCH
     serializer = EventSerializer(event, data=request.data, partial=True, context={'request': request})
     serializer.is_valid(raise_exception=True)
     serializer.save()
+
+    # Notify attendees of update
+    from notifications.tasks import send_event_update_email
+    send_event_update_email.delay(str(event.id), 'updated')
+
     return Response(serializer.data)
 
 
@@ -284,7 +304,13 @@ def event_invite(request, event_id):
 
     serializer = EventInvitationSerializer(data=data)
     serializer.is_valid(raise_exception=True)
-    serializer.save()
+    invitation = serializer.save()
+
+    # Send invitation email (only for user invitations, not grotto)
+    if user_id:
+        from notifications.tasks import send_event_invitation_email
+        send_event_invitation_email.delay(str(invitation.id))
+
     return Response(serializer.data, status=http_status.HTTP_201_CREATED)
 
 

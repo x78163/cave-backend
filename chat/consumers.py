@@ -212,6 +212,17 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                             channel_id=channel_id,
                             actor=self.user,
                         )
+                        # Send mention email notification
+                        from notifications.tasks import send_mention_notification_email
+                        from django.conf import settings as django_settings
+                        frontend_url = getattr(django_settings, 'FRONTEND_URL', 'http://localhost:5174')
+                        send_mention_notification_email.delay(
+                            recipient_user_id=user.id,
+                            mentioner_username=self.user.username,
+                            message_text=content[:500],
+                            context_label='a chat message',
+                            content_url=f'{frontend_url}/chat',
+                        )
 
         # Reply notification
         if reply_to_msg and reply_to_msg.author_id != self.user.id:

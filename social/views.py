@@ -433,7 +433,22 @@ def post_comments(request, post_id):
     data['author'] = request.user.id
     serializer = PostCommentSerializer(data=data)
     serializer.is_valid(raise_exception=True)
-    serializer.save()
+    comment = serializer.save()
+
+    # Notify post author of new comment (if not self-commenting)
+    if post.author_id and post.author_id != request.user.id:
+        from notifications.tasks import send_comment_notification_email
+        from django.conf import settings
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
+        send_comment_notification_email.delay(
+            recipient_user_id=post.author_id,
+            commenter_username=request.user.username,
+            comment_text=comment.text[:500] if hasattr(comment, 'text') else str(comment),
+            content_type='post',
+            content_url=f'{frontend_url}/social',
+            action_text='commented on your post',
+        )
+
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 

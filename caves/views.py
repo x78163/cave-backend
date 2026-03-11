@@ -1060,6 +1060,11 @@ def cave_requests(request, cave_id):
         message=request.data.get('message', ''),
         payload=payload,
     )
+
+    # Notify cave owner via email
+    from notifications.tasks import send_cave_access_request_email
+    send_cave_access_request_email.delay(str(cave_request.id))
+
     serializer = CaveRequestSerializer(cave_request)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -1125,6 +1130,10 @@ def cave_request_resolve(request, cave_id, request_id):
             if payload.get('owner_name'):
                 lo.owner_name = payload['owner_name']
             lo.save()
+
+    # Notify requester of resolution via email
+    from notifications.tasks import send_cave_access_resolved_email
+    send_cave_access_resolved_email.delay(str(cave_request.id), new_status)
 
     serializer = CaveRequestSerializer(cave_request)
     return Response(serializer.data)

@@ -201,17 +201,43 @@ def send_event_invitation_email(self, invitation_id):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_event_update_email(self, event_id, update_type, changes=''):
-    """Notify RSVPed users of event update/cancellation."""
+def send_event_update_email(self, event_id, update_type, changes='',
+                            event_name=None, attendee_user_ids=None):
+    """Notify RSVPed users of event update/cancellation.
+
+    For cancellations, event_name and attendee_user_ids should be passed
+    directly since the event may be deleted before this task runs.
+    """
     from events.models import Event, EventRSVP
+    from users.models import UserProfile
     from .sender import send_notification_email
 
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
+
+    # If pre-captured data was provided (cancellation), use it directly
+    if event_name and attendee_user_ids is not None:
+        users = UserProfile.objects.filter(id__in=attendee_user_ids)
+        for user in users:
+            send_notification_email(
+                user=user,
+                subject=f'Event {update_type}: {event_name}',
+                template_name='emails/event_update.html',
+                context={
+                    'event_name': event_name,
+                    'update_type': update_type,
+                    'changes': changes,
+                    'event_url': f'{frontend_url}/events/{event_id}',
+                },
+                preference_key='event_update',
+            )
+        return
+
+    # For updates, fetch from DB (event still exists)
     try:
         event = Event.objects.get(id=event_id)
     except Event.DoesNotExist:
         return
 
-    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
     rsvps = EventRSVP.objects.filter(
         event=event, status='going',
     ).select_related('user')
