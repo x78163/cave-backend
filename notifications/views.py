@@ -140,13 +140,20 @@ def _handle_cave_access(data, status):
     cave_req.resolved_at = timezone.now()
     cave_req.save(update_fields=['status', 'resolved_by', 'resolved_at'])
 
-    # If approved and it's a contact_access request, grant access
-    if status == 'accepted' and cave_req.request_type == 'contact_access':
-        try:
-            lo = cave_req.cave.land_owner
-            lo.contact_access_users.add(cave_req.requester)
-        except LandOwner.DoesNotExist:
-            pass  # No land owner record to grant access to
+    # If approved, grant the appropriate access
+    if status == 'accepted':
+        if cave_req.request_type == 'cave_access':
+            from caves.models import CavePermission
+            CavePermission.objects.get_or_create(
+                cave=cave_req.cave, user=cave_req.requester,
+                defaults={'role': 'viewer', 'granted_by': resolver},
+            )
+        elif cave_req.request_type == 'contact_access':
+            try:
+                lo = cave_req.cave.land_owner
+                lo.contact_access_users.add(cave_req.requester)
+            except LandOwner.DoesNotExist:
+                pass  # No land owner record to grant access to
 
     # Notify requester asynchronously
     send_cave_access_resolved_email.delay(str(cave_req.id), status)

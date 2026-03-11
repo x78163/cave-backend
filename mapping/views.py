@@ -9,6 +9,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 
 from caves.models import Cave
+from caves.views import _get_cave_or_deny
 from .models import PointOfInterest
 from .serializers import PointOfInterestSerializer
 
@@ -17,10 +18,9 @@ from .serializers import PointOfInterestSerializer
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def poi_list(request, cave_id):
     """List POIs for a cave, or create a new one."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if request.method == 'GET':
         pois = PointOfInterest.objects.filter(cave=cave)

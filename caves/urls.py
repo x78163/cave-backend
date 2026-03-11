@@ -15,6 +15,7 @@ urlpatterns = [
     path('<uuid:cave_id>/comments/', views.cave_comment_add, name='cave_comment_add'),
     path('<uuid:cave_id>/description/', views.cave_description, name='cave_description'),
     path('<uuid:cave_id>/permissions/', views.cave_permissions, name='cave_permissions'),
+    path('<uuid:cave_id>/permissions/<uuid:perm_id>/', views.cave_permission_delete, name='cave_permission_delete'),
     path('<uuid:cave_id>/share/', views.cave_share, name='cave_share'),
     path('<uuid:cave_id>/map-data/', views.cave_map_data, name='cave_map_data'),
     path('<uuid:cave_id>/map-data/revert/', views.cave_map_revert, name='cave_map_revert'),

@@ -438,6 +438,7 @@ class CaveRequest(models.Model):
     """
 
     class RequestType(models.TextChoices):
+        CAVE_ACCESS = 'cave_access', 'Cave Access Request'
         CONTACT_ACCESS = 'contact_access', 'Contact Access Request'
         CONTACT_SUBMISSION = 'contact_submission', 'Contact Info Submission'
 

@@ -1001,8 +1001,8 @@ function NotificationPrefsTab() {
                     prefs[key] ? 'bg-[var(--cyber-cyan)]' : 'bg-[#333]'
                   }`}
                 >
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                    prefs[key] ? 'translate-x-5' : 'translate-x-0.5'
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                    prefs[key] ? 'left-5' : 'left-0.5'
                   }`} />
                 </button>
               </label>

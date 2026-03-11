@@ -223,62 +223,89 @@ export default function Explore() {
                   : ''
               }`}
             >
-              {cave.cover_photo && (
-                <img
-                  src={cave.cover_photo}
-                  alt={cave.name}
-                  className="w-full h-36 object-cover rounded-lg mb-3"
-                />
+              {cave.has_access === false ? (
+                <>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="font-semibold text-[var(--cyber-text)]">
+                      {cave.name}
+                      {cave.aliases && (
+                        <span className="font-normal text-[var(--cyber-text-dim)] text-sm"> ({cave.aliases})</span>
+                      )}
+                    </h3>
+                    <span
+                      className="cyber-badge text-[10px]"
+                      style={{ borderColor: '#f59e0b', color: '#f59e0b' }}
+                    >
+                      {cave.visibility === 'private' ? 'Private' : 'Restricted'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
+                    {cave.region && `${cave.region}, `}{cave.country || 'Unknown location'}
+                  </p>
+                  <p className="text-xs text-[var(--cyber-text-dim)] mt-3 italic">
+                    Request access to view this cave
+                  </p>
+                </>
+              ) : (
+                <>
+                  {cave.cover_photo && (
+                    <img
+                      src={cave.cover_photo}
+                      alt={cave.name}
+                      className="w-full h-36 object-cover rounded-lg mb-3"
+                    />
+                  )}
+                  <h3 className="font-semibold text-[var(--cyber-text)]">
+                    {cave.name}
+                    {cave.aliases && (
+                      <span className="font-normal text-[var(--cyber-text-dim)] text-sm"> ({cave.aliases})</span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
+                    {cave.region && `${cave.region}, `}{cave.country || 'Unknown location'}
+                  </p>
+
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {cave.total_length && (
+                      <span
+                        className="cyber-badge"
+                        style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
+                      >
+                        {cave.total_length}m
+                      </span>
+                    )}
+                    {cave.has_map && (
+                      <span
+                        className="cyber-badge"
+                        style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
+                      >
+                        3D Map
+                      </span>
+                    )}
+                    {cave.rating_count > 0 && (
+                      <span
+                        className="cyber-badge"
+                        style={{ borderColor: '#fbbf24', color: '#fbbf24' }}
+                      >
+                        ★ {Number(cave.average_rating).toFixed(1)} ({cave.rating_count})
+                      </span>
+                    )}
+                    {cave.public_land_name && cave.public_land_name !== 'N/A' && (
+                      <span
+                        className="cyber-badge"
+                        style={{ borderColor: '#4ade80', color: '#4ade80' }}
+                        title={cave.public_land_name}
+                      >
+                        {cave.public_land_type || 'Public Land'}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-[var(--cyber-text-dim)] mt-3 line-clamp-2">
+                    {cave.description || 'No description yet'}
+                  </p>
+                </>
               )}
-              <h3 className="font-semibold text-[var(--cyber-text)]">
-                {cave.name}
-                {cave.aliases && (
-                  <span className="font-normal text-[var(--cyber-text-dim)] text-sm"> ({cave.aliases})</span>
-                )}
-              </h3>
-              <p className="text-xs text-[var(--cyber-text-dim)] mt-1">
-                {cave.region && `${cave.region}, `}{cave.country || 'Unknown location'}
-              </p>
-
-              <div className="flex flex-wrap gap-2 mt-3">
-                {cave.total_length && (
-                  <span
-                    className="cyber-badge"
-                    style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
-                  >
-                    {cave.total_length}m
-                  </span>
-                )}
-                {cave.has_map && (
-                  <span
-                    className="cyber-badge"
-                    style={{ borderColor: 'var(--cyber-cyan)', color: 'var(--cyber-cyan)' }}
-                  >
-                    3D Map
-                  </span>
-                )}
-                {cave.rating_count > 0 && (
-                  <span
-                    className="cyber-badge"
-                    style={{ borderColor: '#fbbf24', color: '#fbbf24' }}
-                  >
-                    ★ {Number(cave.average_rating).toFixed(1)} ({cave.rating_count})
-                  </span>
-                )}
-                {cave.public_land_name && cave.public_land_name !== 'N/A' && (
-                  <span
-                    className="cyber-badge"
-                    style={{ borderColor: '#4ade80', color: '#4ade80' }}
-                    title={cave.public_land_name}
-                  >
-                    {cave.public_land_type || 'Public Land'}
-                  </span>
-                )}
-              </div>
-
-              <p className="text-xs text-[var(--cyber-text-dim)] mt-3 line-clamp-2">
-                {cave.description || 'No description yet'}
-              </p>
             </Link>
           ))}
         </div>

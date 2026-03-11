@@ -34,6 +34,54 @@ from .serializers import (
 )
 
 
+def _user_can_view_cave(cave, user):
+    """
+    Check if a user has permission to view a cave's full detail.
+    Returns True for public/limited_public caves.
+    For unlisted/private caves, requires owner, admin, or CavePermission.
+    """
+    if cave.visibility in ('public', 'limited_public'):
+        return True
+    if not user or not user.is_authenticated:
+        return False
+    if cave.owner_id == user.id or user.is_staff:
+        return True
+    return CavePermission.objects.filter(cave=cave, user=user).exists()
+
+
+def _check_cave_view_permission(cave, user):
+    """
+    Returns None if user can view the cave, or a Response(403) if not.
+    """
+    if _user_can_view_cave(cave, user):
+        return None
+    return Response(
+        {
+            'error': 'You do not have access to this cave',
+            'cave_id': str(cave.id),
+            'cave_name': cave.name,
+            'visibility': cave.visibility,
+            'owner_username': cave.owner.username if cave.owner else None,
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def _get_cave_or_deny(cave_id, user):
+    """
+    Fetch a cave and check view permission.
+    Returns (cave, None) on success or (None, Response) on failure.
+    """
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return None, Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    denied = _check_cave_view_permission(cave, user)
+    if denied:
+        return None, denied
+    return cave, None
+
+
 @api_view(['POST'])
 def resolve_map_url(request):
     """
@@ -216,10 +264,9 @@ def proximity_check(request):
 @api_view(['GET'])
 def cave_nearby(request, cave_id):
     """Return caves within 300m of the given cave, visible to the current user."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if cave.latitude is None or cave.longitude is None:
         return Response({'nearby_caves': []})
@@ -293,10 +340,8 @@ def cave_list(request):
     """List all caves or create a new cave."""
     if request.method == 'GET':
         if request.user.is_authenticated:
-            caves = Cave.objects.filter(
-                Q(visibility__in=['public', 'limited_public']) |
-                Q(owner=request.user)
-            )
+            # Show all caves — private/unlisted ones get redacted in serializer
+            caves = Cave.objects.all()
         else:
             caves = Cave.objects.filter(visibility__in=['public', 'limited_public'])
 
@@ -319,7 +364,7 @@ def cave_list(request):
             except (ValueError, TypeError):
                 pass
 
-        serializer = CaveListSerializer(caves, many=True)
+        serializer = CaveListSerializer(caves, many=True, context={'request': request})
         return Response({'caves': serializer.data, 'count': len(serializer.data)})
 
     elif request.method == 'POST':
@@ -372,6 +417,9 @@ def cave_detail(request, cave_id):
     ctx = {'request': request}
 
     if request.method == 'GET':
+        denied = _check_cave_view_permission(cave, request.user)
+        if denied:
+            return denied
         serializer = CaveDetailSerializer(cave, context=ctx)
         return Response(serializer.data)
 
@@ -454,10 +502,9 @@ def cave_detail(request, cave_id):
 @parser_classes([MultiPartParser, FormParser])
 def cave_photo_upload(request, cave_id):
     """Upload a photo to a cave."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     serializer = CavePhotoSerializer(data=request.data)
     if serializer.is_valid():
@@ -494,10 +541,9 @@ def cave_photo_detail(request, cave_id, photo_id):
 @api_view(['GET', 'POST'])
 def cave_comment_add(request, cave_id):
     """List or add comments to a cave."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if request.method == 'GET':
         comments = cave.comments.all()
@@ -518,10 +564,9 @@ def cave_description(request, cave_id):
     GET: List all description revisions (wiki history).
     POST: Create a new revision (edit description).
     """
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if request.method == 'GET':
         revisions = cave.revisions.all()
@@ -562,10 +607,9 @@ def cave_description(request, cave_id):
 @api_view(['GET', 'POST'])
 def cave_permissions(request, cave_id):
     """List or add permissions for a cave."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if request.method == 'GET':
         perms = cave.permissions.all()
@@ -580,13 +624,33 @@ def cave_permissions(request, cave_id):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
-def cave_share(request, cave_id):
-    """Generate a share link for a cave."""
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def cave_permission_delete(request, cave_id, perm_id):
+    """Revoke a user's access to a cave."""
     try:
         cave = Cave.objects.get(id=cave_id)
     except Cave.DoesNotExist:
         return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if cave.owner_id != request.user.id and not request.user.is_staff:
+        return Response({'error': 'Only the cave owner can revoke access'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        perm = CavePermission.objects.get(id=perm_id, cave=cave)
+    except CavePermission.DoesNotExist:
+        return Response({'error': 'Permission not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    perm.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['POST'])
+def cave_share(request, cave_id):
+    """Generate a share link for a cave."""
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     role = request.data.get('role', CavePermission.Role.VIEWER)
     expires_at = request.data.get('expires_at')
@@ -608,7 +672,15 @@ def cave_share(request, cave_id):
 def cave_media_file(request, cave_id, filename):
     """Proxy a cave media file from storage (local or R2) to avoid CORS issues."""
     from django.core.files.storage import default_storage
-    from django.http import FileResponse, HttpResponseNotFound
+    from django.http import FileResponse, HttpResponseNotFound, JsonResponse
+
+    # Check cave view permission
+    try:
+        cave = Cave.objects.get(id=cave_id)
+    except Cave.DoesNotExist:
+        return HttpResponseNotFound()
+    if not _user_can_view_cave(cave, request.user if hasattr(request, 'user') else None):
+        return JsonResponse({'error': 'You do not have access to this cave'}, status=403)
 
     ALLOWED = {'cave_pointcloud.glb', 'cave_mesh.glb', 'cave_wireframe.glb', 'cave_printable.stl', 'spawn.json', 'trajectory.json'}
     is_glb = filename.endswith('.glb')
@@ -653,10 +725,9 @@ def cave_map_data(request, cave_id):
     Map data is stored as a JSON file in media/caves/<cave_id>/map_data.json.
     Supports ?mode=<mode> query param to select render mode variant.
     """
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if not cave.has_map:
         return Response({'error': 'No map data available'}, status=status.HTTP_404_NOT_FOUND)
@@ -865,10 +936,9 @@ def cave_cancel_stl(request, cave_id):
 @api_view(['GET', 'PUT', 'PATCH'])
 def cave_land_owner(request, cave_id):
     """Get or update land owner info for a cave."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if request.method == 'GET':
         try:
@@ -890,10 +960,9 @@ def cave_land_owner(request, cave_id):
 @api_view(['POST'])
 def cave_land_owner_gis_lookup(request, cave_id):
     """Look up parcel/owner info from TN GIS using the cave's coordinates."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if not cave.has_location:
         return Response(
@@ -941,10 +1010,9 @@ def cave_land_owner_gis_lookup(request, cave_id):
 @api_view(['POST'])
 def cave_public_land_lookup(request, cave_id):
     """Look up PAD-US public land status using the cave's coordinates."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if not cave.has_location:
         return Response(
@@ -1017,15 +1085,21 @@ def cave_requests(request, cave_id):
         )
 
     request_type = request.data.get('request_type')
-    if request_type not in ('contact_access', 'contact_submission'):
+    if request_type not in ('cave_access', 'contact_access', 'contact_submission'):
         return Response(
-            {'error': 'request_type must be "contact_access" or "contact_submission"'},
+            {'error': 'request_type must be "cave_access", "contact_access", or "contact_submission"'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     if cave.owner_id == request.user.id:
         return Response(
             {'error': 'Cave owner does not need to request access'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if request_type == 'cave_access' and CavePermission.objects.filter(cave=cave, user=request.user).exists():
+        return Response(
+            {'error': 'You already have access to this cave'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -1114,7 +1188,13 @@ def cave_request_resolve(request, cave_id, request_id):
     cave_request.save(update_fields=['status', 'resolved_by', 'resolved_at'])
 
     if new_status == 'accepted':
-        if cave_request.request_type == 'contact_access':
+        if cave_request.request_type == 'cave_access':
+            CavePermission.objects.get_or_create(
+                cave=cave, user=cave_request.requester,
+                defaults={'role': CavePermission.Role.VIEWER, 'granted_by': request.user},
+            )
+
+        elif cave_request.request_type == 'contact_access':
             lo, _ = LandOwner.objects.get_or_create(cave=cave)
             lo.contact_access_users.add(cave_request.requester)
 
@@ -1384,10 +1464,9 @@ def survey_map_list_create(request, cave_id):
     GET:  Return all survey maps for this cave.
     POST: Upload image, process (strip bg + recolor), create SurveyMap record.
     """
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if request.method == 'GET':
         surveys = cave.survey_maps.all()
@@ -1484,10 +1563,9 @@ def survey_map_detail(request, cave_id, survey_id):
 @parser_classes([MultiPartParser, FormParser])
 def cave_document_upload(request, cave_id):
     """Upload a PDF document to a cave."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -1556,10 +1634,9 @@ def cave_document_detail(request, cave_id, document_id):
 @api_view(['POST'])
 def cave_video_link_add(request, cave_id):
     """Add a video link to a cave. Auto-detects platform and generates embed URL."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -1739,10 +1816,9 @@ def _polygon_area_sqm(vertices):
 @api_view(['GET', 'POST'])
 def annotation_list_create(request, cave_id):
     """List or create surface annotations for a cave."""
-    try:
-        cave = Cave.objects.get(pk=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if request.method == 'GET':
         annotations = SurfaceAnnotation.objects.filter(cave=cave)
@@ -1801,10 +1877,9 @@ def annotation_detail(request, cave_id, annotation_id):
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def editor_project_list_create(request, cave_id):
     """List or create editor projects for a cave."""
-    try:
-        cave = Cave.objects.get(id=cave_id)
-    except Cave.DoesNotExist:
-        return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
+    cave, denied = _get_cave_or_deny(cave_id, request.user)
+    if denied:
+        return denied
 
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)

@@ -14,6 +14,7 @@ import VideoLinkModal from '../components/VideoLinkModal'
 import VideoEmbed from '../components/VideoEmbed'
 import SurveyManager from '../components/SurveyManager'
 import FineTuneMapModal from '../components/FineTuneMapModal'
+import CaveAccessDenied from '../components/CaveAccessDenied'
 import { PLATFORM_LABELS, PLATFORM_COLORS } from '../utils/videoUtils'
 import { apiFetch } from '../hooks/useApi'
 import useAuthStore from '../stores/authStore'
@@ -35,6 +36,7 @@ export default function CaveDetail() {
   const [preloadedRoute, setPreloadedRoute] = useState(null)
   const [cave, setCave] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [accessDenied, setAccessDenied] = useState(null) // { cave_name, owner_username, visibility }
   const [newComment, setNewComment] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
@@ -118,8 +120,13 @@ export default function CaveDetail() {
 
   const fetchCave = () => {
     apiFetch(`/caves/${caveId}/`)
-      .then(data => { setCave(data); setLoading(false) })
-      .catch(() => { setLoading(false) })
+      .then(data => { setCave(data); setAccessDenied(null); setLoading(false) })
+      .catch(err => {
+        if (err?.response?.status === 403 && err.response.data?.cave_name) {
+          setAccessDenied(err.response.data)
+        }
+        setLoading(false)
+      })
   }
 
   const fetchRatings = () => {
@@ -524,6 +531,19 @@ export default function CaveDetail() {
     )
   }
 
+  if (accessDenied) {
+    return (
+      <CaveAccessDenied
+        caveId={caveId}
+        caveName={accessDenied.cave_name}
+        ownerUsername={accessDenied.owner_username}
+        visibility={accessDenied.visibility}
+        user={user}
+        navigate={navigate}
+      />
+    )
+  }
+
   if (!cave) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[var(--cyber-bg)]">
@@ -775,6 +795,39 @@ export default function CaveDetail() {
                   caveId={caveId}
                   onResolved={() => { fetchRequests(); fetchCave() }}
                 />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Access Management (owner of private/unlisted caves) */}
+        {canManage && cave.access_users?.length > 0 && (cave.visibility === 'private' || cave.visibility === 'unlisted') && (
+          <div className="px-4 py-3">
+            <h3 className="text-white font-semibold mb-2">
+              Users with Access
+              <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-purple-900/30 text-purple-400 border border-purple-800/30">
+                {cave.access_users.length}
+              </span>
+            </h3>
+            <div className="space-y-1.5">
+              {cave.access_users.map(perm => (
+                <div key={perm.id} className="flex items-center justify-between rounded-xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] px-3 py-2">
+                  <div>
+                    <span className="text-sm text-[var(--cyber-text)]">{perm.user__username}</span>
+                    <span className="text-xs text-[var(--cyber-text-dim)] ml-2">({perm.role})</span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await apiFetch(`/caves/${caveId}/permissions/${perm.id}/`, { method: 'DELETE' })
+                        fetchCave()
+                      } catch {}
+                    }}
+                    className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                  >
+                    Revoke
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -2499,7 +2552,16 @@ function RequestCard({ request, caveId, onResolved }) {
     }
   }
 
-  const isAccess = request.request_type === 'contact_access'
+  const isCaveAccess = request.request_type === 'cave_access'
+  const isContactAccess = request.request_type === 'contact_access'
+  const isAccess = isCaveAccess || isContactAccess
+
+  const badgeLabel = isCaveAccess ? 'Cave Access' : isContactAccess ? 'Contact Access' : 'Contact Submission'
+  const badgeClass = isCaveAccess
+    ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
+    : isContactAccess
+      ? 'bg-amber-900/30 text-amber-400 border-amber-800/30'
+      : 'bg-cyan-900/30 text-[var(--cyber-cyan)] border-cyan-800/30'
 
   return (
     <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-3">
@@ -2508,12 +2570,8 @@ function RequestCard({ request, caveId, onResolved }) {
           <span className="text-[var(--cyber-text)] text-sm font-medium">
             {request.requester_username}
           </span>
-          <span className={`inline-block px-2 py-0.5 rounded-full text-xs border
-            ${isAccess
-              ? 'bg-amber-900/30 text-amber-400 border-amber-800/30'
-              : 'bg-cyan-900/30 text-[var(--cyber-cyan)] border-cyan-800/30'
-            }`}>
-            {isAccess ? 'Access Request' : 'Contact Submission'}
+          <span className={`inline-block px-2 py-0.5 rounded-full text-xs border ${badgeClass}`}>
+            {badgeLabel}
           </span>
         </div>
         <span className="text-[#555570] text-xs">
@@ -2550,7 +2608,7 @@ function RequestCard({ request, caveId, onResolved }) {
         <button onClick={() => resolve('accepted')} disabled={resolving}
           className="px-3 py-1.5 rounded-full text-xs font-semibold
             bg-gradient-to-r from-emerald-600 to-emerald-700 text-white">
-          {resolving ? '...' : isAccess ? 'Grant Access' : 'Accept & Apply'}
+          {resolving ? '...' : isCaveAccess ? 'Grant Cave Access' : isContactAccess ? 'Grant Contact Access' : 'Accept & Apply'}
         </button>
         <button onClick={() => resolve('denied')} disabled={resolving}
           className="px-3 py-1.5 rounded-full text-xs text-red-400 border border-red-800/30

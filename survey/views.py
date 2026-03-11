@@ -7,6 +7,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from caves.models import Cave
+from caves.views import _user_can_view_cave
 from .models import CaveSurvey, SurveyStation, SurveyShot
 from .serializers import (
     CaveSurveyListSerializer,
@@ -23,11 +24,14 @@ except ImportError:
     extract_shots_from_image = None
 
 
-def _get_cave_or_404(cave_id):
+def _get_cave_or_404(cave_id, user=None):
     try:
-        return Cave.objects.get(id=cave_id)
+        cave = Cave.objects.get(id=cave_id)
     except Cave.DoesNotExist:
         return None
+    if user is not None and not _user_can_view_cave(cave, user):
+        return None
+    return cave
 
 
 def _get_survey_or_404(cave_id, survey_id):
@@ -42,7 +46,7 @@ def _get_survey_or_404(cave_id, survey_id):
 @api_view(['GET', 'POST'])
 def survey_list(request, cave_id):
     """List surveys for a cave or create a new one."""
-    cave = _get_cave_or_404(cave_id)
+    cave = _get_cave_or_404(cave_id, request.user)
     if not cave:
         return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -355,7 +359,7 @@ def generate_slam_survey(request, cave_id):
 
     Pass level='all' (default) to generate for all levels, or level=0/1/... for a single level.
     """
-    cave = _get_cave_or_404(cave_id)
+    cave = _get_cave_or_404(cave_id, request.user)
     if not cave:
         return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
 

@@ -212,6 +212,7 @@ class CaveListSerializer(serializers.ModelSerializer):
     comment_count = serializers.IntegerField(source='comments.count', read_only=True)
     average_rating = serializers.SerializerMethodField()
     rating_count = serializers.SerializerMethodField()
+    has_access = serializers.SerializerMethodField()
 
     class Meta:
         model = Cave
@@ -224,9 +225,24 @@ class CaveListSerializer(serializers.ModelSerializer):
             'average_rating', 'rating_count',
             'public_land_name', 'public_land_type', 'public_land_owner', 'public_land_access',
             'visibility', 'collaboration_setting',
+            'has_access',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'has_location', 'created_at', 'updated_at']
+
+    def _user_can_view(self, obj):
+        """Check if the requesting user has access to this cave."""
+        if obj.visibility in ('public', 'limited_public'):
+            return True
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        if obj.owner_id == request.user.id or request.user.is_staff:
+            return True
+        return CavePermission.objects.filter(cave=obj, user=request.user).exists()
+
+    def get_has_access(self, obj):
+        return self._user_can_view(obj)
 
     def get_average_rating(self, obj):
         result = obj.ratings.aggregate(avg=Avg('rating'))
@@ -234,6 +250,34 @@ class CaveListSerializer(serializers.ModelSerializer):
 
     def get_rating_count(self, obj):
         return obj.ratings.count()
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not self._user_can_view(instance):
+            # Redact sensitive fields for restricted caves
+            data['latitude'] = None
+            data['longitude'] = None
+            data['coordinates_approximate'] = False
+            data['has_map'] = False
+            data['has_location'] = False
+            data['description'] = None
+            data['cover_photo'] = None
+            data['slam_heading'] = None
+            data['photo_count'] = 0
+            data['comment_count'] = 0
+            data['average_rating'] = None
+            data['rating_count'] = 0
+            data['total_length'] = None
+            data['hazard_count'] = None
+            data['public_land_name'] = ''
+            data['public_land_type'] = ''
+            data['public_land_owner'] = ''
+            data['public_land_access'] = ''
+        elif instance.visibility == 'limited_public':
+            # Hide exact coordinates for limited public
+            data['latitude'] = None
+            data['longitude'] = None
+        return data
 
 
 class CaveDetailSerializer(serializers.ModelSerializer):
@@ -259,6 +303,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     spawn_url = serializers.SerializerMethodField()
     has_stl = serializers.SerializerMethodField()
     wiki_article_slug = serializers.SerializerMethodField()
+    access_users = serializers.SerializerMethodField()
 
     class Meta:
         model = Cave
@@ -286,6 +331,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'pointcloud_url', 'spawn_url', 'has_stl',
             'visibility', 'collaboration_setting',
             'publish_to_wiki', 'wiki_article_slug',
+            'access_users',
             'owner', 'origin_device',
             'created_at', 'updated_at',
         ]
@@ -379,6 +425,19 @@ class CaveDetailSerializer(serializers.ModelSerializer):
                 and lo.contact_access_users.filter(id=request.user.id).exists()):
             return LandOwnerSerializer(lo).data
         return LandOwnerPublicSerializer(lo).data
+
+    def get_access_users(self, obj):
+        """Return list of users with CavePermission (visible only to owner/admin)."""
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return []
+        if obj.owner_id != request.user.id and not request.user.is_staff:
+            return []
+        return list(
+            CavePermission.objects.filter(cave=obj)
+            .select_related('user')
+            .values('id', 'user__id', 'user__username', 'role', 'granted_at')
+        )
 
 
 class CavePermissionSerializer(serializers.ModelSerializer):
