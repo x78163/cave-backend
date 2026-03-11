@@ -544,7 +544,7 @@ def _inherit_user_content(user, admin_user):
     Cave.objects.filter(owner=user).update(owner=admin_user)
     CavePhoto.objects.filter(uploaded_by=user).update(uploaded_by=admin_user)
     CaveDocument.objects.filter(uploaded_by=user).update(uploaded_by=admin_user)
-    CaveVideoLink.objects.filter(uploaded_by=user).update(uploaded_by=admin_user)
+    CaveVideoLink.objects.filter(added_by=user).update(added_by=admin_user)
     Post.objects.filter(author=user).update(author=admin_user)
 
 
