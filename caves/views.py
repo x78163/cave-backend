@@ -996,7 +996,7 @@ def cave_requests(request, cave_id):
             and cave.owner_id
             and cave.owner_id == request.user.id
         )
-        if is_owner:
+        if is_owner or (request.user.is_authenticated and request.user.is_staff):
             qs = cave.requests.select_related('requester', 'resolved_by')
             req_status = request.query_params.get('status')
             if req_status:
@@ -1077,7 +1077,12 @@ def cave_request_resolve(request, cave_id, request_id):
     except Cave.DoesNotExist:
         return Response({'error': 'Cave not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    if not request.user.is_authenticated or cave.owner_id != request.user.id:
+    is_owner = (
+        request.user.is_authenticated
+        and cave.owner_id
+        and cave.owner_id == request.user.id
+    )
+    if not request.user.is_authenticated or (not is_owner and not request.user.is_staff):
         return Response(
             {'error': 'Only the cave owner can resolve requests'},
             status=status.HTTP_403_FORBIDDEN,

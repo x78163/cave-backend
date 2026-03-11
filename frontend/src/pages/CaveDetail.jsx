@@ -2479,9 +2479,11 @@ function Badge({ color, text }) {
 
 function RequestCard({ request, caveId, onResolved }) {
   const [resolving, setResolving] = useState(false)
+  const [error, setError] = useState(null)
 
   const resolve = async (newStatus) => {
     setResolving(true)
+    setError(null)
     try {
       await apiFetch(`/caves/${caveId}/requests/${request.id}/resolve/`, {
         method: 'PATCH',
@@ -2489,6 +2491,8 @@ function RequestCard({ request, caveId, onResolved }) {
       })
       onResolved()
     } catch (err) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to resolve request'
+      setError(msg)
       console.error('Resolve failed:', err)
     } finally {
       setResolving(false)
@@ -2539,6 +2543,9 @@ function RequestCard({ request, caveId, onResolved }) {
         </div>
       )}
 
+      {error && (
+        <p className="text-xs text-red-400 mb-2">{error}</p>
+      )}
       <div className="flex gap-2">
         <button onClick={() => resolve('accepted')} disabled={resolving}
           className="px-3 py-1.5 rounded-full text-xs font-semibold

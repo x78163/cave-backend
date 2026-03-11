@@ -2,15 +2,14 @@
 Views for handling email action tokens (one-click approve/deny/RSVP/unsubscribe).
 
 When a user clicks an action button in an email, the signed token is verified
-and the action is executed, then the user is redirected to the appropriate
-frontend page.
+and the action is executed, then a standalone confirmation page is shown.
 """
 
 import logging
 
 from django.conf import settings
 from django.core import signing
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -23,6 +22,33 @@ logger = logging.getLogger(__name__)
 def _frontend_url(path=''):
     base = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
     return f'{base.rstrip("/")}{path}'
+
+
+def _action_result_page(title, message, link_url=None, link_text='Open Cave Dragon'):
+    """Return a standalone HTML confirmation page for email actions."""
+    link_html = ''
+    if link_url:
+        link_html = f'''
+        <a href="{link_url}"
+           style="display:inline-block;margin-top:24px;padding:12px 32px;
+                  background:linear-gradient(135deg,#00b8d4,#00e5ff);
+                  color:#0a0a12;text-decoration:none;border-radius:9999px;
+                  font-weight:600;font-size:14px;">{link_text}</a>
+        '''
+    html = f'''<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Cave Dragon</title></head>
+<body style="margin:0;padding:0;background:#0a0a12;color:#e0e0f0;font-family:system-ui,sans-serif;
+             min-height:100vh;display:flex;align-items:center;justify-content:center;">
+<div style="text-align:center;padding:40px 24px;max-width:420px;">
+  <img src="{_frontend_url('/cave-dragon-logo.png')}" alt="Cave Dragon" width="80" height="80"
+       style="margin-bottom:16px;">
+  <h1 style="color:#00e5ff;font-size:20px;margin:0 0 12px;">{title}</h1>
+  <p style="color:#8888aa;font-size:14px;line-height:1.5;margin:0;">{message}</p>
+  {link_html}
+</div>
+</body></html>'''
+    return HttpResponse(html, content_type='text/html')
 
 
 @api_view(['GET'])
@@ -44,8 +70,12 @@ def handle_email_action(request):
     try:
         data = verify_action_token(token)
     except signing.BadSignature:
-        return HttpResponseRedirect(
-            _frontend_url('/?error=expired_link')
+        return _action_result_page(
+            'Link Expired',
+            'This action link has expired or is invalid. '
+            'Please log in to Cave Dragon to manage this request.',
+            link_url=_frontend_url('/login'),
+            link_text='Go to Cave Dragon',
         )
 
     action = data.get('action')
@@ -65,7 +95,7 @@ def handle_email_action(request):
 
 def _handle_cave_access(data, status):
     """Approve or deny a cave access request."""
-    from caves.models import CaveRequest
+    from caves.models import CaveRequest, LandOwner
     from users.models import UserProfile
     from .tasks import send_cave_access_resolved_email
 
@@ -75,26 +105,34 @@ def _handle_cave_access(data, status):
     try:
         cave_req = CaveRequest.objects.select_related('cave').get(id=request_id)
     except CaveRequest.DoesNotExist:
-        return HttpResponseRedirect(
-            _frontend_url('/?error=request_not_found')
+        return _action_result_page(
+            'Request Not Found',
+            'This access request no longer exists.',
+            link_url=_frontend_url('/'),
+            link_text='Go to Cave Dragon',
         )
 
     # Verify the token user is the cave owner
     if cave_req.cave.owner_id != user_id:
-        return HttpResponseRedirect(
-            _frontend_url('/?error=unauthorized')
+        return _action_result_page(
+            'Unauthorized',
+            'Only the cave owner can approve or deny access requests.',
         )
 
     if cave_req.status != 'pending':
-        return HttpResponseRedirect(
-            _frontend_url(f'/caves/{cave_req.cave.id}?info=already_resolved')
+        cave_url = _frontend_url(f'/caves/{cave_req.cave.id}')
+        return _action_result_page(
+            'Already Resolved',
+            f'This request has already been {cave_req.status}.',
+            link_url=cave_url,
+            link_text=f'View {cave_req.cave.name}',
         )
 
     # Resolve the request
     try:
         resolver = UserProfile.objects.get(id=user_id)
     except UserProfile.DoesNotExist:
-        return HttpResponseRedirect(_frontend_url('/?error=user_not_found'))
+        return _action_result_page('Error', 'User account not found.')
 
     from django.utils import timezone
     cave_req.status = status
@@ -104,15 +142,23 @@ def _handle_cave_access(data, status):
 
     # If approved and it's a contact_access request, grant access
     if status == 'accepted' and cave_req.request_type == 'contact_access':
-        landowner = getattr(cave_req.cave, 'landowner', None)
-        if landowner:
-            landowner.contact_access_users.add(cave_req.requester)
+        try:
+            lo = cave_req.cave.land_owner
+            lo.contact_access_users.add(cave_req.requester)
+        except LandOwner.DoesNotExist:
+            pass  # No land owner record to grant access to
 
     # Notify requester asynchronously
     send_cave_access_resolved_email.delay(str(cave_req.id), status)
 
-    return HttpResponseRedirect(
-        _frontend_url(f'/caves/{cave_req.cave.id}?info=access_{status}')
+    cave_url = _frontend_url(f'/caves/{cave_req.cave.id}')
+    action_word = 'approved' if status == 'accepted' else 'denied'
+    return _action_result_page(
+        f'Request {action_word.title()}',
+        f'You have {action_word} {cave_req.requester.username}\'s access request '
+        f'for {cave_req.cave.name}. They will be notified by email.',
+        link_url=cave_url,
+        link_text=f'View {cave_req.cave.name}',
     )
 
 
@@ -129,8 +175,11 @@ def _handle_event_rsvp(data):
         event = Event.objects.get(id=event_id)
         user = UserProfile.objects.get(id=user_id)
     except (Event.DoesNotExist, UserProfile.DoesNotExist):
-        return HttpResponseRedirect(
-            _frontend_url('/?error=not_found')
+        return _action_result_page(
+            'Not Found',
+            'This event or user account no longer exists.',
+            link_url=_frontend_url('/events'),
+            link_text='View Events',
         )
 
     if rsvp_status == 'going':
@@ -140,20 +189,37 @@ def _handle_event_rsvp(data):
                 event=event, status='going',
             ).count()
             if going_count >= event.max_participants:
-                return HttpResponseRedirect(
-                    _frontend_url(f'/events/{event.id}?error=event_full')
+                event_url = _frontend_url(f'/events/{event.id}')
+                return _action_result_page(
+                    'Event Full',
+                    f'{event.name} has reached its maximum capacity.',
+                    link_url=event_url,
+                    link_text='View Event',
                 )
 
         EventRSVP.objects.update_or_create(
             event=event, user=user,
             defaults={'status': 'going'},
         )
+        event_url = _frontend_url(f'/events/{event.id}')
+        return _action_result_page(
+            'RSVP Confirmed',
+            f'You\'re going to {event.name}!',
+            link_url=event_url,
+            link_text='View Event',
+        )
+
     elif rsvp_status == 'not_going':
         EventRSVP.objects.filter(event=event, user=user).delete()
+        event_url = _frontend_url(f'/events/{event.id}')
+        return _action_result_page(
+            'RSVP Updated',
+            f'You\'ve declined {event.name}.',
+            link_url=event_url,
+            link_text='View Event',
+        )
 
-    return HttpResponseRedirect(
-        _frontend_url(f'/events/{event.id}?info=rsvp_{rsvp_status}')
-    )
+    return HttpResponseRedirect(_frontend_url(f'/events/{event.id}'))
 
 
 def _handle_unsubscribe(data):
@@ -166,7 +232,12 @@ def _handle_unsubscribe(data):
     try:
         user = UserProfile.objects.get(id=user_id)
     except UserProfile.DoesNotExist:
-        return HttpResponseRedirect(_frontend_url('/'))
+        return _action_result_page(
+            'Error',
+            'User account not found.',
+            link_url=_frontend_url('/'),
+            link_text='Go to Cave Dragon',
+        )
 
     if category:
         prefs = NotificationPreference.for_user(user)
@@ -179,6 +250,11 @@ def _handle_unsubscribe(data):
             prefs.save()
             logger.info('User %s unsubscribed from %s', user.username, category)
 
-    return HttpResponseRedirect(
-        _frontend_url('/profile?info=unsubscribed')
+    category_label = (category or '').replace('_', ' ')
+    return _action_result_page(
+        'Unsubscribed',
+        f'You have been unsubscribed from {category_label} emails. '
+        'You can manage your notification preferences in your profile settings.',
+        link_url=_frontend_url('/profile'),
+        link_text='Manage Preferences',
     )
