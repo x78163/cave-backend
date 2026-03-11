@@ -10,6 +10,7 @@ import Groups from './pages/Groups'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import VerifyEmail from './pages/VerifyEmail'
+import GoogleCallback from './pages/GoogleCallback'
 import useAuthStore from './stores/authStore'
 
 // Lazy-load heavy pages — they import Three.js, Leaflet, TipTap, etc.
@@ -118,6 +119,7 @@ function AppContent() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/auth/google/callback" element={<GoogleCallback />} />
 
         {/* Protected routes — with TopBar */}
         <Route path="/*" element={

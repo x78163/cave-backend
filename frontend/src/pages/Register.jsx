@@ -53,17 +53,19 @@ export default function Register() {
 
   // Google flow: user was redirected here because they need an invite code
   const handleGoogleWithCode = useCallback(async () => {
-    const credential = sessionStorage.getItem('google_credential')
-    if (!credential) {
+    const code = sessionStorage.getItem('google_auth_code')
+    const redirectUri = sessionStorage.getItem('google_redirect_uri')
+    if (!code || !redirectUri) {
       navigate('/login')
       return
     }
     setLoading(true)
     clearError()
     try {
-      const result = await googleAuth(credential, inviteCode)
+      const result = await googleAuth(code, inviteCode, redirectUri)
       if (result?.needsInviteCode) return // still need code
-      sessionStorage.removeItem('google_credential')
+      sessionStorage.removeItem('google_auth_code')
+      sessionStorage.removeItem('google_redirect_uri')
       navigate('/')
     } catch {
       // error in store

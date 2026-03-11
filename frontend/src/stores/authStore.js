@@ -33,10 +33,12 @@ const useAuthStore = create((set) => ({
     }
   },
 
-  googleAuth: async (credential, inviteCode) => {
+  googleAuth: async (credential, inviteCode, redirectUri) => {
     set({ error: null })
     try {
-      const payload = { credential }
+      const payload = redirectUri
+        ? { code: credential, redirect_uri: redirectUri }
+        : { credential }
       if (inviteCode) payload.invite_code = inviteCode
       const { data } = await api.post('/users/auth/google/', payload)
 

@@ -54,31 +54,79 @@ def register_view(request):
 
 
 GOOGLE_TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo'
+GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo'
+
+
+def _exchange_google_code(code, redirect_uri):
+    """Exchange an authorization code for Google user data."""
+    google_client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', '')
+    google_client_secret = getattr(settings, 'GOOGLE_OAUTH_CLIENT_SECRET', '')
+
+    # Exchange code for tokens
+    token_resp = http_requests.post(GOOGLE_TOKEN_URL, data={
+        'code': code,
+        'client_id': google_client_id,
+        'client_secret': google_client_secret,
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code',
+    }, timeout=10)
+
+    if token_resp.status_code != 200:
+        logger.warning('Google token exchange failed: %s', token_resp.text)
+        return None
+
+    tokens = token_resp.json()
+    access_token = tokens.get('access_token')
+    if not access_token:
+        return None
+
+    # Fetch user info with the access token
+    userinfo_resp = http_requests.get(GOOGLE_USERINFO_URL, headers={
+        'Authorization': f'Bearer {access_token}',
+    }, timeout=5)
+
+    if userinfo_resp.status_code != 200:
+        return None
+
+    return userinfo_resp.json()
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_auth_view(request):
-    """Authenticate with Google OAuth. Body: {credential, invite_code?}"""
+    """Authenticate with Google OAuth.
+
+    Accepts either:
+    - {credential: <id_token>} — legacy GIS popup flow
+    - {code: <auth_code>, redirect_uri: <uri>} — redirect flow
+    """
+    auth_code = request.data.get('code', '')
+    redirect_uri = request.data.get('redirect_uri', '')
     credential = request.data.get('credential', '')
-    if not credential:
-        return Response({'error': 'Missing Google credential'}, status=400)
 
-    # Verify the Google ID token
-    try:
-        resp = http_requests.get(
-            GOOGLE_TOKENINFO_URL, params={'id_token': credential}, timeout=5,
-        )
-        if resp.status_code != 200:
-            return Response({'error': 'Invalid Google token'}, status=400)
-        google_data = resp.json()
-    except http_requests.RequestException:
-        return Response({'error': 'Failed to verify Google token'}, status=502)
+    if auth_code and redirect_uri:
+        # Authorization code flow (redirect)
+        google_data = _exchange_google_code(auth_code, redirect_uri)
+        if not google_data:
+            return Response({'error': 'Failed to exchange Google auth code'}, status=400)
+    elif credential:
+        # Legacy ID token flow (popup)
+        try:
+            resp = http_requests.get(
+                GOOGLE_TOKENINFO_URL, params={'id_token': credential}, timeout=5,
+            )
+            if resp.status_code != 200:
+                return Response({'error': 'Invalid Google token'}, status=400)
+            google_data = resp.json()
+        except http_requests.RequestException:
+            return Response({'error': 'Failed to verify Google token'}, status=502)
 
-    # Validate audience matches our client ID
-    google_client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', '')
-    if google_client_id and google_data.get('aud') != google_client_id:
-        return Response({'error': 'Token audience mismatch'}, status=400)
+        google_client_id = getattr(settings, 'GOOGLE_OAUTH_CLIENT_ID', '')
+        if google_client_id and google_data.get('aud') != google_client_id:
+            return Response({'error': 'Token audience mismatch'}, status=400)
+    else:
+        return Response({'error': 'Missing Google credential or code'}, status=400)
 
     email = google_data.get('email', '')
     google_id = google_data.get('sub', '')

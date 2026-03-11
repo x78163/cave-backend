@@ -194,6 +194,7 @@ if not DEBUG:
 
 # Google OAuth
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
+GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET', '')
 
 # Email (console backend for dev, SMTP for production)
 if DEBUG:
