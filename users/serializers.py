@@ -1,7 +1,7 @@
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
-from .models import UserProfile, Grotto, GrottoMembership, InviteCode
+from .models import UserProfile, Grotto, GrottoMembership, InviteCode, NotificationPreference
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -98,6 +98,19 @@ class UserProfileSerializer(serializers.ModelSerializer):
             if not isinstance(item, str) or len(item) > 50:
                 raise serializers.ValidationError('Each specialty must be a string of 50 chars or less.')
         return value
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            'cave_access_request', 'cave_access_granted',
+            'landowner_contact_request',
+            'event_invitation', 'event_update', 'event_reminder',
+            'comment_on_post', 'comment_reply', 'mention', 'new_follower',
+            'chat_digest',
+            'wiki_cave_edit',
+        ]
 
 
 class GrottoSerializer(serializers.ModelSerializer):

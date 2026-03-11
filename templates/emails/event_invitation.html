@@ -1,0 +1,43 @@
+{% extends "emails/base.html" %}
+{% block title %}Event invitation — Cave Dragon{% endblock %}
+{% block content %}
+<h2>You're invited!</h2>
+<p>Hi {{ invitee_username }},</p>
+<p><strong>{{ inviter_username }}</strong> has invited you to:</p>
+<div class="card">
+  <h2 style="margin-top: 0;">{{ event_name }}</h2>
+  <p>📅 {{ event_date }}</p>
+  {% if event_location %}<p>📍 {{ event_location }}</p>{% endif %}
+  {% if event_description %}<p>{{ event_description }}</p>{% endif %}
+</div>
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ rsvp_going_url }}" class="btn btn-success">Going</a>
+  <a href="{{ rsvp_not_going_url }}" class="btn btn-danger">Not Going</a>
+</p>
+<p class="muted"><a href="{{ event_url }}">View event details</a></p>
+{% endblock %}
+{% block schema %}
+<script type="application/ld+json">
+{
+  "@context": "http://schema.org",
+  "@type": "Event",
+  "name": "{{ event_name }}",
+  "startDate": "{{ event_start_iso }}",
+  {% if event_end_iso %}"endDate": "{{ event_end_iso }}",{% endif %}
+  {% if event_location %}"location": { "@type": "Place", "name": "{{ event_location }}" },{% endif %}
+  "organizer": { "@type": "Person", "name": "{{ inviter_username }}" },
+  "url": "{{ event_url }}",
+  "potentialAction": {
+    "@type": "RsvpAction",
+    "handler": {
+      "@type": "HttpActionHandler",
+      "url": "{{ rsvp_going_url }}"
+    },
+    "attendance": [
+      "https://schema.org/RsvpAttendance/Yes",
+      "https://schema.org/RsvpAttendance/No"
+    ]
+  }
+}
+</script>
+{% endblock %}

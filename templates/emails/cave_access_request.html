@@ -1,0 +1,17 @@
+{% extends "emails/base.html" %}
+{% block title %}Cave access request — Cave Dragon{% endblock %}
+{% block content %}
+<h2>New access request</h2>
+<p>Hi {{ owner_username }},</p>
+<p><strong>{{ requester_username }}</strong> is requesting access to <strong>{{ cave_name }}</strong>.</p>
+{% if message %}
+<div class="card">
+  <p style="margin: 0; font-style: italic;">"{{ message }}"</p>
+</div>
+{% endif %}
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ approve_url }}" class="btn btn-success">Approve</a>
+  <a href="{{ deny_url }}" class="btn btn-danger">Deny</a>
+</p>
+<p class="muted">Or <a href="{{ cave_url }}">view the cave</a> to manage access requests.</p>
+{% endblock %}

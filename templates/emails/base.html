@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Cave Dragon{% endblock %}</title>
+<style>
+  body { margin: 0; padding: 0; background: #0a0a12; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .wrapper { max-width: 560px; margin: 0 auto; padding: 32px 20px; }
+  .header { text-align: center; padding-bottom: 24px; border-bottom: 1px solid #1a1a2e; margin-bottom: 24px; }
+  .header img { width: 48px; height: 48px; }
+  .header h1 { color: #00d4ff; font-size: 20px; margin: 8px 0 0; }
+  .content { color: #d0d0d0; font-size: 15px; line-height: 1.6; }
+  .content h2 { color: #ffffff; font-size: 18px; margin-top: 0; }
+  .content p { margin: 12px 0; }
+  .content a { color: #00d4ff; text-decoration: none; }
+  .btn { display: inline-block; padding: 12px 32px; border-radius: 4px; font-weight: bold; text-decoration: none; font-size: 15px; margin: 8px 4px; }
+  .btn-primary { background: #00d4ff; color: #0a0a12 !important; }
+  .btn-success { background: #22c55e; color: #ffffff !important; }
+  .btn-danger { background: #ef4444; color: #ffffff !important; }
+  .btn-secondary { background: #2a2a3e; color: #d0d0d0 !important; border: 1px solid #3a3a4e; }
+  .card { background: #12121e; border: 1px solid #1a1a2e; border-radius: 8px; padding: 20px; margin: 16px 0; }
+  .footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid #1a1a2e; text-align: center; color: #666; font-size: 12px; }
+  .footer a { color: #888; text-decoration: none; }
+  .muted { color: #888; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <h1>Cave Dragon</h1>
+  </div>
+  <div class="content">
+    {% block content %}{% endblock %}
+  </div>
+  <div class="footer">
+    <p>
+      <a href="{{ frontend_url }}">Cave Dragon</a> &mdash; Mapping the underground world
+    </p>
+    <p>
+      <a href="{{ frontend_url }}/profile">Notification settings</a> &middot;
+      <a href="{{ unsubscribe_url }}">Unsubscribe</a>
+    </p>
+  </div>
+</div>
+{% block schema %}{% endblock %}
+</body>
+</html>

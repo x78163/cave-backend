@@ -64,6 +64,7 @@ urlpatterns = [
     path('api/events/', include('events.urls')),
     path('api/wiki/', include('wiki.urls')),
     path('api/admin/', include('admin_api.urls')),
+    path('api/notifications/', include('notifications.urls')),
 ]
 
 if settings.DEBUG:

@@ -1,0 +1,14 @@
+{% extends "emails/base.html" %}
+{% block title %}Cave access {{ status }} — Cave Dragon{% endblock %}
+{% block content %}
+<h2>Access request {{ status }}</h2>
+<p>Hi {{ requester_username }},</p>
+{% if status == "accepted" %}
+<p>Your request to access <strong>{{ cave_name }}</strong> has been <strong style="color: #22c55e;">approved</strong>.</p>
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ cave_url }}" class="btn btn-primary">View Cave</a>
+</p>
+{% else %}
+<p>Your request to access <strong>{{ cave_name }}</strong> has been <strong style="color: #ef4444;">denied</strong>.</p>
+{% endif %}
+{% endblock %}

@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'events',
     'wiki',
     'admin_api',
+    'notifications',
 ]
 
 ASGI_APPLICATION = 'cave_backend.asgi.application'
@@ -208,6 +209,17 @@ else:
 
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Cave Dragon <noreply@cavedragon.llc>')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5174')
+
+# Celery (async task queue — uses same Redis as Channels)
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_SOFT_TIME_LIMIT = 300  # 5 min soft limit
+CELERY_TASK_TIME_LIMIT = 600  # 10 min hard limit
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 # Sync settings
 SYNC_CHUNK_DIR = BASE_DIR / 'media' / 'chunks'

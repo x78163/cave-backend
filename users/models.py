@@ -158,6 +158,88 @@ class InviteCode(models.Model):
         return self.is_active and (self.max_uses == 0 or self.use_count < self.max_uses)
 
 
+class NotificationPreference(models.Model):
+    """Per-user email notification preferences.
+
+    Each boolean controls whether an email is sent for that category.
+    Defaults are all True (opt-out model). Users can toggle in profile settings.
+    """
+
+    class DigestFrequency(models.TextChoices):
+        IMMEDIATE = 'immediate', 'Immediate'
+        DAILY = 'daily', 'Daily digest'
+        WEEKLY = 'weekly', 'Weekly digest'
+        OFF = 'off', 'Off'
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='notification_prefs',
+    )
+
+    # Cave access & permissions
+    cave_access_request = models.BooleanField(
+        default=True, help_text='Someone requests access to your cave',
+    )
+    cave_access_granted = models.BooleanField(
+        default=True, help_text='Your cave access request is approved/denied',
+    )
+    landowner_contact_request = models.BooleanField(
+        default=True, help_text='Someone requests landowner contact info',
+    )
+
+    # Events
+    event_invitation = models.BooleanField(
+        default=True, help_text='You are invited to an event',
+    )
+    event_update = models.BooleanField(
+        default=True, help_text='An event you RSVPed to is updated/cancelled',
+    )
+    event_reminder = models.BooleanField(
+        default=True, help_text='Reminder 24h before an event',
+    )
+
+    # Social
+    comment_on_post = models.BooleanField(
+        default=True, help_text='Someone comments on your post',
+    )
+    comment_reply = models.BooleanField(
+        default=True, help_text='Someone replies to your comment',
+    )
+    mention = models.BooleanField(
+        default=True, help_text='Someone @mentions you',
+    )
+    new_follower = models.BooleanField(
+        default=True, help_text='Someone follows you',
+    )
+
+    # Chat digest
+    chat_digest = models.CharField(
+        max_length=10, choices=DigestFrequency.choices,
+        default=DigestFrequency.DAILY,
+        help_text='Unread chat message digest frequency',
+    )
+
+    # Wiki
+    wiki_cave_edit = models.BooleanField(
+        default=True, help_text='Wiki article edited for a cave you own',
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'notification preference'
+        verbose_name_plural = 'notification preferences'
+
+    def __str__(self):
+        return f'NotificationPreference for {self.user.username}'
+
+    @classmethod
+    def for_user(cls, user):
+        """Get or create preferences for a user (lazy creation)."""
+        obj, _ = cls.objects.get_or_create(user=user)
+        return obj
+
+
 class SiteSettings(models.Model):
     """Singleton site-wide settings (always exactly one row)."""
 

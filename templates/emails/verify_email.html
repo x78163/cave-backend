@@ -1,0 +1,12 @@
+{% extends "emails/base.html" %}
+{% block title %}Verify your email — Cave Dragon{% endblock %}
+{% block content %}
+<h2>Verify your email</h2>
+<p>Hi {{ username }},</p>
+<p>Please verify your email address to activate your Cave Dragon account.</p>
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ verify_url }}" class="btn btn-primary">Verify Email</a>
+</p>
+<p class="muted">Or copy this link: {{ verify_url }}</p>
+<p class="muted">This link expires in 3 days.</p>
+{% endblock %}

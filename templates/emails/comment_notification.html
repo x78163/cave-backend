@@ -1,0 +1,13 @@
+{% extends "emails/base.html" %}
+{% block title %}New {{ comment_type }} — Cave Dragon{% endblock %}
+{% block content %}
+<h2>New {{ comment_type }}</h2>
+<p>Hi {{ username }},</p>
+<p><strong>{{ commenter_username }}</strong> {{ action_text }}:</p>
+<div class="card">
+  <p style="margin: 0;">{{ comment_text }}</p>
+</div>
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ content_url }}" class="btn btn-primary">View {{ content_type }}</a>
+</p>
+{% endblock %}

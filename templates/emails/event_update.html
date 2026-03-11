@@ -1,0 +1,15 @@
+{% extends "emails/base.html" %}
+{% block title %}Event {{ update_type }} — Cave Dragon{% endblock %}
+{% block content %}
+<h2>Event {{ update_type }}</h2>
+<p>Hi {{ username }},</p>
+{% if update_type == "cancelled" %}
+<p>The event <strong>{{ event_name }}</strong> has been <strong style="color: #ef4444;">cancelled</strong>.</p>
+{% else %}
+<p>The event <strong>{{ event_name }}</strong> has been updated.</p>
+{% if changes %}<p>Changes: {{ changes }}</p>{% endif %}
+{% endif %}
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ event_url }}" class="btn btn-primary">View Event</a>
+</p>
+{% endblock %}

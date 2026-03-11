@@ -21,6 +21,9 @@ urlpatterns = [
     # Search
     path('search/', views.user_search, name='user_search'),
 
+    # Notification preferences
+    path('notification-prefs/', views.notification_prefs_view, name='notification_prefs'),
+
     # Profile
     path('me/', views.me_view, name='user_me'),
     path('profile/<int:user_id>/', views.user_profile_detail, name='user_profile_detail'),

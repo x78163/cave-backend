@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+{% block title %}Unread messages — Cave Dragon{% endblock %}
+{% block content %}
+<h2>You have unread messages</h2>
+<p>Hi {{ username }},</p>
+<p>Here's what you missed:</p>
+{% for channel in channels %}
+<div class="card">
+  <p style="margin: 0 0 4px;">
+    <strong>{{ channel.name }}</strong>
+    <span class="muted">&mdash; {{ channel.unread_count }} unread message{{ channel.unread_count|pluralize }}</span>
+  </p>
+  {% if channel.preview %}
+  <p class="muted" style="margin: 0;">{{ channel.last_author }}: {{ channel.preview }}</p>
+  {% endif %}
+</div>
+{% endfor %}
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ chat_url }}" class="btn btn-primary">Open Chat</a>
+</p>
+{% endblock %}

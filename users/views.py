@@ -17,11 +17,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import UserProfile, Grotto, GrottoMembership, InviteCode, SiteSettings
+from .models import UserProfile, Grotto, GrottoMembership, InviteCode, SiteSettings, NotificationPreference
 from .serializers import (
     RegisterSerializer, UserProfileSerializer,
     GrottoSerializer, GrottoMembershipSerializer,
-    InviteCodeSerializer,
+    InviteCodeSerializer, NotificationPreferenceSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,11 +35,9 @@ def register_view(request):
     serializer.is_valid(raise_exception=True)
     user = serializer.save()
 
-    # Send verification email (non-blocking — don't fail registration)
-    try:
-        _send_verification_email(user)
-    except Exception:
-        logger.exception('Failed to send verification email to %s', user.email)
+    # Send verification email asynchronously via Celery
+    from notifications.tasks import send_verification_email
+    send_verification_email.delay(user.id)
 
     refresh = RefreshToken.for_user(user)
     return Response({
@@ -239,12 +237,8 @@ def send_verification_email_view(request):
     if user.email_verified:
         return Response({'status': 'already_verified'})
 
-    try:
-        _send_verification_email(user)
-    except Exception:
-        logger.exception('Failed to send verification email')
-        return Response({'error': 'Failed to send email'}, status=500)
-
+    from notifications.tasks import send_verification_email
+    send_verification_email.delay(user.id)
     return Response({'status': 'sent'})
 
 
@@ -345,6 +339,21 @@ def site_settings_view(request):
     return Response({
         'require_invite_code': site.require_invite_code,
     })
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def notification_prefs_view(request):
+    """GET or PATCH the current user's email notification preferences."""
+    prefs = NotificationPreference.for_user(request.user)
+
+    if request.method == 'GET':
+        return Response(NotificationPreferenceSerializer(prefs).data)
+
+    serializer = NotificationPreferenceSerializer(prefs, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
 
 
 @api_view(['GET', 'PATCH'])
