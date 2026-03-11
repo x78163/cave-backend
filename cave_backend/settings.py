@@ -222,6 +222,21 @@ CELERY_TASK_SOFT_TIME_LIMIT = 300  # 5 min soft limit
 CELERY_TASK_TIME_LIMIT = 600  # 10 min hard limit
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
+# Celery Beat schedule (periodic tasks)
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    'daily-chat-digest': {
+        'task': 'notifications.tasks.send_chat_digest',
+        'schedule': crontab(hour=8, minute=0),  # 8 AM daily
+        'options': {'expires': 60 * 60 * 12},
+    },
+    'weekly-activity-summary': {
+        'task': 'notifications.tasks.send_weekly_activity_summary',
+        'schedule': crontab(hour=9, minute=0, day_of_week=1),  # Monday 9 AM
+        'options': {'expires': 60 * 60 * 24},
+    },
+}
+
 # Sync settings
 SYNC_CHUNK_DIR = BASE_DIR / 'media' / 'chunks'
 SYNC_MAX_CHUNK_SIZE = 10 * 1024 * 1024  # 10MB per chunk

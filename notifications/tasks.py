@@ -261,6 +261,30 @@ def send_event_update_email(self, event_id, update_type, changes='',
 
 
 @shared_task
+def send_new_follower_email(follower_user_id, followed_user_id):
+    """Notify a user that someone followed them."""
+    from .sender import send_notification_email
+
+    follower = _get_user(follower_user_id)
+    followed = _get_user(followed_user_id)
+    if not follower or not followed:
+        return
+
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
+    send_notification_email(
+        user=followed,
+        subject=f'{follower.username} started following you',
+        template_name='emails/new_follower.html',
+        context={
+            'follower_username': follower.username,
+            'follower_bio': (follower.bio or '')[:200],
+            'profile_url': f'{frontend_url}/users/{follower.id}',
+        },
+        preference_key='new_follower',
+    )
+
+
+@shared_task
 def send_comment_notification_email(
     recipient_user_id, commenter_username, comment_text,
     content_type, content_url, action_text='commented on your post',
@@ -390,4 +414,73 @@ def send_chat_digest():
                 'chat_url': f'{frontend_url}/chat',
             },
             preference_key='chat_digest',
+        )
+
+
+# ── Weekly Activity Summary ─────────────────────────────────
+
+
+@shared_task
+def send_weekly_activity_summary():
+    """Send a weekly activity summary to all active users.
+
+    Includes: new caves, events, followers gained, posts in feed.
+    Called by Celery Beat every Monday at 9 AM.
+    """
+    from datetime import timedelta
+
+    from django.db.models import Count, Q
+    from django.utils import timezone
+
+    from caves.models import Cave
+    from events.models import Event
+    from social.models import Activity, UserFollow
+    from users.models import UserProfile
+    from .sender import send_notification_email
+
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
+    one_week_ago = timezone.now() - timedelta(days=7)
+
+    # Global stats for the week
+    new_caves_count = Cave.objects.filter(created_at__gte=one_week_ago).count()
+    upcoming_events = Event.objects.filter(
+        start_date__gte=timezone.now(),
+        status='published',
+    ).order_by('start_date')[:5]
+
+    users = UserProfile.objects.filter(is_active=True).exclude(email='')
+    for user in users:
+        # Per-user stats
+        new_followers = UserFollow.objects.filter(
+            following=user, created_at__gte=one_week_ago,
+        ).count()
+        user_activities = Activity.objects.filter(
+            actor=user, created_at__gte=one_week_ago,
+        ).count()
+
+        # Skip if nothing happened this week for this user and no global news
+        if not new_followers and not user_activities and not new_caves_count and not upcoming_events:
+            continue
+
+        event_list = []
+        for ev in upcoming_events:
+            event_list.append({
+                'name': ev.name,
+                'date': ev.start_date.strftime('%b %d'),
+                'url': f'{frontend_url}/events/{ev.id}',
+            })
+
+        send_notification_email(
+            user=user,
+            subject='Your weekly Cave Dragon summary',
+            template_name='emails/weekly_summary.html',
+            context={
+                'new_caves_count': new_caves_count,
+                'new_followers': new_followers,
+                'user_activities': user_activities,
+                'upcoming_events': event_list,
+                'explore_url': f'{frontend_url}/explore',
+                'events_url': f'{frontend_url}/events',
+            },
+            preference_key=None,  # Always send (users can unsubscribe via link)
         )

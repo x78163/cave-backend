@@ -694,6 +694,7 @@ const BASE_TABS = [
   { key: 'routes', label: 'Routes' },
   { key: 'events', label: 'My Events' },
   { key: 'ratings', label: 'Ratings' },
+  { key: 'notifications', label: 'Notifications' },
 ]
 
 function InviteCodeSection() {
@@ -900,6 +901,132 @@ export default function Profile() {
       {activeTab === 'routes' && userId && <RoutesTab userId={userId} />}
       {activeTab === 'events' && userId && <EventsTab userId={userId} />}
       {activeTab === 'ratings' && userId && <RatingsTab userId={userId} />}
+      {activeTab === 'notifications' && <NotificationPrefsTab />}
+    </div>
+  )
+}
+
+// ── Notification Preferences ─────────────────────────────────
+
+const PREF_SECTIONS = [
+  {
+    title: 'Cave Access',
+    prefs: [
+      { key: 'cave_access_request', label: 'Someone requests access to your cave' },
+      { key: 'cave_access_granted', label: 'Your access request is approved/denied' },
+      { key: 'landowner_contact_request', label: 'Someone requests landowner contact info' },
+    ],
+  },
+  {
+    title: 'Events',
+    prefs: [
+      { key: 'event_invitation', label: 'You are invited to an event' },
+      { key: 'event_update', label: 'An event you RSVPed to is updated/cancelled' },
+      { key: 'event_reminder', label: 'Reminder before an event' },
+    ],
+  },
+  {
+    title: 'Social',
+    prefs: [
+      { key: 'comment_on_post', label: 'Someone comments on your post' },
+      { key: 'comment_reply', label: 'Someone replies to your comment' },
+      { key: 'mention', label: 'Someone @mentions you' },
+      { key: 'new_follower', label: 'Someone follows you' },
+    ],
+  },
+  {
+    title: 'Wiki',
+    prefs: [
+      { key: 'wiki_cave_edit', label: 'Wiki article edited for a cave you own' },
+    ],
+  },
+]
+
+const DIGEST_OPTIONS = [
+  { value: 'immediate', label: 'Immediate' },
+  { value: 'daily', label: 'Daily digest' },
+  { value: 'weekly', label: 'Weekly digest' },
+  { value: 'off', label: 'Off' },
+]
+
+function NotificationPrefsTab() {
+  const [prefs, setPrefs] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useCallback(() => {}, [])
+
+  useState(() => {
+    apiFetch('/users/notification-prefs/')
+      .then(data => setPrefs(data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  })
+
+  const updatePref = async (key, value) => {
+    const prev = prefs[key]
+    setPrefs(p => ({ ...p, [key]: value }))
+    setSaving(true)
+    try {
+      await apiFetch('/users/notification-prefs/', {
+        method: 'PATCH',
+        body: { [key]: value },
+      })
+    } catch {
+      setPrefs(p => ({ ...p, [key]: prev }))
+    }
+    setSaving(false)
+  }
+
+  if (loading || !prefs) {
+    return <div className="text-center text-xs text-[var(--cyber-text-dim)] py-8">Loading preferences...</div>
+  }
+
+  return (
+    <div className="max-w-xl space-y-6">
+      <p className="text-xs text-[var(--cyber-text-dim)]">
+        Control which email notifications you receive. {saving && <span className="text-[var(--cyber-cyan)]">Saving...</span>}
+      </p>
+
+      {PREF_SECTIONS.map(section => (
+        <div key={section.title}>
+          <h3 className="text-sm font-semibold text-[var(--cyber-text)] mb-3">{section.title}</h3>
+          <div className="space-y-2">
+            {section.prefs.map(({ key, label }) => (
+              <label key={key} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-[var(--cyber-surface)] cursor-pointer">
+                <span className="text-sm text-[var(--cyber-text-dim)]">{label}</span>
+                <button
+                  onClick={() => updatePref(key, !prefs[key])}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${
+                    prefs[key] ? 'bg-[var(--cyber-cyan)]' : 'bg-[#333]'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                    prefs[key] ? 'translate-x-5' : 'translate-x-0.5'
+                  }`} />
+                </button>
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {/* Chat digest frequency */}
+      <div>
+        <h3 className="text-sm font-semibold text-[var(--cyber-text)] mb-3">Chat</h3>
+        <div className="flex items-center justify-between py-2 px-3">
+          <span className="text-sm text-[var(--cyber-text-dim)]">Unread message digest</span>
+          <select
+            value={prefs.chat_digest || 'daily'}
+            onChange={e => updatePref('chat_digest', e.target.value)}
+            className="cyber-input text-xs px-3 py-1.5 rounded-lg"
+          >
+            {DIGEST_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
     </div>
   )
 }

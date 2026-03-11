@@ -410,9 +410,9 @@ def notification_prefs_view(request):
 def me_view(request):
     """Get or update the currently authenticated user's profile."""
     if request.method == 'GET':
-        return Response(UserProfileSerializer(request.user).data)
+        return Response(UserProfileSerializer(request.user, context={'request': request}).data)
 
-    serializer = UserProfileSerializer(request.user, data=request.data, partial=True)
+    serializer = UserProfileSerializer(request.user, data=request.data, partial=True, context={'request': request})
     serializer.is_valid(raise_exception=True)
     serializer.save()
     return Response(serializer.data)
@@ -428,11 +428,11 @@ def user_profile_detail(request, user_id):
         return Response({'error': 'Profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
-        serializer = UserProfileSerializer(profile)
+        serializer = UserProfileSerializer(profile, context={'request': request})
         return Response(serializer.data)
 
     elif request.method == 'PATCH':
-        serializer = UserProfileSerializer(profile, data=request.data, partial=True)
+        serializer = UserProfileSerializer(profile, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)

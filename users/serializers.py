@@ -67,6 +67,10 @@ class RegisterSerializer(serializers.Serializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+
     class Meta:
         model = UserProfile
         fields = [
@@ -75,13 +79,29 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'specialties', 'onboarding_complete', 'allow_dms',
             'is_staff', 'is_wiki_editor', 'email_verified',
             'caves_explored', 'total_mapping_distance', 'expeditions_count',
+            'followers_count', 'following_count', 'is_following',
             'date_joined', 'updated_at',
         ]
         read_only_fields = [
             'id', 'username', 'email', 'date_joined', 'updated_at',
             'caves_explored', 'total_mapping_distance', 'expeditions_count',
             'is_staff', 'is_wiki_editor', 'email_verified',
+            'followers_count', 'following_count', 'is_following',
         ]
+
+    def get_followers_count(self, obj):
+        return obj.followers.count()
+
+    def get_following_count(self, obj):
+        return obj.following.count()
+
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.id == obj.id:
+            return None  # Self — not applicable
+        return obj.followers.filter(follower=request.user).exists()
 
     def validate_specialties(self, value):
         import json

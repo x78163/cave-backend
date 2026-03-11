@@ -1,0 +1,47 @@
+{% extends "emails/base.html" %}
+{% block title %}Weekly Summary — Cave Dragon{% endblock %}
+{% block content %}
+<h2>Your Weekly Summary</h2>
+<p>Hi {{ username }}, here's what happened this week on Cave Dragon.</p>
+
+{% if new_caves_count or new_followers or user_activities %}
+<div class="card">
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+    {% if new_caves_count %}
+    <tr>
+      <td style="padding: 8px 0; color: #8888aa; font-size: 14px;">New caves added</td>
+      <td style="padding: 8px 0; text-align: right; color: #00e5ff; font-weight: 600; font-size: 14px;">{{ new_caves_count }}</td>
+    </tr>
+    {% endif %}
+    {% if new_followers %}
+    <tr>
+      <td style="padding: 8px 0; color: #8888aa; font-size: 14px;">New followers</td>
+      <td style="padding: 8px 0; text-align: right; color: #00e5ff; font-weight: 600; font-size: 14px;">{{ new_followers }}</td>
+    </tr>
+    {% endif %}
+    {% if user_activities %}
+    <tr>
+      <td style="padding: 8px 0; color: #8888aa; font-size: 14px;">Your activities</td>
+      <td style="padding: 8px 0; text-align: right; color: #00e5ff; font-weight: 600; font-size: 14px;">{{ user_activities }}</td>
+    </tr>
+    {% endif %}
+  </table>
+</div>
+{% endif %}
+
+{% if upcoming_events %}
+<h3 style="color: #00e5ff; font-size: 16px; margin: 24px 0 12px;">Upcoming Events</h3>
+{% for event in upcoming_events %}
+<div style="margin-bottom: 8px;">
+  <a href="{{ event.url }}" style="color: #e0e0f0; text-decoration: none; font-size: 14px;">
+    <strong>{{ event.name }}</strong>
+    <span style="color: #8888aa;"> — {{ event.date }}</span>
+  </a>
+</div>
+{% endfor %}
+{% endif %}
+
+<p style="text-align: center; margin: 28px 0;">
+  <a href="{{ explore_url }}" class="btn btn-primary">Explore Caves</a>
+</p>
+{% endblock %}

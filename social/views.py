@@ -115,6 +115,11 @@ def user_follow(request, user_id):
                 {'detail': 'Already following this user.'},
                 status=status.HTTP_409_CONFLICT,
             )
+
+        # Notify the followed user via email
+        from notifications.tasks import send_new_follower_email
+        send_new_follower_email.delay(request.user.id, target.id)
+
         serializer = UserFollowSerializer(follow)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 

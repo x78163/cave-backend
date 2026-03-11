@@ -12,6 +12,7 @@ export default function UserProfilePage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('wall')
   const [dmLoading, setDmLoading] = useState(false)
+  const [followLoading, setFollowLoading] = useState(false)
 
   // Redirect to own profile
   useEffect(() => {
@@ -48,6 +49,28 @@ export default function UserProfilePage() {
     setDmLoading(false)
   }
 
+  const handleFollow = async () => {
+    setFollowLoading(true)
+    try {
+      if (profile.is_following) {
+        await apiFetch(`/social/users/${userId}/follow/`, { method: 'DELETE' })
+        setProfile(p => ({
+          ...p,
+          is_following: false,
+          followers_count: Math.max(0, (p.followers_count || 0) - 1),
+        }))
+      } else {
+        await apiFetch(`/social/users/${userId}/follow/`, { method: 'POST' })
+        setProfile(p => ({
+          ...p,
+          is_following: true,
+          followers_count: (p.followers_count || 0) + 1,
+        }))
+      }
+    } catch { /* ignore */ }
+    setFollowLoading(false)
+  }
+
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8">
@@ -75,17 +98,29 @@ export default function UserProfilePage() {
           <div className="flex-1">
             <div className="flex items-center justify-between">
               <h1 className="text-lg font-bold text-[var(--cyber-text)]">{profile.username}</h1>
-              {!isSelf && profile.allow_dms !== false && (
-                <button
-                  onClick={handleSendDM}
-                  disabled={dmLoading}
-                  className="cyber-btn cyber-btn-cyan text-xs px-4 py-1.5"
-                >
-                  {dmLoading ? '...' : 'Send DM'}
-                </button>
-              )}
-              {!isSelf && profile.allow_dms === false && (
-                <span className="text-xs text-[var(--cyber-text-dim)] italic">DMs disabled</span>
+              {!isSelf && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleFollow}
+                    disabled={followLoading}
+                    className={`text-xs px-4 py-1.5 rounded-full font-semibold transition-colors ${
+                      profile.is_following
+                        ? 'border border-[var(--cyber-border)] text-[var(--cyber-text-dim)] hover:border-red-500 hover:text-red-400'
+                        : 'bg-[var(--cyber-cyan)] text-[var(--cyber-bg)]'
+                    }`}
+                  >
+                    {followLoading ? '...' : profile.is_following ? 'Following' : 'Follow'}
+                  </button>
+                  {profile.allow_dms !== false && (
+                    <button
+                      onClick={handleSendDM}
+                      disabled={dmLoading}
+                      className="cyber-btn cyber-btn-cyan text-xs px-4 py-1.5"
+                    >
+                      {dmLoading ? '...' : 'Send DM'}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
             {profile.location && (
@@ -98,20 +133,24 @@ export default function UserProfilePage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mt-4 text-center">
-          <div className="cyber-card p-3">
-            <p className="text-lg font-bold text-[var(--cyber-cyan)]">{profile.caves_explored}</p>
-            <p className="text-[10px] text-[var(--cyber-text-dim)]">Caves Explored</p>
+        <div className="flex flex-wrap gap-6 mt-4 text-sm">
+          <div>
+            <span className="font-semibold text-[var(--cyber-cyan)]">{profile.followers_count ?? 0}</span>{' '}
+            <span className="text-[var(--cyber-text-dim)]">followers</span>
           </div>
-          <div className="cyber-card p-3">
-            <p className="text-lg font-bold text-[var(--cyber-cyan)]">
+          <div>
+            <span className="font-semibold text-[var(--cyber-cyan)]">{profile.following_count ?? 0}</span>{' '}
+            <span className="text-[var(--cyber-text-dim)]">following</span>
+          </div>
+          <div>
+            <span className="font-semibold text-[var(--cyber-cyan)]">{profile.caves_explored}</span>{' '}
+            <span className="text-[var(--cyber-text-dim)]">caves</span>
+          </div>
+          <div>
+            <span className="font-semibold text-[var(--cyber-cyan)]">
               {profile.total_mapping_distance ? `${(profile.total_mapping_distance).toFixed(0)}m` : '0m'}
-            </p>
-            <p className="text-[10px] text-[var(--cyber-text-dim)]">Mapped</p>
-          </div>
-          <div className="cyber-card p-3">
-            <p className="text-lg font-bold text-[var(--cyber-cyan)]">{profile.expeditions_count}</p>
-            <p className="text-[10px] text-[var(--cyber-text-dim)]">Expeditions</p>
+            </span>{' '}
+            <span className="text-[var(--cyber-text-dim)]">mapped</span>
           </div>
         </div>
 
