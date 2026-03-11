@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import useAuthStore from '../stores/authStore'
 
@@ -6,8 +6,60 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const { login, error, clearError } = useAuthStore()
+  const [resendStatus, setResendStatus] = useState(null)
+  const {
+    login, googleAuth, resendVerification,
+    error, clearError, emailVerificationRequired, unverifiedEmail,
+  } = useAuthStore()
   const navigate = useNavigate()
+
+  // Load Google Identity Services script
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+    if (!clientId) return
+
+    const script = document.createElement('script')
+    script.src = 'https://accounts.google.com/gsi/client'
+    script.async = true
+    script.defer = true
+    script.onload = () => {
+      window.google?.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleGoogleCallback,
+      })
+      window.google?.accounts.id.renderButton(
+        document.getElementById('google-signin-btn'),
+        {
+          theme: 'filled_black',
+          size: 'large',
+          width: '100%',
+          text: 'signin_with',
+          shape: 'rectangular',
+        }
+      )
+    }
+    document.head.appendChild(script)
+    return () => { document.head.removeChild(script) }
+  }, [])
+
+  const handleGoogleCallback = useCallback(async (response) => {
+    setLoading(true)
+    clearError()
+    try {
+      const result = await googleAuth(response.credential)
+      if (result?.needsInviteCode) {
+        // Redirect to register with the Google credential
+        sessionStorage.setItem('google_credential', response.credential)
+        navigate('/register?google=1')
+        return
+      }
+      navigate('/')
+    } catch {
+      // error set in store
+    } finally {
+      setLoading(false)
+    }
+  }, [googleAuth, navigate, clearError])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -19,6 +71,17 @@ export default function Login() {
       // error is set in store
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleResend = async () => {
+    if (!unverifiedEmail) return
+    setResendStatus('sending')
+    try {
+      await resendVerification(unverifiedEmail)
+      setResendStatus('sent')
+    } catch {
+      setResendStatus('error')
     }
   }
 
@@ -42,6 +105,21 @@ export default function Login() {
             <div className="text-sm text-center py-2 px-3 rounded-lg"
               style={{ background: 'rgba(255,0,200,0.1)', color: '#ff6b6b', border: '1px solid rgba(255,0,200,0.2)' }}>
               {error}
+              {emailVerificationRequired && unverifiedEmail && (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={handleResend}
+                    disabled={resendStatus === 'sending'}
+                    className="text-xs underline"
+                    style={{ color: 'var(--cyber-cyan)' }}
+                  >
+                    {resendStatus === 'sent' ? 'Verification email sent!' :
+                     resendStatus === 'sending' ? 'Sending...' :
+                     'Resend verification email'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -82,6 +160,18 @@ export default function Login() {
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
+
+          {/* Google Sign-In */}
+          {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+            <>
+              <div className="flex items-center gap-3 my-2">
+                <div className="flex-1 h-px" style={{ background: 'var(--cyber-border)' }} />
+                <span className="text-xs" style={{ color: 'var(--cyber-text-dim)' }}>or</span>
+                <div className="flex-1 h-px" style={{ background: 'var(--cyber-border)' }} />
+              </div>
+              <div id="google-signin-btn" className="flex justify-center" />
+            </>
+          )}
 
           <p className="text-center text-sm" style={{ color: 'var(--cyber-text-dim)' }}>
             No account?{' '}

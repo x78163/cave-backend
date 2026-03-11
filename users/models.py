@@ -33,6 +33,13 @@ class UserProfile(AbstractUser):
     is_wiki_editor = models.BooleanField(
         default=False, help_text='Can publish wiki edits directly without review',
     )
+    email_verified = models.BooleanField(
+        default=False, help_text='Whether email address has been verified',
+    )
+    google_id = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Google account ID for OAuth users',
+    )
 
     invited_by = models.ForeignKey(
         'self', on_delete=models.SET_NULL,
@@ -149,3 +156,28 @@ class InviteCode(models.Model):
     @property
     def is_usable(self):
         return self.is_active and (self.max_uses == 0 or self.use_count < self.max_uses)
+
+
+class SiteSettings(models.Model):
+    """Singleton site-wide settings (always exactly one row)."""
+
+    require_invite_code = models.BooleanField(
+        default=True, help_text='Require invite code for registration',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'site settings'
+        verbose_name_plural = 'site settings'
+
+    def __str__(self):
+        return 'Site Settings'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

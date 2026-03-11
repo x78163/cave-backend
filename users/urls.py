@@ -1,6 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView, TokenRefreshView, TokenVerifyView,
+    TokenRefreshView, TokenVerifyView,
 )
 from . import views
 from caves.views import user_media, user_media_update
@@ -8,9 +8,15 @@ from caves.views import user_media, user_media_update
 urlpatterns = [
     # Auth
     path('auth/register/', views.register_view, name='auth_register'),
-    path('auth/login/', TokenObtainPairView.as_view(), name='auth_login'),
+    path('auth/login/', views.login_view, name='auth_login'),
+    path('auth/google/', views.google_auth_view, name='auth_google'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='auth_refresh'),
     path('auth/verify/', TokenVerifyView.as_view(), name='auth_verify'),
+    path('auth/send-verification/', views.send_verification_email_view, name='auth_send_verification'),
+    path('auth/verify-email/', views.verify_email_view, name='auth_verify_email'),
+
+    # Site settings (public GET, admin PATCH)
+    path('site-settings/', views.site_settings_view, name='site_settings'),
 
     # Search
     path('search/', views.user_search, name='user_search'),

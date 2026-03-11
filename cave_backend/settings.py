@@ -191,6 +191,23 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
 
+# Google OAuth
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
+
+# Email (console backend for dev, SMTP for production)
+if DEBUG:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.zoho.com')
+    EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '465'))
+    EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'True') == 'True'
+    EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+    EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Cave Dragon <noreply@cavedragon.llc>')
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5174')
+
 # Sync settings
 SYNC_CHUNK_DIR = BASE_DIR / 'media' / 'chunks'
 SYNC_MAX_CHUNK_SIZE = 10 * 1024 * 1024  # 10MB per chunk

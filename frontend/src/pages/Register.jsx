@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import useAuthStore from '../stores/authStore'
+import api from '../services/api'
 
 // Matches Django's UnicodeUsernameValidator: letters, digits, and _ . @ + -
 const USERNAME_RE = /^[\w.@+-]+$/
@@ -31,14 +32,45 @@ function FieldHint({ result }) {
 
 export default function Register() {
   const [searchParams] = useSearchParams()
+  const isGoogleFlow = searchParams.get('google') === '1'
   const [inviteCode, setInviteCode] = useState(searchParams.get('code') || '')
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [loading, setLoading] = useState(false)
-  const { register, error, clearError } = useAuthStore()
+  const [requireInviteCode, setRequireInviteCode] = useState(true)
+  const [verificationSent, setVerificationSent] = useState(false)
+  const { register, googleAuth, error, clearError } = useAuthStore()
   const navigate = useNavigate()
+
+  // Fetch site settings to know if invite code is required
+  useEffect(() => {
+    api.get('/users/site-settings/')
+      .then(({ data }) => setRequireInviteCode(data.require_invite_code))
+      .catch(() => {})
+  }, [])
+
+  // Google flow: user was redirected here because they need an invite code
+  const handleGoogleWithCode = useCallback(async () => {
+    const credential = sessionStorage.getItem('google_credential')
+    if (!credential) {
+      navigate('/login')
+      return
+    }
+    setLoading(true)
+    clearError()
+    try {
+      const result = await googleAuth(credential, inviteCode)
+      if (result?.needsInviteCode) return // still need code
+      sessionStorage.removeItem('google_credential')
+      navigate('/')
+    } catch {
+      // error in store
+    } finally {
+      setLoading(false)
+    }
+  }, [googleAuth, inviteCode, navigate, clearError])
 
   const usernameResult = useMemo(() => validateUsername(username), [username])
   const passwordResult = useMemo(() => validatePassword(password), [password])
@@ -48,21 +80,111 @@ export default function Register() {
     return { ok: true, msg: 'Passwords match' }
   }, [password, passwordConfirm])
 
-  const clientValid = inviteCode.length > 0 && usernameResult?.ok &&
-    passwordResult?.ok && confirmResult?.ok && email.length > 0
+  const clientValid = isGoogleFlow
+    ? inviteCode.length > 0
+    : usernameResult?.ok && passwordResult?.ok && confirmResult?.ok &&
+      email.length > 0 && (!requireInviteCode || inviteCode.length > 0)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!clientValid) return
+
+    if (isGoogleFlow) {
+      handleGoogleWithCode()
+      return
+    }
+
     setLoading(true)
     try {
-      await register(username, email, password, passwordConfirm, inviteCode)
+      const result = await register(username, email, password, passwordConfirm, inviteCode)
+      if (result?.emailVerificationRequired) {
+        setVerificationSent(true)
+        return
+      }
       navigate('/')
     } catch {
       // error is set in store
     } finally {
       setLoading(false)
     }
+  }
+
+  // Show verification sent screen
+  if (verificationSent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--cyber-bg)' }}>
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <img src="/cave-dragon-logo.png" alt="Cave Dragon" className="w-48 h-48 mx-auto mb-2" />
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--cyber-cyan)' }}>
+              Check Your Email
+            </h1>
+          </div>
+          <div className="cyber-card p-6 text-center space-y-4">
+            <p className="text-sm" style={{ color: 'var(--cyber-text)' }}>
+              We sent a verification link to <strong style={{ color: 'var(--cyber-cyan)' }}>{email}</strong>.
+            </p>
+            <p className="text-sm" style={{ color: 'var(--cyber-text-dim)' }}>
+              Click the link in the email to verify your account and start exploring.
+            </p>
+            <p className="text-center text-sm" style={{ color: 'var(--cyber-text-dim)' }}>
+              Already verified?{' '}
+              <Link to="/login" style={{ color: 'var(--cyber-cyan)' }} className="hover:underline">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Google invite code flow
+  if (isGoogleFlow) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--cyber-bg)' }}>
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <img src="/cave-dragon-logo.png" alt="Cave Dragon" className="w-48 h-48 mx-auto mb-2" />
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--cyber-cyan)' }}>
+              Almost There
+            </h1>
+            <p className="text-sm mt-1" style={{ color: 'var(--cyber-text-dim)' }}>
+              Enter your invite code to complete sign-up
+            </p>
+          </div>
+          <form onSubmit={handleSubmit} className="cyber-card p-6 space-y-4">
+            {error && (
+              <div className="text-sm text-center py-2 px-3 rounded-lg"
+                style={{ background: 'rgba(255,0,200,0.1)', color: '#ff6b6b', border: '1px solid rgba(255,0,200,0.2)' }}>
+                {error}
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>
+                Invite Code
+              </label>
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => { setInviteCode(e.target.value.toUpperCase()); clearError() }}
+                className="cyber-input w-full px-4 py-2.5 text-sm font-mono tracking-widest"
+                placeholder="XXXXXXXX"
+                maxLength={8}
+                autoFocus
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading || !inviteCode}
+              className="cyber-btn cyber-btn-cyan w-full py-2.5 text-sm disabled:opacity-50"
+            >
+              {loading ? 'Creating account...' : 'Complete Sign Up'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -88,20 +210,22 @@ export default function Register() {
             </div>
           )}
 
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>
-              Invite Code
-            </label>
-            <input
-              type="text"
-              value={inviteCode}
-              onChange={(e) => { setInviteCode(e.target.value.toUpperCase()); clearError() }}
-              className="cyber-input w-full px-4 py-2.5 text-sm font-mono tracking-widest"
-              placeholder="XXXXXXXX"
-              maxLength={8}
-              required
-            />
-          </div>
+          {requireInviteCode && (
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>
+                Invite Code
+              </label>
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => { setInviteCode(e.target.value.toUpperCase()); clearError() }}
+                className="cyber-input w-full px-4 py-2.5 text-sm font-mono tracking-widest"
+                placeholder="XXXXXXXX"
+                maxLength={8}
+                required
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--cyber-text-dim)' }}>

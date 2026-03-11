@@ -9,7 +9,7 @@ class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
-    invite_code = serializers.CharField(max_length=8)
+    invite_code = serializers.CharField(max_length=8, required=False, allow_blank=True)
 
     def validate_username(self, value):
         if ' ' in value:
@@ -24,6 +24,8 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_invite_code(self, value):
+        if not value:
+            return ''
         try:
             code = InviteCode.objects.get(code=value.upper())
         except InviteCode.DoesNotExist:
@@ -39,18 +41,28 @@ class RegisterSerializer(serializers.Serializer):
             validate_password(data['password'])
         except DjangoValidationError as e:
             raise serializers.ValidationError({'password': e.messages})
+
+        # Check invite code requirement
+        from .models import SiteSettings
+        site = SiteSettings.load()
+        invite_code = data.get('invite_code', '').strip()
+        if site.require_invite_code and not invite_code:
+            raise serializers.ValidationError({'invite_code': 'Invite code is required.'})
         return data
 
     def create(self, validated_data):
         validated_data.pop('password_confirm')
-        code_str = validated_data.pop('invite_code')
-        invite = InviteCode.objects.get(code=code_str)
+        code_str = validated_data.pop('invite_code', '')
+        invite = None
+        if code_str:
+            invite = InviteCode.objects.get(code=code_str)
         user = UserProfile.objects.create_user(
-            invited_by=invite.created_by,
+            invited_by=invite.created_by if invite else None,
             **validated_data,
         )
-        invite.use_count += 1
-        invite.save(update_fields=['use_count'])
+        if invite:
+            invite.use_count += 1
+            invite.save(update_fields=['use_count'])
         return user
 
 
@@ -61,14 +73,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name',
             'bio', 'avatar', 'avatar_preset', 'location',
             'specialties', 'onboarding_complete', 'allow_dms',
-            'is_staff', 'is_wiki_editor',
+            'is_staff', 'is_wiki_editor', 'email_verified',
             'caves_explored', 'total_mapping_distance', 'expeditions_count',
             'date_joined', 'updated_at',
         ]
         read_only_fields = [
             'id', 'username', 'email', 'date_joined', 'updated_at',
             'caves_explored', 'total_mapping_distance', 'expeditions_count',
-            'is_staff', 'is_wiki_editor',
+            'is_staff', 'is_wiki_editor', 'email_verified',
         ]
 
     def validate_specialties(self, value):

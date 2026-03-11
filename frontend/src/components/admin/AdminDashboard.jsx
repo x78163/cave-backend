@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useApi } from '../../hooks/useApi'
+import { useState, useEffect } from 'react'
+import { useApi, apiFetch } from '../../hooks/useApi'
 import ServerMonitoring from './ServerMonitoring'
 import UserManagement from './UserManagement'
 import CaveManagement from './CaveManagement'
@@ -40,7 +40,103 @@ const SECTIONS = [
   { key: 'caves', label: 'Caves' },
   { key: 'invites', label: 'Invite Codes' },
   { key: 'data', label: 'Data Browser' },
+  { key: 'settings', label: 'Settings' },
 ]
+
+// ── Settings Section ──────────────────────────────────────────
+
+function SettingsSection() {
+  const [settings, setSettings] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    apiFetch('/users/site-settings/')
+      .then(data => setSettings(data))
+      .catch(e => console.error(e))
+  }, [])
+
+  const toggleInviteCode = async () => {
+    setSaving(true)
+    try {
+      const data = await apiFetch('/users/site-settings/', {
+        method: 'PATCH',
+        body: JSON.stringify({ require_invite_code: !settings.require_invite_code }),
+      })
+      setSettings(data)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!settings) {
+    return <p className="text-center py-8" style={{ color: 'var(--cyber-text-dim)' }}>Loading...</p>
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--cyber-cyan)' }}>Registration</h3>
+        <div className="cyber-card p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium" style={{ color: 'var(--cyber-text)' }}>
+                Require Invite Code
+              </p>
+              <p className="text-xs" style={{ color: 'var(--cyber-text-dim)' }}>
+                When enabled, new users must provide an invite code to register.
+                Disable to open registration to everyone.
+              </p>
+            </div>
+            <button
+              onClick={toggleInviteCode}
+              disabled={saving}
+              className="relative w-12 h-6 rounded-full transition-colors shrink-0 ml-4"
+              style={{
+                background: settings.require_invite_code ? 'var(--cyber-cyan)' : 'var(--cyber-surface)',
+                border: '1px solid var(--cyber-border)',
+              }}
+            >
+              <span
+                className="absolute top-0.5 w-5 h-5 rounded-full transition-all"
+                style={{
+                  left: settings.require_invite_code ? '24px' : '2px',
+                  background: settings.require_invite_code ? 'var(--cyber-bg)' : 'var(--cyber-text-dim)',
+                }}
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--cyber-cyan)' }}>Authentication</h3>
+        <div className="cyber-card p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full" style={{ background: 'var(--cyber-green, #00ff88)' }} />
+            <span className="text-sm" style={{ color: 'var(--cyber-text)' }}>Username / Password</span>
+            <span className="text-xs ml-auto" style={{ color: 'var(--cyber-text-dim)' }}>Active</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full" style={{
+              background: import.meta.env.VITE_GOOGLE_CLIENT_ID ? 'var(--cyber-green, #00ff88)' : 'var(--cyber-text-dim)'
+            }} />
+            <span className="text-sm" style={{ color: 'var(--cyber-text)' }}>Google OAuth</span>
+            <span className="text-xs ml-auto" style={{ color: 'var(--cyber-text-dim)' }}>
+              {import.meta.env.VITE_GOOGLE_CLIENT_ID ? 'Active' : 'Not configured'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full" style={{ background: 'var(--cyber-green, #00ff88)' }} />
+            <span className="text-sm" style={{ color: 'var(--cyber-text)' }}>Email Verification</span>
+            <span className="text-xs ml-auto" style={{ color: 'var(--cyber-text-dim)' }}>Required</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ── Overview Section ──────────────────────────────────────────
 
@@ -147,6 +243,7 @@ export default function AdminDashboard() {
       {section === 'caves' && <CaveManagement />}
       {section === 'invites' && <InviteCodeManagement />}
       {section === 'data' && <DataBrowser />}
+      {section === 'settings' && <SettingsSection />}
     </div>
   )
 }
