@@ -358,7 +358,12 @@ def post_detail(request, post_id):
     if request.method == 'DELETE':
         if not request.user.is_authenticated:
             return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-        if request.user.id != post.author_id and not request.user.is_staff:
+        can_delete = request.user.id == post.author_id or request.user.is_staff
+        # Grotto officers+ can delete posts on their grotto wall
+        if not can_delete and post.grotto_id:
+            from users.models import is_grotto_officer_or_above
+            can_delete = is_grotto_officer_or_above(request.user, post.grotto)
+        if not can_delete:
             return Response({'error': 'Only the author can delete this post'}, status=status.HTTP_403_FORBIDDEN)
 
         if post.comments.exists():

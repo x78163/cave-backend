@@ -59,16 +59,16 @@ def send_verification_email(self, user_id):
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_cave_access_request_email(self, request_id):
     """Notify cave owner of a new access request."""
-    from caves.models import CaveRequest
+    from requests_app.models import Request
     from .sender import send_notification_email
     from .tokens import make_action_url
 
     try:
-        cave_req = CaveRequest.objects.select_related(
+        cave_req = Request.objects.select_related(
             'cave', 'requester', 'cave__owner',
         ).get(id=request_id)
-    except CaveRequest.DoesNotExist:
-        logger.warning('CaveRequest %s not found', request_id)
+    except Request.DoesNotExist:
+        logger.warning('Request %s not found', request_id)
         return
 
     owner = cave_req.cave.owner
@@ -107,14 +107,14 @@ def send_cave_access_request_email(self, request_id):
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_cave_access_resolved_email(self, request_id, status):
     """Notify requester that their cave access request was resolved."""
-    from caves.models import CaveRequest
+    from requests_app.models import Request
     from .sender import send_notification_email
 
     try:
-        cave_req = CaveRequest.objects.select_related(
+        cave_req = Request.objects.select_related(
             'cave', 'requester',
         ).get(id=request_id)
-    except CaveRequest.DoesNotExist:
+    except Request.DoesNotExist:
         return
 
     frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')

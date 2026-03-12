@@ -151,7 +151,15 @@ export default function EventCreateModal({ onClose, onCreated, editEvent = null 
 
   useEffect(() => {
     apiFetch('/users/grottos/')
-      .then(data => setGrottos(Array.isArray(data) ? data : data?.results || []))
+      .then(data => {
+        const all = data?.grottos ?? (Array.isArray(data) ? data : data?.results || [])
+        // Only show grottos where user is officer or admin
+        const eligible = all.filter(g =>
+          g.user_membership?.status === 'active' &&
+          (g.user_membership?.role === 'admin' || g.user_membership?.role === 'officer')
+        )
+        setGrottos(eligible)
+      })
       .catch(() => {})
   }, [])
 
@@ -278,7 +286,7 @@ export default function EventCreateModal({ onClose, onCreated, editEvent = null 
       if (parsedLon != null) body.longitude = parsedLon
       if (caveId) body.cave = caveId
       if (maxParticipants) body.max_participants = parseInt(maxParticipants, 10)
-      if ((visibility === 'grotto_only' || visibility === 'all_grotto') && grottoId) {
+      if (grottoId) {
         body.grotto = grottoId
       }
 

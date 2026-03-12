@@ -135,15 +135,40 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
 
 class GrottoSerializer(serializers.ModelSerializer):
     member_count = serializers.IntegerField(source='memberships.count', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True, default=None)
+    user_membership = serializers.SerializerMethodField()
+    has_pending_request = serializers.SerializerMethodField()
 
     class Meta:
         model = Grotto
         fields = [
             'id', 'name', 'description', 'website', 'logo',
-            'cover_image', 'privacy', 'created_by', 'member_count',
+            'cover_image', 'privacy', 'created_by', 'created_by_username',
+            'member_count', 'user_membership', 'has_pending_request',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_user_membership(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return None
+        mem = obj.memberships.filter(user=request.user).first()
+        if not mem:
+            return None
+        return {'id': str(mem.id), 'role': mem.role, 'status': mem.status}
+
+    def get_has_pending_request(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        from requests_app.models import Request
+        from django.db.models import Q
+        return Request.objects.filter(
+            Q(requester=request.user, request_type='grotto_membership') |
+            Q(target_user=request.user, request_type='grotto_invitation'),
+            grotto=obj, status='pending',
+        ).exists()
 
 
 class GrottoMembershipSerializer(serializers.ModelSerializer):

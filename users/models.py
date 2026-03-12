@@ -97,6 +97,7 @@ class GrottoMembership(models.Model):
 
     class Role(models.TextChoices):
         ADMIN = 'admin', 'Admin'
+        OFFICER = 'officer', 'Officer'
         MEMBER = 'member', 'Member'
 
     class Status(models.TextChoices):
@@ -126,6 +127,30 @@ class GrottoMembership(models.Model):
 
     def __str__(self):
         return f"{self.user.username} in {self.grotto.name} ({self.role})"
+
+
+# ── Grotto permission helpers ─────────────────────────────
+
+
+def get_grotto_role(user, grotto):
+    """Return the user's role in a grotto, or None if not an active member."""
+    try:
+        mem = GrottoMembership.objects.get(grotto=grotto, user=user, status='active')
+        return mem.role
+    except GrottoMembership.DoesNotExist:
+        return None
+
+
+def is_grotto_admin(user, grotto):
+    return get_grotto_role(user, grotto) == 'admin'
+
+
+def is_grotto_officer_or_above(user, grotto):
+    return get_grotto_role(user, grotto) in ('admin', 'officer')
+
+
+def is_grotto_member_or_above(user, grotto):
+    return get_grotto_role(user, grotto) in ('admin', 'officer', 'member')
 
 
 class InviteCode(models.Model):

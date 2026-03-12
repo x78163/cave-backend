@@ -1,21 +1,24 @@
 import { useState } from 'react'
 import { apiFetch } from '../hooks/useApi'
 
-export default function CaveAccessDenied({ caveId, caveName, ownerUsername, visibility, user, navigate }) {
+export default function CaveAccessDenied({ caveId, caveName, ownerUsername, visibility, hasPendingRequest, user, navigate }) {
   const [requestSent, setRequestSent] = useState(false)
   const [sending, setSending] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState(null)
 
+  const alreadyPending = hasPendingRequest || requestSent
+
   const handleRequestAccess = async () => {
     setSending(true)
     setError(null)
     try {
-      await apiFetch(`/caves/${caveId}/requests/`, {
+      await apiFetch('/requests/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           request_type: 'cave_access',
+          cave: caveId,
           message: message.trim(),
         }),
       })
@@ -65,9 +68,18 @@ export default function CaveAccessDenied({ caveId, caveName, ownerUsername, visi
               Log In
             </button>
           </div>
-        ) : requestSent ? (
-          <div className="text-sm text-[#4ade80]">
-            Access request sent! The cave owner will be notified.
+        ) : alreadyPending ? (
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-900/20 border border-amber-800/30">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              <span className="text-sm text-amber-400 font-medium">Request Pending</span>
+            </div>
+            <p className="text-xs text-[var(--cyber-text-dim)]">
+              Your access request has been sent. The cave owner will be notified and can approve or deny it.
+            </p>
           </div>
         ) : (
           <div>

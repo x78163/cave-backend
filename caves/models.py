@@ -133,6 +133,11 @@ class Cave(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='owned_caves'
     )
+    grotto = models.ForeignKey(
+        'users.Grotto', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='caves',
+        help_text='Grotto that owns this cave (optional)',
+    )
     origin_device = models.ForeignKey(
         'devices.Device', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='caves',

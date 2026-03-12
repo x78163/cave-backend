@@ -65,6 +65,7 @@ urlpatterns = [
     path('api/wiki/', include('wiki.urls')),
     path('api/admin/', include('admin_api.urls')),
     path('api/notifications/', include('notifications.urls')),
+    path('api/requests/', include('requests_app.urls')),
 ]
 
 if settings.DEBUG:

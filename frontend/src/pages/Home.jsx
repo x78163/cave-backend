@@ -47,11 +47,11 @@ export default function Home() {
             Explore
           </Link>
           <Link
-            to="/groups"
+            to="/grottos"
             className="cyber-btn cyber-btn-ghost px-3 py-1.5 text-xs no-underline"
             style={{ borderColor: 'var(--cyber-border)', color: 'var(--cyber-text-dim)' }}
           >
-            Groups
+            Grottos
           </Link>
         </div>
       </div>

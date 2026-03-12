@@ -40,8 +40,14 @@ urlpatterns = [
     path('grottos/<uuid:grotto_id>/members/', views.grotto_members, name='grotto_members'),
     path('grottos/<uuid:grotto_id>/apply/', views.grotto_apply, name='grotto_apply'),
     path('grottos/<uuid:grotto_id>/invite/', views.grotto_invite, name='grotto_invite'),
+    path('grottos/<uuid:grotto_id>/leave/', views.grotto_leave, name='grotto_leave'),
     path(
         'grottos/<uuid:grotto_id>/members/<uuid:membership_id>/',
         views.grotto_member_update, name='grotto_member_update',
     ),
+
+    # Grotto profile tabs
+    path('grottos/<uuid:grotto_id>/caves/', views.grotto_caves, name='grotto_caves'),
+    path('grottos/<uuid:grotto_id>/events/', views.grotto_events, name='grotto_events'),
+    path('grottos/<uuid:grotto_id>/media/', views.grotto_media, name='grotto_media'),
 ]

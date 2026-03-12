@@ -142,8 +142,10 @@ function AppContent() {
                 <Route path="/events/:eventId" element={<EventDetail />} />
                 <Route path="/expeditions" element={<Navigate to="/events" replace />} />
                 <Route path="/feed" element={<Feed />} />
-                <Route path="/groups" element={<Groups />} />
-                <Route path="/groups/:grottoId" element={<Groups />} />
+                <Route path="/grottos" element={<Groups />} />
+                <Route path="/grottos/:grottoId" element={<Groups />} />
+                <Route path="/groups" element={<Navigate to="/grottos" replace />} />
+                <Route path="/groups/:grottoId" element={<Navigate to="/grottos" replace />} />
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/chat/:channelId" element={<ChatPage />} />
                 <Route path="/wiki" element={<WikiPage />} />

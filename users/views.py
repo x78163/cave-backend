@@ -17,7 +17,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import UserProfile, Grotto, GrottoMembership, InviteCode, SiteSettings, NotificationPreference
+from .models import (
+    UserProfile, Grotto, GrottoMembership, InviteCode, SiteSettings,
+    NotificationPreference, get_grotto_role, is_grotto_admin,
+    is_grotto_officer_or_above, is_grotto_member_or_above,
+)
 from .serializers import (
     RegisterSerializer, UserProfileSerializer,
     GrottoSerializer, GrottoMembershipSerializer,
@@ -445,7 +449,7 @@ def grotto_list(request):
     """List all grottos or create a new one."""
     if request.method == 'GET':
         grottos = Grotto.objects.all()
-        serializer = GrottoSerializer(grottos, many=True)
+        serializer = GrottoSerializer(grottos, many=True, context={'request': request})
         return Response({'grottos': serializer.data, 'count': grottos.count()})
 
     elif request.method == 'POST':
@@ -470,10 +474,14 @@ def grotto_detail(request, grotto_id):
         return Response({'error': 'Grotto not found'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
-        serializer = GrottoSerializer(grotto)
+        serializer = GrottoSerializer(grotto, context={'request': request})
         return Response(serializer.data)
 
     elif request.method == 'PATCH':
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_grotto_admin(request.user, grotto) and not request.user.is_staff:
+            return Response({'error': 'Only grotto admins can edit'}, status=status.HTTP_403_FORBIDDEN)
         serializer = GrottoSerializer(grotto, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -481,6 +489,10 @@ def grotto_detail(request, grotto_id):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        if grotto.created_by_id != request.user.id and not request.user.is_staff:
+            return Response({'error': 'Only the group creator can delete'}, status=status.HTTP_403_FORBIDDEN)
         grotto.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -494,9 +506,10 @@ def grotto_members(request, grotto_id):
         return Response({'error': 'Grotto not found'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
-        memberships = grotto.memberships.all()
+        memberships = grotto.memberships.exclude(status='rejected')
         serializer = GrottoMembershipSerializer(memberships, many=True)
-        return Response({'members': serializer.data, 'count': memberships.count()})
+        active_count = memberships.filter(status='active').count()
+        return Response({'members': serializer.data, 'count': active_count})
 
     elif request.method == 'POST':
         serializer = GrottoMembershipSerializer(data=request.data)
@@ -509,64 +522,170 @@ def grotto_members(request, grotto_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def grotto_apply(request, grotto_id):
-    """Apply to join a grotto. Uses request.user."""
+    """Apply to join a grotto via the generic Request system."""
     grotto = Grotto.objects.filter(id=grotto_id).first()
     if not grotto:
         return Response({'error': 'Grotto not found'}, status=status.HTTP_404_NOT_FOUND)
-    membership, created = GrottoMembership.objects.get_or_create(
-        grotto=grotto, user=request.user,
-        defaults={'status': 'pending_application', 'role': 'member'},
+
+    # Already a member?
+    if GrottoMembership.objects.filter(grotto=grotto, user=request.user, status='active').exists():
+        return Response({'error': 'You are already a member'}, status=status.HTTP_409_CONFLICT)
+
+    # Delegate to the generic request system
+    from requests_app.models import Request as AppRequest
+    from requests_app.serializers import RequestSerializer
+
+    # Check for existing pending request
+    if AppRequest.objects.filter(
+        grotto=grotto, requester=request.user,
+        request_type='grotto_membership', status='pending',
+    ).exists():
+        return Response({'error': 'You already have a pending application'}, status=status.HTTP_409_CONFLICT)
+
+    req = AppRequest.objects.create(
+        request_type='grotto_membership',
+        requester=request.user,
+        target_user=grotto.created_by,
+        grotto=grotto,
+        message=request.data.get('message', ''),
     )
-    if not created:
-        return Response(
-            {'detail': 'Already a member or pending.'},
-            status=status.HTTP_409_CONFLICT,
-        )
-    serializer = GrottoMembershipSerializer(membership)
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    # In-app notification
+    from requests_app.views import _create_in_app_notification
+    _create_in_app_notification(req, is_new=True)
+
+    return Response(RequestSerializer(req).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def grotto_leave(request, grotto_id):
+    """Leave a grotto. Last admin cannot leave."""
+    membership = GrottoMembership.objects.filter(
+        grotto_id=grotto_id, user=request.user,
+    ).first()
+    if not membership:
+        return Response({'error': 'You are not a member of this group'}, status=status.HTTP_400_BAD_REQUEST)
+    if membership.role == 'admin':
+        other_admins = GrottoMembership.objects.filter(
+            grotto_id=grotto_id, role='admin', status='active',
+        ).exclude(pk=membership.pk).exists()
+        if not other_admins:
+            return Response(
+                {'error': 'Cannot leave — you are the only admin. Transfer ownership or delete the group.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    membership.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def grotto_invite(request, grotto_id):
-    """Invite a user to a grotto. Body: {user}."""
+    """Invite a user to a grotto. Body: {user_id} or {username}. Admin only."""
     grotto = Grotto.objects.filter(id=grotto_id).first()
     if not grotto:
         return Response({'error': 'Grotto not found'}, status=status.HTTP_404_NOT_FOUND)
-    user_id = request.data.get('user')
-    user = UserProfile.objects.filter(pk=user_id).first()
-    if not user:
+
+    # Officers and admins can invite
+    if not is_grotto_officer_or_above(request.user, grotto) and not request.user.is_staff:
+        return Response({'error': 'Only officers and admins can invite members'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Find user by user_id or username
+    user_id = request.data.get('user_id') or request.data.get('user')
+    username = request.data.get('username')
+    if user_id:
+        target = UserProfile.objects.filter(pk=user_id).first()
+    elif username:
+        target = UserProfile.objects.filter(username__iexact=username).first()
+    else:
+        return Response({'error': 'user_id or username required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not target:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-    membership, created = GrottoMembership.objects.get_or_create(
-        grotto=grotto, user=user,
-        defaults={'status': 'pending_invitation', 'role': 'member'},
+
+    # Check if already a member
+    if GrottoMembership.objects.filter(grotto=grotto, user=target, status='active').exists():
+        return Response({'error': 'User is already a member.'}, status=status.HTTP_409_CONFLICT)
+
+    # Check for existing pending invitation
+    from requests_app.models import Request as AppRequest
+    if AppRequest.objects.filter(
+        grotto=grotto, target_user=target,
+        request_type='grotto_invitation', status='pending',
+    ).exists():
+        return Response({'error': 'Invitation already pending.'}, status=status.HTTP_409_CONFLICT)
+
+    # Create invitation request — admin is requester, invitee is target_user
+    req = AppRequest.objects.create(
+        request_type='grotto_invitation',
+        requester=request.user,
+        target_user=target,
+        grotto=grotto,
+        message=request.data.get('message', ''),
     )
-    if not created:
-        return Response(
-            {'detail': 'Already a member or pending.'},
-            status=status.HTTP_409_CONFLICT,
-        )
-    serializer = GrottoMembershipSerializer(membership)
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
+    from requests_app.serializers import RequestSerializer
+    return Response(RequestSerializer(req).data, status=status.HTTP_201_CREATED)
 
 
-@api_view(['PATCH'])
+@api_view(['PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def grotto_member_update(request, grotto_id, membership_id):
-    """Approve or reject a membership. Body: {status: 'active'|'rejected'}."""
+    """
+    PATCH: Update membership status or role.
+      - status: 'active'|'rejected' (officer+ can approve/reject)
+      - role: 'admin'|'officer'|'member' (admin only, cannot change other admins)
+    DELETE: Remove a member (officer+) or leave (self).
+    """
     membership = GrottoMembership.objects.filter(
         pk=membership_id, grotto_id=grotto_id
     ).first()
     if not membership:
         return Response({'error': 'Membership not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    grotto = membership.grotto
+    caller_role = get_grotto_role(request.user, grotto)
+    caller_is_admin = caller_role == 'admin'
+    caller_is_officer_plus = caller_role in ('admin', 'officer')
+    is_self = membership.user_id == request.user.id
+
+    if request.method == 'DELETE':
+        if not is_self and not caller_is_officer_plus and not request.user.is_staff:
+            return Response({'error': 'Only officers and admins can remove members'}, status=status.HTTP_403_FORBIDDEN)
+        # Officers cannot remove officers or admins
+        if not is_self and caller_role == 'officer' and membership.role in ('admin', 'officer'):
+            return Response({'error': 'Officers cannot remove other officers or admins'}, status=status.HTTP_403_FORBIDDEN)
+        if is_self and membership.role == 'admin':
+            other_admins = GrottoMembership.objects.filter(
+                grotto_id=grotto_id, role='admin', status='active',
+            ).exclude(pk=membership_id).exists()
+            if not other_admins:
+                return Response({'error': 'Cannot leave — you are the only admin. Transfer ownership first.'}, status=status.HTTP_400_BAD_REQUEST)
+        membership.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH
     new_status = request.data.get('status')
-    if new_status not in ('active', 'rejected'):
-        return Response(
-            {'detail': 'Status must be "active" or "rejected".'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    membership.status = new_status
-    membership.save(update_fields=['status'])
+    new_role = request.data.get('role')
+
+    if new_status:
+        if not caller_is_officer_plus and not request.user.is_staff:
+            return Response({'error': 'Only officers and admins can approve/reject members'}, status=status.HTTP_403_FORBIDDEN)
+        if new_status not in ('active', 'rejected'):
+            return Response({'detail': 'Status must be "active" or "rejected".'}, status=status.HTTP_400_BAD_REQUEST)
+        membership.status = new_status
+        membership.save(update_fields=['status'])
+
+    if new_role:
+        if not caller_is_admin and not request.user.is_staff:
+            return Response({'error': 'Only admins can change roles'}, status=status.HTTP_403_FORBIDDEN)
+        if new_role not in ('admin', 'officer', 'member'):
+            return Response({'detail': 'Role must be "admin", "officer", or "member".'}, status=status.HTTP_400_BAD_REQUEST)
+        # Cannot demote other admins (only site staff can)
+        if membership.role == 'admin' and not request.user.is_staff:
+            return Response({'error': 'Cannot change another admin\'s role'}, status=status.HTTP_403_FORBIDDEN)
+        membership.role = new_role
+        membership.save(update_fields=['role'])
+
     serializer = GrottoMembershipSerializer(membership)
     return Response(serializer.data)
 
@@ -644,3 +763,62 @@ def invite_code_detail(request, code_id):
         code.max_uses = request.data['max_uses']
     code.save()
     return Response(InviteCodeSerializer(code).data)
+
+
+# ── Grotto Profile Endpoints ──────────────────────────────
+
+
+@api_view(['GET'])
+def grotto_caves(request, grotto_id):
+    """List caves owned by a grotto (visibility-filtered)."""
+    grotto = Grotto.objects.filter(id=grotto_id).first()
+    if not grotto:
+        return Response({'error': 'Grotto not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    from caves.models import Cave
+    from caves.serializers import CaveListSerializer
+
+    caves = Cave.objects.filter(grotto=grotto)
+    # Non-members only see public/limited_public
+    if not request.user.is_authenticated or not is_grotto_member_or_above(request.user, grotto):
+        caves = caves.filter(visibility__in=['public', 'limited_public'])
+
+    serializer = CaveListSerializer(caves, many=True, context={'request': request})
+    return Response({'caves': serializer.data, 'count': len(serializer.data)})
+
+
+@api_view(['GET'])
+def grotto_events(request, grotto_id):
+    """List events created by/for a grotto."""
+    grotto = Grotto.objects.filter(id=grotto_id).first()
+    if not grotto:
+        return Response({'error': 'Grotto not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    from events.models import Event
+    from events.serializers import EventSerializer
+
+    events = Event.objects.filter(grotto=grotto).order_by('-start_date')
+    # Non-members only see public events
+    if not request.user.is_authenticated or not is_grotto_member_or_above(request.user, grotto):
+        events = events.filter(visibility='public')
+
+    serializer = EventSerializer(events, many=True, context={'request': request})
+    return Response({'events': serializer.data, 'count': len(serializer.data)})
+
+
+@api_view(['GET'])
+def grotto_media(request, grotto_id):
+    """List media (photos) from grotto-owned caves."""
+    grotto = Grotto.objects.filter(id=grotto_id).first()
+    if not grotto:
+        return Response({'error': 'Grotto not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    from caves.models import CavePhoto
+    from caves.serializers import CavePhotoSerializer
+
+    photos = CavePhoto.objects.filter(
+        cave__grotto=grotto, visibility='public',
+    ).select_related('cave').order_by('-uploaded_at')[:100]
+
+    serializer = CavePhotoSerializer(photos, many=True)
+    return Response({'media': serializer.data, 'count': len(serializer.data)})

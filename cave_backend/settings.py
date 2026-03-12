@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'wiki',
     'admin_api',
     'notifications',
+    'requests_app',
 ]
 
 ASGI_APPLICATION = 'cave_backend.asgi.application'

@@ -3,10 +3,11 @@ from django.core.files.storage import default_storage
 from rest_framework import serializers
 from .models import (
     Cave, CavePhoto, CaveComment, DescriptionRevision,
-    CavePermission, CaveShareLink, LandOwner, CaveRequest,
+    CavePermission, CaveShareLink, LandOwner,
     SurveyMap, CaveDocument, CaveVideoLink, SurfaceAnnotation,
     EditorProject,
 )
+from requests_app.models import Request
 
 
 class CavePhotoSerializer(serializers.ModelSerializer):
@@ -239,7 +240,13 @@ class CaveListSerializer(serializers.ModelSerializer):
             return False
         if obj.owner_id == request.user.id or request.user.is_staff:
             return True
-        return CavePermission.objects.filter(cave=obj, user=request.user).exists()
+        if CavePermission.objects.filter(cave=obj, user=request.user).exists():
+            return True
+        if obj.grotto_id:
+            from users.models import is_grotto_member_or_above
+            if is_grotto_member_or_above(request.user, obj.grotto):
+                return True
+        return False
 
     def get_has_access(self, obj):
         return self._user_can_view(obj)
@@ -304,6 +311,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
     has_stl = serializers.SerializerMethodField()
     wiki_article_slug = serializers.SerializerMethodField()
     access_users = serializers.SerializerMethodField()
+    grotto_name = serializers.CharField(source='grotto.name', read_only=True, default=None)
 
     class Meta:
         model = Cave
@@ -332,7 +340,7 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             'visibility', 'collaboration_setting',
             'publish_to_wiki', 'wiki_article_slug',
             'access_users',
-            'owner', 'origin_device',
+            'owner', 'grotto', 'grotto_name', 'origin_device',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'has_location', 'created_at', 'updated_at']
@@ -362,17 +370,16 @@ class CaveDetailSerializer(serializers.ModelSerializer):
             return 0
         if obj.owner_id != request.user.id:
             return 0
-        return obj.requests.filter(status='pending').count()
+        return Request.objects.filter(cave=obj, status='pending').count()
 
     def get_user_pending_request(self, obj):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return []
-        pending = list(
-            obj.requests.filter(requester=request.user, status='pending')
+        return list(
+            Request.objects.filter(cave=obj, requester=request.user, status='pending')
             .values_list('request_type', flat=True)
         )
-        return pending
 
     def get_user_has_contact_access(self, obj):
         request = self.context.get('request')
@@ -456,29 +463,6 @@ class CaveShareLinkSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'token', 'use_count', 'created_at', 'is_expired']
 
-
-class CaveRequestSerializer(serializers.ModelSerializer):
-    requester_username = serializers.CharField(source='requester.username', read_only=True)
-    cave_name = serializers.CharField(source='cave.name', read_only=True)
-    resolved_by_username = serializers.CharField(
-        source='resolved_by.username', read_only=True, default=None,
-    )
-
-    class Meta:
-        model = CaveRequest
-        fields = [
-            'id', 'cave', 'cave_name',
-            'requester', 'requester_username',
-            'request_type', 'status',
-            'message', 'payload',
-            'resolved_by', 'resolved_by_username', 'resolved_at',
-            'created_at',
-        ]
-        read_only_fields = [
-            'id', 'cave_name', 'requester_username',
-            'resolved_by', 'resolved_by_username', 'resolved_at',
-            'created_at',
-        ]
 
 
 class EditorProjectSerializer(serializers.ModelSerializer):

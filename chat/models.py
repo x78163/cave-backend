@@ -143,6 +143,7 @@ class Notification(models.Model):
         MENTION = 'mention', 'Mention'
         REPLY = 'reply', 'Reply'
         PIN = 'pin', 'Pin'
+        REQUEST = 'request', 'Request'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -154,9 +155,11 @@ class Notification(models.Model):
     )
     message = models.ForeignKey(
         Message, on_delete=models.CASCADE, related_name='notifications',
+        null=True, blank=True,
     )
     channel = models.ForeignKey(
         Channel, on_delete=models.CASCADE, related_name='notifications',
+        null=True, blank=True,
     )
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE,

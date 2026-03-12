@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import useAuthStore from '../stores/authStore'
 import useChatStore from '../stores/chatStore'
+import { apiFetch } from '../hooks/useApi'
 import AvatarDisplay from './AvatarDisplay'
 
 const BASE_NAV = [
   { path: '/', label: 'Home' },
   { path: '/explore', label: 'Explore' },
-  { path: '/groups', label: 'Groups' },
+  { path: '/grottos', label: 'Grottos' },
   { path: '/events', label: 'Events' },
   { path: '/wiki', label: 'Knowledge' },
   { path: '/chat', label: 'Chat' },
@@ -22,6 +23,14 @@ export default function TopBar() {
   const fetchUnreadCount = useChatStore(state => state.fetchUnreadCount)
   const pollRef = useRef(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [requestCount, setRequestCount] = useState(0)
+
+  const fetchRequestCount = useCallback(async () => {
+    try {
+      const data = await apiFetch('/requests/counts/')
+      setRequestCount(data?.inbox_pending ?? 0)
+    } catch {}
+  }, [])
 
   const navItems = user?.is_staff
     ? [...BASE_NAV, { path: '/admin', label: 'Admin' }]
@@ -44,6 +53,14 @@ export default function TopBar() {
     pollRef.current = setInterval(fetchUnreadCount, 60000)
     return () => clearInterval(pollRef.current)
   }, [location.pathname, fetchUnreadCount])
+
+  // Poll request count
+  useEffect(() => {
+    if (!user) return
+    fetchRequestCount()
+    const iv = setInterval(fetchRequestCount, 120000) // every 2 min
+    return () => clearInterval(iv)
+  }, [user, fetchRequestCount])
 
   const handleLogout = () => {
     logout()
@@ -68,6 +85,12 @@ export default function TopBar() {
         {item.path === '/chat' && totalUnread > 0 && (
           <span className="absolute -top-1 -right-1 chat-unread-badge">
             {totalUnread > 99 ? '99+' : totalUnread}
+          </span>
+        )}
+        {item.path === '/profile' && requestCount > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold text-white"
+            style={{ background: '#f59e0b' }}>
+            {requestCount > 99 ? '99+' : requestCount}
           </span>
         )}
       </Link>

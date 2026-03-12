@@ -95,7 +95,8 @@ def handle_email_action(request):
 
 def _handle_cave_access(data, status):
     """Approve or deny a cave access request."""
-    from caves.models import CaveRequest, LandOwner
+    from requests_app.models import Request
+    from caves.models import LandOwner
     from users.models import UserProfile
     from .tasks import send_cave_access_resolved_email
 
@@ -103,8 +104,8 @@ def _handle_cave_access(data, status):
     user_id = data.get('user_id')
 
     try:
-        cave_req = CaveRequest.objects.select_related('cave').get(id=request_id)
-    except CaveRequest.DoesNotExist:
+        cave_req = Request.objects.select_related('cave').get(id=request_id)
+    except Request.DoesNotExist:
         return _action_result_page(
             'Request Not Found',
             'This access request no longer exists.',

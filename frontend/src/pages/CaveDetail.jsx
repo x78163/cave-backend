@@ -1,4 +1,4 @@
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { MarkdownHooks as Markdown } from 'react-markdown'
 import RichTextEditor from '../components/RichTextEditor'
@@ -538,6 +538,7 @@ export default function CaveDetail() {
         caveName={accessDenied.cave_name}
         ownerUsername={accessDenied.owner_username}
         visibility={accessDenied.visibility}
+        hasPendingRequest={accessDenied.has_pending_request}
         user={user}
         navigate={navigate}
       />
@@ -605,6 +606,17 @@ export default function CaveDetail() {
             hasLocation={hasLocation}
             onUpdate={() => { fetchCave(); fetchEntrancePois() }}
           />
+          {cave.grotto_name && (
+            <p className="text-xs mt-1">
+              <span className="text-[var(--cyber-text-dim)]">by </span>
+              <Link
+                to={`/grottos/${cave.grotto}`}
+                className="text-[var(--cyber-cyan)] hover:underline no-underline"
+              >
+                {cave.grotto_name}
+              </Link>
+            </p>
+          )}
           <EntranceList
             entrances={entrancePois}
             caveId={caveId}
@@ -794,6 +806,7 @@ export default function CaveDetail() {
                   request={req}
                   caveId={caveId}
                   onResolved={() => { fetchRequests(); fetchCave() }}
+                  navigate={navigate}
                 />
               ))}
             </div>
@@ -2530,17 +2543,19 @@ function Badge({ color, text }) {
   )
 }
 
-function RequestCard({ request, caveId, onResolved }) {
+function RequestCard({ request, caveId, onResolved, navigate }) {
   const [resolving, setResolving] = useState(false)
   const [error, setError] = useState(null)
+  const [responseMsg, setResponseMsg] = useState('')
+  const [showResponse, setShowResponse] = useState(false)
 
   const resolve = async (newStatus) => {
     setResolving(true)
     setError(null)
     try {
-      await apiFetch(`/caves/${caveId}/requests/${request.id}/resolve/`, {
+      await apiFetch(`/requests/${request.id}/resolve/`, {
         method: 'PATCH',
-        body: { status: newStatus },
+        body: { status: newStatus, response_message: responseMsg.trim() },
       })
       onResolved()
     } catch (err) {
@@ -2567,7 +2582,10 @@ function RequestCard({ request, caveId, onResolved }) {
     <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-3">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <span className="text-[var(--cyber-text)] text-sm font-medium">
+          <span
+            className="text-[var(--cyber-text)] text-sm font-medium cursor-pointer hover:text-[var(--cyber-cyan)] transition-colors"
+            onClick={() => navigate(`/users/${request.requester_id}`)}
+          >
             {request.requester_username}
           </span>
           <span className={`inline-block px-2 py-0.5 rounded-full text-xs border ${badgeClass}`}>
@@ -2604,7 +2622,18 @@ function RequestCard({ request, caveId, onResolved }) {
       {error && (
         <p className="text-xs text-red-400 mb-2">{error}</p>
       )}
-      <div className="flex gap-2">
+
+      {showResponse && (
+        <textarea
+          value={responseMsg}
+          onChange={e => setResponseMsg(e.target.value)}
+          placeholder="Optional message to the requester..."
+          className="w-full bg-[var(--cyber-bg)] border border-[var(--cyber-border)] rounded-lg p-2 text-xs text-[var(--cyber-text)] placeholder:text-[var(--cyber-text-dim)]/40 mb-2 resize-none"
+          rows={2}
+        />
+      )}
+
+      <div className="flex items-center gap-2">
         <button onClick={() => resolve('accepted')} disabled={resolving}
           className="px-3 py-1.5 rounded-full text-xs font-semibold
             bg-gradient-to-r from-emerald-600 to-emerald-700 text-white">
@@ -2614,6 +2643,13 @@ function RequestCard({ request, caveId, onResolved }) {
           className="px-3 py-1.5 rounded-full text-xs text-red-400 border border-red-800/30
             hover:bg-red-900/20 transition-colors">
           Deny
+        </button>
+        <button
+          onClick={() => setShowResponse(!showResponse)}
+          className="px-2 py-1.5 text-xs text-[var(--cyber-text-dim)] hover:text-[var(--cyber-text)] transition-colors"
+          title="Add a response message"
+        >
+          {showResponse ? 'Hide Reply' : 'Reply'}
         </button>
       </div>
     </div>

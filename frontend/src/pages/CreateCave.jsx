@@ -42,6 +42,23 @@ export default function CreateCave() {
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState(null)
   const [proximityWarning, setProximityWarning] = useState(null)
+  const [grottoId, setGrottoId] = useState('')
+  const [grottos, setGrottos] = useState([])
+
+  // Fetch user's grottos where they are officer+
+  useEffect(() => {
+    apiFetch('/users/grottos/')
+      .then(data => {
+        const all = data?.grottos ?? (Array.isArray(data) ? data : [])
+        // Filter to grottos where user is officer or admin
+        const eligible = all.filter(g =>
+          g.user_membership?.status === 'active' &&
+          (g.user_membership?.role === 'admin' || g.user_membership?.role === 'officer')
+        )
+        setGrottos(eligible)
+      })
+      .catch(() => {})
+  }, [])
 
   // Load existing cave data when editing
   useEffect(() => {
@@ -87,6 +104,10 @@ export default function CreateCave() {
     // Set owner to current user on create
     if (!isEdit && user) {
       payload.owner = user.id
+    }
+    // Include grotto if selected
+    if (grottoId) {
+      payload.grotto = grottoId
     }
 
     try {
@@ -160,6 +181,16 @@ export default function CreateCave() {
               <option value="public">Public</option>
             </select>
           </div>
+          {grottos.length > 0 && (
+            <div>
+              <label className="block text-[var(--cyber-text-dim)] text-sm mb-1">Create for Grotto (optional)</label>
+              <select value={grottoId} onChange={e => setGrottoId(e.target.value)}
+                className="cyber-input w-full px-4 py-2.5 text-sm">
+                <option value="">Personal (no grotto)</option>
+                {grottos.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </div>
+          )}
         </Section>
 
         {/* Location */}

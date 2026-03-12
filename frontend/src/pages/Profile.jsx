@@ -693,6 +693,7 @@ const BASE_TABS = [
   { key: 'media', label: 'Media' },
   { key: 'routes', label: 'Routes' },
   { key: 'events', label: 'My Events' },
+  { key: 'requests', label: 'Requests', color: '#f59e0b' },
   { key: 'ratings', label: 'Ratings' },
   { key: 'notifications', label: 'Notifications' },
 ]
@@ -791,7 +792,13 @@ export default function Profile() {
   const { data: postsData } = useApi(userId ? `/social/posts/?user=${userId}&limit=1` : null)
   const { data: followersData } = useApi(userId ? `/social/users/${userId}/followers/` : null)
   const { data: followingData } = useApi(userId ? `/social/users/${userId}/following/` : null)
-  const TABS = BASE_TABS
+  const { data: requestCounts, refetch: refetchRequestCounts } = useApi('/requests/counts/')
+  const inboxCount = requestCounts?.inbox_pending ?? 0
+  const TABS = BASE_TABS.map(t =>
+    t.key === 'requests' && inboxCount > 0
+      ? { ...t, badge: inboxCount }
+      : t
+  )
   const routeCount = routeData?.total ?? 0
   const postCount = postsData?.total ?? 0
   const followerCount = Array.isArray(followersData) ? followersData.length : 0
@@ -891,6 +898,15 @@ export default function Profile() {
             }
           >
             {tab.label}
+            {tab.badge > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full text-[10px] font-bold"
+                style={{
+                  background: activeTab === tab.key ? '#fff' : (tab.color || 'var(--cyber-magenta)'),
+                  color: activeTab === tab.key ? (tab.color || 'var(--cyber-bg)') : '#fff',
+                }}>
+                {tab.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -901,7 +917,308 @@ export default function Profile() {
       {activeTab === 'routes' && userId && <RoutesTab userId={userId} />}
       {activeTab === 'events' && userId && <EventsTab userId={userId} />}
       {activeTab === 'ratings' && userId && <RatingsTab userId={userId} />}
+      {activeTab === 'requests' && <RequestsTab onCountChange={refetchRequestCounts} />}
       {activeTab === 'notifications' && <NotificationPrefsTab />}
+    </div>
+  )
+}
+
+// ── Requests Tab ────────────────────────────────────────────
+
+const REQUEST_TYPE_LABELS = {
+  cave_access: 'Cave Access',
+  cave_edit: 'Cave Edit',
+  contact_access: 'Contact Access',
+  contact_submission: 'Contact Submission',
+  event_access: 'Event Access',
+  grotto_membership: 'Grotto Membership',
+  grotto_invitation: 'Grotto Invitation',
+  map_upload: 'Map Upload',
+  admin_escalation: 'Admin Escalation',
+}
+
+const REQUEST_TYPE_COLORS = {
+  cave_access: { bg: 'bg-purple-900/30', text: 'text-purple-400', border: 'border-purple-800/30' },
+  cave_edit: { bg: 'bg-indigo-900/30', text: 'text-indigo-400', border: 'border-indigo-800/30' },
+  contact_access: { bg: 'bg-amber-900/30', text: 'text-amber-400', border: 'border-amber-800/30' },
+  contact_submission: { bg: 'bg-cyan-900/30', text: 'text-[var(--cyber-cyan)]', border: 'border-cyan-800/30' },
+  event_access: { bg: 'bg-pink-900/30', text: 'text-pink-400', border: 'border-pink-800/30' },
+  grotto_membership: { bg: 'bg-emerald-900/30', text: 'text-emerald-400', border: 'border-emerald-800/30' },
+  grotto_invitation: { bg: 'bg-teal-900/30', text: 'text-teal-400', border: 'border-teal-800/30' },
+  map_upload: { bg: 'bg-blue-900/30', text: 'text-blue-400', border: 'border-blue-800/30' },
+  admin_escalation: { bg: 'bg-red-900/30', text: 'text-red-400', border: 'border-red-800/30' },
+}
+
+function RequestsTab({ onCountChange }) {
+  const navigate = useNavigate()
+  const [view, setView] = useState('inbox') // inbox | outgoing
+  const [statusFilter, setStatusFilter] = useState('')
+  const { data: inboxData, refetch: refetchInbox } = useApi('/requests/inbox/')
+  const { data: outgoingData, refetch: refetchOutgoing } = useApi('/requests/outgoing/')
+  const { data: counts, refetch: refetchCounts } = useApi('/requests/counts/')
+
+  const inbox = Array.isArray(inboxData) ? inboxData : []
+  const outgoing = Array.isArray(outgoingData) ? outgoingData : []
+
+  const filteredInbox = statusFilter ? inbox.filter(r => r.status === statusFilter) : inbox
+  const filteredOutgoing = statusFilter ? outgoing.filter(r => r.status === statusFilter) : outgoing
+
+  const items = view === 'inbox' ? filteredInbox : filteredOutgoing
+
+  const onResolved = () => {
+    refetchInbox()
+    refetchOutgoing()
+    refetchCounts()
+    onCountChange?.()
+  }
+
+  return (
+    <div>
+      {/* View toggle + filter */}
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex gap-1">
+          <button
+            onClick={() => setView('inbox')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              view === 'inbox'
+                ? 'bg-[#f59e0b] text-[var(--cyber-bg)]'
+                : 'text-[var(--cyber-text-dim)] hover:text-[#f59e0b]'
+            }`}
+          >
+            Inbox
+            {(counts?.inbox_pending ?? 0) > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs bg-red-500 text-white">
+                {counts.inbox_pending}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setView('outgoing')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              view === 'outgoing'
+                ? 'bg-[#f59e0b] text-[var(--cyber-bg)]'
+                : 'text-[var(--cyber-text-dim)] hover:text-[#f59e0b]'
+            }`}
+          >
+            Outgoing
+            {(counts?.outgoing_pending ?? 0) > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs bg-amber-600 text-white">
+                {counts.outgoing_pending}
+              </span>
+            )}
+          </button>
+        </div>
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="bg-[var(--cyber-surface)] border border-[var(--cyber-border)] rounded-lg px-3 py-1.5 text-xs text-[var(--cyber-text)]"
+        >
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
+          <option value="denied">Denied</option>
+        </select>
+      </div>
+
+      {/* Request list */}
+      {items.length === 0 ? (
+        <p className="text-center text-[var(--cyber-text-dim)] py-8 text-sm">
+          {statusFilter
+            ? `No ${statusFilter} requests`
+            : view === 'inbox'
+              ? 'No incoming requests'
+              : 'No outgoing requests'}
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {items.map(req => (
+            <ProfileRequestCard
+              key={req.id}
+              request={req}
+              isInbox={view === 'inbox'}
+              onResolved={onResolved}
+              navigate={navigate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProfileRequestCard({ request, isInbox, onResolved, navigate }) {
+  const [resolving, setResolving] = useState(false)
+  const [error, setError] = useState(null)
+  const [responseMsg, setResponseMsg] = useState('')
+  const [showResponse, setShowResponse] = useState(false)
+
+  const resolve = async (newStatus) => {
+    setResolving(true)
+    setError(null)
+    try {
+      await apiFetch(`/requests/${request.id}/resolve/`, {
+        method: 'PATCH',
+        body: { status: newStatus, response_message: responseMsg.trim() },
+      })
+      onResolved()
+    } catch (err) {
+      setError(err?.response?.data?.error || err?.message || 'Failed')
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const cancel = async () => {
+    setResolving(true)
+    try {
+      await apiFetch(`/requests/${request.id}/`, { method: 'DELETE' })
+      onResolved()
+    } catch (err) {
+      setError(err?.response?.data?.error || err?.message || 'Failed')
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const colors = REQUEST_TYPE_COLORS[request.request_type] || REQUEST_TYPE_COLORS.cave_access
+  const typeLabel = REQUEST_TYPE_LABELS[request.request_type] || request.request_type
+  const isPending = request.status === 'pending'
+
+  // Build target description
+  let targetLabel = ''
+  if (request.cave_name) targetLabel = request.cave_name
+  else if (request.event_name) targetLabel = request.event_name
+  else if (request.grotto_name) targetLabel = request.grotto_name
+
+  const targetLink = request.cave_id
+    ? `/caves/${request.cave_id}`
+    : request.event_id
+      ? `/events/${request.event_id}`
+      : null
+
+  return (
+    <div className="rounded-2xl bg-[var(--cyber-surface)] border border-[var(--cyber-border)] p-4">
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className="text-[var(--cyber-text)] text-sm font-medium cursor-pointer hover:text-[var(--cyber-cyan)] transition-colors"
+            onClick={() => navigate(`/users/${isInbox ? request.requester_id : request.requester_id}`)}
+          >
+            {isInbox ? request.requester_username : 'You'}
+          </span>
+          <span className="text-[var(--cyber-text-dim)] text-xs">
+            {request.request_type === 'grotto_invitation' ? 'invited you to' : 'requested'}
+          </span>
+          <span className={`inline-block px-2 py-0.5 rounded-full text-xs border ${colors.bg} ${colors.text} ${colors.border}`}>
+            {typeLabel}
+          </span>
+          {targetLabel && (
+            <>
+              <span className="text-[var(--cyber-text-dim)] text-xs">for</span>
+              {targetLink ? (
+                <span
+                  className="text-[var(--cyber-cyan)] text-sm cursor-pointer hover:underline"
+                  onClick={() => navigate(targetLink)}
+                >
+                  {targetLabel}
+                </span>
+              ) : (
+                <span className="text-[var(--cyber-text)] text-sm">{targetLabel}</span>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!isPending && (
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+              request.status === 'accepted'
+                ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/30'
+                : 'bg-red-900/30 text-red-400 border border-red-800/30'
+            }`}>
+              {request.status === 'accepted' ? 'Accepted' : 'Denied'}
+            </span>
+          )}
+          <span className="text-[#555570] text-xs">
+            {new Date(request.created_at).toLocaleDateString()}
+          </span>
+          <button
+            onClick={cancel}
+            disabled={resolving}
+            className="ml-1 w-5 h-5 flex items-center justify-center rounded-full text-[var(--cyber-text-dim)] hover:text-red-400 hover:bg-red-900/20 transition-colors"
+            title={isPending ? (isInbox ? 'Decline & remove' : 'Cancel & remove') : 'Remove'}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M1 1L9 9M9 1L1 9" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {request.message && (
+        <p className="text-[var(--cyber-text-dim)] text-sm mb-2 pl-1">{request.message}</p>
+      )}
+
+      {request.response_message && (
+        <div className="text-xs mb-2 p-2 rounded-lg bg-[var(--cyber-bg)] border border-[var(--cyber-border)]">
+          <span className="text-[var(--cyber-text-dim)]">Response: </span>
+          <span className="text-[var(--cyber-text)]">{request.response_message}</span>
+        </div>
+      )}
+
+      {/* Contact submission payload */}
+      {request.request_type === 'contact_submission' && request.payload && (
+        <div className="text-xs space-y-0.5 mb-2 p-2 rounded-lg bg-[var(--cyber-bg)] border border-[var(--cyber-border)]">
+          {request.payload.phone && <p className="text-[var(--cyber-text-dim)]">Phone: <span className="text-[var(--cyber-text)]">{request.payload.phone}</span></p>}
+          {request.payload.email && <p className="text-[var(--cyber-text-dim)]">Email: <span className="text-[var(--cyber-text)]">{request.payload.email}</span></p>}
+          {request.payload.address && <p className="text-[var(--cyber-text-dim)]">Address: <span className="text-[var(--cyber-text)]">{request.payload.address}</span></p>}
+        </div>
+      )}
+
+      {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+
+      {/* Actions */}
+      {isPending && isInbox && (
+        <>
+          {showResponse && (
+            <textarea
+              value={responseMsg}
+              onChange={e => setResponseMsg(e.target.value)}
+              placeholder="Optional message to the requester..."
+              className="w-full bg-[var(--cyber-bg)] border border-[var(--cyber-border)] rounded-lg p-2 text-xs text-[var(--cyber-text)] placeholder:text-[var(--cyber-text-dim)]/40 mb-2 resize-none"
+              rows={2}
+            />
+          )}
+          <div className="flex items-center gap-2">
+            <button onClick={() => resolve('accepted')} disabled={resolving}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold bg-gradient-to-r from-emerald-600 to-emerald-700 text-white">
+              {resolving ? '...' : request.request_type === 'grotto_invitation' ? 'Accept' : 'Approve'}
+            </button>
+            <button onClick={() => resolve('denied')} disabled={resolving}
+              className="px-3 py-1.5 rounded-full text-xs text-red-400 border border-red-800/30 hover:bg-red-900/20 transition-colors">
+              {request.request_type === 'grotto_invitation' ? 'Decline' : 'Deny'}
+            </button>
+            <button
+              onClick={() => setShowResponse(!showResponse)}
+              className="px-2 py-1.5 text-xs text-[var(--cyber-text-dim)] hover:text-[var(--cyber-text)] transition-colors"
+            >
+              {showResponse ? 'Hide Reply' : 'Reply'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {isPending && !isInbox && (
+        <button onClick={cancel} disabled={resolving}
+          className="px-3 py-1.5 rounded-full text-xs text-red-400 border border-red-800/30 hover:bg-red-900/20 transition-colors">
+          {resolving ? '...' : 'Cancel Request'}
+        </button>
+      )}
+
+      {!isPending && request.resolved_by_username && (
+        <p className="text-[#555570] text-xs mt-1">
+          Resolved by {request.resolved_by_username} on {new Date(request.resolved_at).toLocaleDateString()}
+        </p>
+      )}
     </div>
   )
 }
