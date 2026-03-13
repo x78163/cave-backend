@@ -1,0 +1,31 @@
+{% extends "emails/base.html" %}
+{% block title %}Expedition Safety Surrogate{% endblock %}
+
+{% block content %}
+<h2>You've Been Designated as a Safety Surrogate</h2>
+<p><strong>{{ leader_name }}</strong> has designated you as a safety surrogate for an upcoming expedition.</p>
+
+<div class="card">
+  <p><strong>Event:</strong> {{ event_name }}</p>
+  <p><strong>Cave:</strong> {{ cave_name }}</p>
+  {% if expected_return %}
+  <p><strong>Expected Return:</strong> {{ expected_return|date:"M d, Y g:i A" }}</p>
+  {% endif %}
+</div>
+
+<p><strong>What does this mean?</strong></p>
+<ul>
+  <li>You will be notified if the expedition becomes overdue</li>
+  <li>You can trigger an emergency alert to the expedition's emergency contacts</li>
+  <li>You can monitor the expedition's status in real-time on the event page</li>
+</ul>
+
+<p style="text-align: center; margin-top: 24px;">
+  <a href="{{ event_url }}" class="btn btn-primary">View Expedition</a>
+</p>
+
+<p class="muted">
+  As a safety surrogate, you are an important part of the expedition's safety plan.
+  Please make yourself available during the expedition window.
+</p>
+{% endblock %}

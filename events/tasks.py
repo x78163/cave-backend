@@ -118,22 +118,28 @@ def _get_surrogate_user_ids(tracking):
 
 
 def _notify_state_change(tracking, from_state, to_state):
-    """Send WebSocket notification to surrogates + chat channel message."""
+    """Send WebSocket notification to surrogates + leader + chat channel message."""
     channel_layer = get_channel_layer()
     if not channel_layer:
         return
 
     surrogate_user_ids = _get_surrogate_user_ids(tracking)
-    data = {
-        'type': 'expedition_state_change',
-        'tracking_id': str(tracking.id),
-        'event_id': str(tracking.event_id),
-        'event_name': tracking.event.name,
-        'state': to_state,
-        'previous_state': from_state,
-    }
 
-    for user_id in surrogate_user_ids:
+    # Also notify the expedition leader
+    leader_id = tracking.event.created_by_id
+    all_notify_ids = set(surrogate_user_ids)
+    all_notify_ids.add(leader_id)
+
+    for user_id in all_notify_ids:
+        data = {
+            'type': 'expedition_state_change',
+            'tracking_id': str(tracking.id),
+            'event_id': str(tracking.event_id),
+            'event_name': tracking.event.name,
+            'state': to_state,
+            'previous_state': from_state,
+            'role': 'leader' if user_id == leader_id else 'surrogate',
+        }
         try:
             async_to_sync(channel_layer.group_send)(
                 f'user_{user_id}',
@@ -290,6 +296,67 @@ def send_emergency_email(self, tracking_id):
         except Exception as exc:
             logger.exception('Failed to send emergency email to %s', email)
             raise self.retry(exc=exc)
+
+
+@shared_task
+def notify_surrogate_added(tracking_id, surrogate_user_id):
+    """Notify a user that they've been designated as a safety surrogate."""
+    try:
+        from .models import ExpeditionTracking
+        tracking = (
+            ExpeditionTracking.objects
+            .select_related('event', 'event__cave', 'event__created_by')
+            .get(id=tracking_id)
+        )
+    except Exception:
+        logger.warning('ExpeditionTracking %s not found', tracking_id)
+        return
+
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    try:
+        surrogate_user = User.objects.get(id=surrogate_user_id)
+    except User.DoesNotExist:
+        return
+
+    from notifications.sender import send_notification_email
+
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'https://cavedragon.llc')
+    context = {
+        'event_name': tracking.event.name,
+        'cave_name': tracking.event.cave.name if tracking.event.cave else 'Unknown',
+        'expected_return': tracking.expected_return,
+        'leader_name': tracking.event.created_by.username,
+        'event_url': f'{frontend_url}/events/{tracking.event_id}',
+    }
+
+    send_notification_email(
+        user=surrogate_user,
+        subject=f'Safety Surrogate: {tracking.event.name}',
+        template_name='emails/expedition_surrogate_added.html',
+        context=context,
+        preference_key='expedition_alert',
+    )
+
+    # Also send a WS notification so they see it immediately
+    channel_layer = get_channel_layer()
+    if channel_layer:
+        try:
+            async_to_sync(channel_layer.group_send)(
+                f'user_{surrogate_user_id}',
+                {
+                    'type': 'chat_notification',
+                    'data': {
+                        'type': 'expedition_surrogate_added',
+                        'tracking_id': str(tracking.id),
+                        'event_id': str(tracking.event_id),
+                        'event_name': tracking.event.name,
+                        'leader_name': tracking.event.created_by.username,
+                    },
+                },
+            )
+        except Exception:
+            logger.exception('Failed to send WS surrogate added notification to user %s', surrogate_user_id)
 
 
 def _get_last_gps_per_user(tracking):

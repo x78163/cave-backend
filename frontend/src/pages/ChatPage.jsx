@@ -9,6 +9,8 @@ import NewDMModal from '../components/NewDMModal'
 import NewChannelModal from '../components/NewChannelModal'
 import BrowseChannelsModal from '../components/BrowseChannelsModal'
 
+// Note: WebSocket connection is managed globally in App.jsx
+
 export default function ChatPage() {
   const { channelId } = useParams()
   const navigate = useNavigate()
@@ -20,42 +22,10 @@ export default function ChatPage() {
   const [showBrowse, setShowBrowse] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(!channelId)
 
-  // Connect WebSocket on mount
+  // WebSocket is connected globally in App.jsx — just fetch channels on mount
   useEffect(() => {
-    chatSocket.connect()
-
-    const unsub = chatSocket.subscribe((data) => {
-      const store = useChatStore.getState()
-      if (data.type === 'connected') {
-        fetchChannels()
-      } else if (data.type === 'typing') {
-        store.handleTypingEvent(data)
-      } else if (data.type === 'reaction_update') {
-        store.handleReactionUpdate(data, user?.id)
-      } else if (data.type === 'member_update') {
-        fetchChannels()
-      } else if (data.type === 'message_edit') {
-        store.handleMessageEdit(data)
-      } else if (data.type === 'message_delete') {
-        store.handleMessageDelete(data)
-      } else if (data.type === 'message_pin') {
-        store.handleMessagePin(data)
-      } else if (data.type === 'notification') {
-        store.handleNotification(data)
-      } else if (data.type === 'expedition_state_change') {
-        store.handleExpeditionStateChange(data)
-      } else if (data.id && data.channel_id) {
-        store.handleIncomingMessage(data)
-      }
-    })
-
     fetchChannels()
-
-    return () => {
-      unsub()
-      chatSocket.disconnect()
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchChannels])
 
   // Sync active channel from URL
   useEffect(() => {

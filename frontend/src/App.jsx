@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react'
 import TopBar from './components/TopBar'
 import OnboardingModal from './components/OnboardingModal'
+import ExpeditionAlertModal from './components/ExpeditionAlertModal'
 import Home from './pages/Home'
 import Explore from './pages/Explore'
 import Events from './pages/Events'
@@ -12,6 +13,9 @@ import Register from './pages/Register'
 import VerifyEmail from './pages/VerifyEmail'
 import GoogleCallback from './pages/GoogleCallback'
 import useAuthStore from './stores/authStore'
+import chatSocket from './services/chatSocket'
+import useChatStore from './stores/chatStore'
+import useExpeditionStore from './stores/expeditionStore'
 
 // Lazy-load heavy pages — they import Three.js, Leaflet, TipTap, etc.
 const CaveDetail = lazy(() => import('./pages/CaveDetail'))
@@ -84,6 +88,61 @@ function ProtectedRoute({ children }) {
   return children
 }
 
+/**
+ * Global WebSocket connection — connects once when authenticated,
+ * routes messages to chat store and expedition alert store.
+ */
+function GlobalWebSocket() {
+  const { user } = useAuthStore()
+
+  useEffect(() => {
+    if (!user) return
+
+    chatSocket.connect()
+
+    const unsub = chatSocket.subscribe((data) => {
+      const chatStore = useChatStore.getState()
+
+      if (data.type === 'connected') {
+        chatStore.fetchChannels()
+      } else if (data.type === 'typing') {
+        chatStore.handleTypingEvent(data)
+      } else if (data.type === 'reaction_update') {
+        chatStore.handleReactionUpdate(data, user?.id)
+      } else if (data.type === 'member_update') {
+        chatStore.fetchChannels()
+      } else if (data.type === 'message_edit') {
+        chatStore.handleMessageEdit(data)
+      } else if (data.type === 'message_delete') {
+        chatStore.handleMessageDelete(data)
+      } else if (data.type === 'message_pin') {
+        chatStore.handleMessagePin(data)
+      } else if (data.type === 'notification') {
+        chatStore.handleNotification(data)
+      } else if (data.type === 'expedition_state_change') {
+        chatStore.handleExpeditionStateChange(data)
+        // Push blocking alert for important state transitions
+        const alertStates = ['active', 'overdue', 'alert_sent', 'emergency_sent', 'completed', 'resolved']
+        if (alertStates.includes(data.state)) {
+          useExpeditionStore.getState().pushAlert(data)
+        }
+      } else if (data.type === 'expedition_surrogate_added') {
+        chatStore.handleExpeditionStateChange(data)
+        useExpeditionStore.getState().pushAlert(data)
+      } else if (data.id && data.channel_id) {
+        chatStore.handleIncomingMessage(data)
+      }
+    })
+
+    return () => {
+      unsub()
+      chatSocket.disconnect()
+    }
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null
+}
+
 function AppContent() {
   const { initAuth, user, isAuthenticated } = useAuthStore()
   const [showOnboarding, setShowOnboarding] = useState(false)
@@ -124,6 +183,8 @@ function AppContent() {
         {/* Protected routes — with TopBar */}
         <Route path="/*" element={
           <ProtectedRoute>
+            <GlobalWebSocket />
+            <ExpeditionAlertModal />
             <TopBar />
           <main className="flex-1 min-w-0 overflow-x-hidden">
             <Suspense fallback={

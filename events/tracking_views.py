@@ -434,6 +434,23 @@ def tracking_surrogate_add(request, event_id):
         user_id=user_id,
         grotto_id=grotto_id,
     )
+
+    # Notify the surrogate(s) that they've been designated
+    try:
+        from .tasks import notify_surrogate_added
+        if user_id:
+            notify_surrogate_added.delay(str(tracking.id), int(user_id))
+        elif grotto_id:
+            # Notify all active grotto members
+            from users.models import GrottoMembership
+            member_ids = GrottoMembership.objects.filter(
+                grotto_id=grotto_id, status='active',
+            ).values_list('user_id', flat=True)
+            for mid in member_ids:
+                notify_surrogate_added.delay(str(tracking.id), mid)
+    except Exception:
+        logger.exception('Failed to dispatch surrogate notification')
+
     return Response(
         ExpeditionSurrogateSerializer(surrogate).data,
         status=status.HTTP_201_CREATED,

@@ -18,6 +18,24 @@ const useExpeditionStore = create((set, get) => ({
   // GPS trail data (for map display)
   gpsTrail: [], // [{ user, username, latitude, longitude, recorded_at }]
 
+  // Alert queue — blocking modals for surrogates and leaders
+  alertQueue: [],
+  // { id, type, event_id, event_name, state, previous_state, role, leader_name, timestamp }
+
+  pushAlert: (alert) => {
+    set(state => ({
+      alertQueue: [...state.alertQueue, { ...alert, id: Date.now(), timestamp: new Date().toISOString() }],
+    }))
+  },
+
+  dismissAlert: (alertId) => {
+    set(state => ({
+      alertQueue: state.alertQueue.filter(a => a.id !== alertId),
+    }))
+  },
+
+  clearAlerts: () => set({ alertQueue: [] }),
+
   /**
    * Start GPS tracking for an expedition.
    * Begins watchPosition + periodic POST to server.
