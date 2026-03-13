@@ -42,6 +42,8 @@ export default function ChatPage() {
         store.handleMessagePin(data)
       } else if (data.type === 'notification') {
         store.handleNotification(data)
+      } else if (data.type === 'expedition_state_change') {
+        store.handleExpeditionStateChange(data)
       } else if (data.id && data.channel_id) {
         store.handleIncomingMessage(data)
       }

@@ -1,0 +1,55 @@
+{% extends "emails/base.html" %}
+{% block title %}EMERGENCY: Overdue Expedition{% endblock %}
+
+{% block content %}
+<h2 style="color: #ef4444;">OVERDUE CAVING EXPEDITION</h2>
+<p>This is an automated safety alert from Cave Dragon. A caving expedition has
+not returned by their expected time and their designated safety contacts have
+been unable to confirm their status.</p>
+
+<div class="card" style="border-color: #ef4444;">
+  <p><strong>Event:</strong> {{ event_name }}</p>
+  <p><strong>Cave:</strong> {{ cave_name }}</p>
+  {% if cave_latitude and cave_longitude %}
+  <p><strong>Cave Coordinates:</strong> {{ cave_latitude }}, {{ cave_longitude }}</p>
+  <p><a href="https://www.google.com/maps?q={{ cave_latitude }},{{ cave_longitude }}" style="color: #00d4ff;">Open in Google Maps</a></p>
+  {% endif %}
+  <p><strong>Expedition Leader:</strong> {{ leader_name }}</p>
+  {% if expected_return %}
+  <p><strong>Expected Return:</strong> {{ expected_return|date:"M d, Y g:i A" }}</p>
+  {% endif %}
+  {% if started_at %}
+  <p><strong>Expedition Started:</strong> {{ started_at|date:"M d, Y g:i A" }}</p>
+  {% endif %}
+</div>
+
+{% if participants %}
+<p><strong>Party Members (checked in):</strong></p>
+<ul>
+  {% for name in participants %}
+  <li>{{ name }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if last_gps %}
+<p><strong>Last Known GPS Positions:</strong></p>
+<div class="card">
+  {% for gps in last_gps %}
+  <p>{{ gps.username }}: {{ gps.latitude }}, {{ gps.longitude }}<br>
+    <span class="muted">Last seen: {{ gps.recorded_at }}</span></p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<p style="text-align: center; margin-top: 24px;">
+  <a href="{{ event_url }}" class="btn btn-danger">View Expedition Details</a>
+</p>
+
+<p class="muted">
+  This is an automated safety alert from Cave Dragon ({{ frontend_url }}).
+  You were listed as an emergency contact for this expedition. If you believe
+  a rescue may be needed, contact local emergency services (911) and mention
+  "cave rescue" so they can dispatch the appropriate team.
+</p>
+{% endblock %}

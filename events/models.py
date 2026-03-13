@@ -211,3 +211,189 @@ class EventComment(models.Model):
 
     def __str__(self):
         return f'{self.author.username} on {self.event.name}: {self.text[:50]}'
+
+
+# ---------------------------------------------------------------------------
+# Expedition Safety & Tracking
+# ---------------------------------------------------------------------------
+
+class ExpeditionTracking(models.Model):
+    """Safety tracking layer for expedition-type events.
+
+    Created when a leader opts in to tracking for an event.  Manages a state
+    machine, timer configuration, emergency contacts, and links to check-ins,
+    GPS breadcrumbs, and surrogates.
+    """
+
+    class State(models.TextChoices):
+        PREPARING = 'preparing', 'Preparing'
+        ACTIVE = 'active', 'Active'
+        UNDERGROUND = 'underground', 'Underground'
+        SURFACED = 'surfaced', 'Surfaced'
+        OVERDUE = 'overdue', 'Overdue'
+        ALERT_SENT = 'alert_sent', 'Alert Sent'
+        EMERGENCY_SENT = 'emergency_sent', 'Emergency Sent'
+        COMPLETED = 'completed', 'Completed'
+        RESOLVED = 'resolved', 'Resolved'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.OneToOneField(
+        Event, on_delete=models.CASCADE, related_name='tracking',
+    )
+
+    # State machine
+    state = models.CharField(
+        max_length=20, choices=State.choices, default=State.PREPARING,
+    )
+    state_changed_at = models.DateTimeField(auto_now_add=True)
+
+    # Timer configuration
+    expected_return = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Absolute time when party is expected to surface',
+    )
+    alert_delay_minutes = models.IntegerField(
+        default=30,
+        help_text='Minutes after expected_return + GPS stale before emergency email',
+    )
+    gps_stale_minutes = models.IntegerField(
+        default=15,
+        help_text='Minutes without GPS from ANY participant before assuming underground',
+    )
+
+    # Tracking metadata
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_gps_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Most recent GPS ping from ANY checked-in participant',
+    )
+
+    # Emergency contact info (non-app users: [{name, email, phone}])
+    emergency_contacts = models.JSONField(
+        default=list, blank=True,
+        help_text='List of {name, email, phone} dicts for emergency notification',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['state', 'expected_return']),
+        ]
+
+    def __str__(self):
+        return f'Tracking for {self.event.name} [{self.state}]'
+
+
+class ExpeditionCheckIn(models.Model):
+    """Records who actually showed up (vs. who RSVPed)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tracking = models.ForeignKey(
+        ExpeditionTracking, on_delete=models.CASCADE, related_name='checkins',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='expedition_checkins',
+    )
+    checked_in_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, related_name='checkins_performed',
+        help_text='User who performed the check-in (self or leader)',
+    )
+    checked_in_at = models.DateTimeField(auto_now_add=True)
+    checked_out_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ['tracking', 'user']
+        ordering = ['checked_in_at']
+
+    def __str__(self):
+        return f'{self.user.username} checked in ({self.tracking.event.name})'
+
+
+class ExpeditionGPSPoint(models.Model):
+    """GPS breadcrumb for a checked-in participant."""
+
+    id = models.BigAutoField(primary_key=True)
+    tracking = models.ForeignKey(
+        ExpeditionTracking, on_delete=models.CASCADE, related_name='gps_points',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='expedition_gps_points',
+    )
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    accuracy = models.FloatField(null=True, blank=True)
+    altitude = models.FloatField(null=True, blank=True)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['tracking', 'recorded_at']),
+            models.Index(fields=['tracking', 'user', '-recorded_at']),
+        ]
+        ordering = ['recorded_at']
+
+    def __str__(self):
+        return f'GPS {self.user.username} @ {self.latitude},{self.longitude}'
+
+
+class ExpeditionSurrogate(models.Model):
+    """User or grotto designated as safety surrogate for an expedition."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tracking = models.ForeignKey(
+        ExpeditionTracking, on_delete=models.CASCADE, related_name='surrogates',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        null=True, blank=True, related_name='surrogate_for',
+    )
+    grotto = models.ForeignKey(
+        'users.Grotto', on_delete=models.CASCADE,
+        null=True, blank=True, related_name='surrogate_for',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(user__isnull=False, grotto__isnull=True)
+                    | models.Q(user__isnull=True, grotto__isnull=False)
+                ),
+                name='surrogate_target_xor',
+            ),
+        ]
+
+    def __str__(self):
+        target = self.user or self.grotto
+        return f'Surrogate {target} for {self.tracking.event.name}'
+
+
+class ExpeditionStateLog(models.Model):
+    """Audit log of all state transitions for an expedition."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tracking = models.ForeignKey(
+        ExpeditionTracking, on_delete=models.CASCADE, related_name='state_logs',
+    )
+    from_state = models.CharField(max_length=20)
+    to_state = models.CharField(max_length=20)
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True,
+        help_text='Null if triggered by system (timer)',
+    )
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.from_state} -> {self.to_state} ({self.tracking.event.name})'

@@ -374,20 +374,23 @@ def send_chat_digest():
 
         channels_with_unread = []
         for membership in memberships:
-            # Count messages after the read cursor
-            unread_filter = Q(channel=membership.channel)
-            if membership.last_read_message_id:
-                # Get the created_at of the last read message
-                last_read_msg = Message.objects.filter(
-                    id=membership.last_read_message_id,
-                ).values_list('created_at', flat=True).first()
-                if last_read_msg:
-                    unread_filter &= Q(created_at__gt=last_read_msg)
-                else:
-                    continue
-            unread_filter &= Q(is_deleted=False)
+            # Only count messages after the user's read cursor
+            if not membership.last_read_message_id:
+                # User has never opened this channel — don't count as unread
+                continue
 
-            unread_count = Message.objects.filter(unread_filter).count()
+            last_read_msg = Message.objects.filter(
+                id=membership.last_read_message_id,
+            ).values_list('created_at', flat=True).first()
+            if not last_read_msg:
+                continue
+
+            # Count messages after read cursor, excluding user's own messages
+            unread_count = Message.objects.filter(
+                channel=membership.channel,
+                created_at__gt=last_read_msg,
+                is_deleted=False,
+            ).exclude(author=user).count()
             if unread_count > 0:
                 # Get last message preview
                 last_msg = Message.objects.filter(

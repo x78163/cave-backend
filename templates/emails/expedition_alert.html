@@ -1,0 +1,47 @@
+{% extends "emails/base.html" %}
+{% block title %}Expedition Alert{% endblock %}
+
+{% block content %}
+<h2>Expedition Alert</h2>
+<p>An expedition you are monitoring is <strong>overdue</strong>.</p>
+
+<div class="card">
+  <p><strong>Event:</strong> {{ event_name }}</p>
+  <p><strong>Cave:</strong> {{ cave_name }}</p>
+  {% if expected_return %}
+  <p><strong>Expected Return:</strong> {{ expected_return|date:"M d, Y g:i A" }}</p>
+  {% endif %}
+  {% if started_at %}
+  <p><strong>Started:</strong> {{ started_at|date:"M d, Y g:i A" }}</p>
+  {% endif %}
+</div>
+
+{% if participants %}
+<p><strong>Participants Underground:</strong></p>
+<ul>
+  {% for name in participants %}
+  <li>{{ name }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if last_gps %}
+<p><strong>Last Known Positions:</strong></p>
+<div class="card">
+  {% for gps in last_gps %}
+  <p>{{ gps.username }}: {{ gps.latitude }}, {{ gps.longitude }} ({{ gps.recorded_at }})</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<p style="text-align: center; margin-top: 24px;">
+  <a href="{{ event_url }}" class="btn btn-primary">View Expedition</a>
+  <a href="{{ trigger_emergency_url }}" class="btn btn-danger">Trigger Emergency Alert</a>
+</p>
+
+<p class="muted">
+  If the party surfaces safely, no further action is needed. You can trigger
+  an emergency alert to notify the expedition's emergency contacts if you
+  believe the situation requires it.
+</p>
+{% endblock %}

@@ -23,6 +23,8 @@ class EventSerializer(serializers.ModelSerializer):
     comment_count = serializers.SerializerMethodField()
     user_rsvp = serializers.SerializerMethodField()
     is_full = serializers.SerializerMethodField()
+    has_tracking = serializers.SerializerMethodField()
+    tracking_state = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -39,6 +41,7 @@ class EventSerializer(serializers.ModelSerializer):
             'chat_channel',
             'going_count', 'maybe_count', 'comment_count',
             'user_rsvp', 'is_full',
+            'has_tracking', 'tracking_state',
             'created_at', 'updated_at',
         ]
         read_only_fields = [
@@ -47,6 +50,7 @@ class EventSerializer(serializers.ModelSerializer):
             'cave_name', 'grotto_name',
             'going_count', 'maybe_count', 'comment_count',
             'user_rsvp', 'is_full',
+            'has_tracking', 'tracking_state',
             'created_at', 'updated_at',
         ]
 
@@ -85,6 +89,14 @@ class EventSerializer(serializers.ModelSerializer):
         if not obj.max_participants:
             return False
         return self._get_rsvp_counts(obj)['going'] >= obj.max_participants
+
+    def get_has_tracking(self, obj):
+        return hasattr(obj, 'tracking')
+
+    def get_tracking_state(self, obj):
+        if hasattr(obj, 'tracking'):
+            return obj.tracking.state
+        return None
 
 
 class EventCalendarSerializer(serializers.ModelSerializer):

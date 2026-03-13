@@ -7,6 +7,7 @@ import AvatarDisplay from '../components/AvatarDisplay'
 import EventComments from '../components/EventComments'
 import EventCreateModal from '../components/EventCreateModal'
 import EventInviteModal from '../components/EventInviteModal'
+import ExpeditionTrackingPanel from '../components/ExpeditionTrackingPanel'
 import L from 'leaflet'
 import MyLocationButton from '../components/maptools/MyLocationButton'
 import 'leaflet/dist/leaflet.css'
@@ -289,6 +290,9 @@ export default function EventDetail() {
           </div>
         )}
       </div>
+
+      {/* Expedition Safety Tracking */}
+      <ExpeditionTrackingPanel event={event} rsvps={rsvps} />
 
       {/* Description */}
       {event.description && (

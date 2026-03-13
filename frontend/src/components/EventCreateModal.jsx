@@ -143,6 +143,17 @@ export default function EventCreateModal({ onClose, onCreated, editEvent = null 
   const [inviteResults, setInviteResults] = useState([])
   const [invitedUsers, setInvitedUsers] = useState([])
 
+  // Expedition tracking config
+  const [enableTracking, setEnableTracking] = useState(false)
+  const [expectedReturn, setExpectedReturn] = useState('')
+  const [alertDelay, setAlertDelay] = useState(30)
+  const [gpsStale, setGpsStale] = useState(15)
+  const [emergencyContacts, setEmergencyContacts] = useState([])
+  const [newContact, setNewContact] = useState({ name: '', email: '', phone: '' })
+  const [surrogateSearch, setSurrogateSearch] = useState('')
+  const [surrogateResults, setSurrogateResults] = useState([])
+  const [addedSurrogates, setAddedSurrogates] = useState([])
+
   // UI
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -190,6 +201,20 @@ export default function EventCreateModal({ onClose, onCreated, editEvent = null 
     }, 300)
     return () => clearTimeout(timer)
   }, [inviteSearch, visibility, invitedUsers])
+
+  // Surrogate search for tracking
+  useEffect(() => {
+    if (surrogateSearch.length < 1 || !enableTracking) { setSurrogateResults([]); return }
+    const timer = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/users/search/?q=${encodeURIComponent(surrogateSearch)}`)
+        const results = Array.isArray(data) ? data : data?.results || []
+        const addedIds = new Set(addedSurrogates.map(u => u.id))
+        setSurrogateResults(results.filter(u => !addedIds.has(u.id)))
+      } catch { setSurrogateResults([]) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [surrogateSearch, enableTracking, addedSurrogates])
 
   // ── Handlers ──
 
@@ -309,6 +334,31 @@ export default function EventCreateModal({ onClose, onCreated, editEvent = null 
         )
       }
 
+      // Set up expedition tracking if enabled
+      if (enableTracking && eventData?.id && !editEvent) {
+        try {
+          await apiFetch(`/events/${eventData.id}/tracking/enable/`, { method: 'POST' })
+          const trackingConfig = {
+            alert_delay_minutes: alertDelay,
+            gps_stale_minutes: gpsStale,
+            emergency_contacts: emergencyContacts,
+          }
+          if (expectedReturn) trackingConfig.expected_return = new Date(expectedReturn).toISOString()
+          await apiFetch(`/events/${eventData.id}/tracking/`, { method: 'PATCH', body: trackingConfig })
+          // Add surrogates
+          await Promise.allSettled(
+            addedSurrogates.map(u =>
+              apiFetch(`/events/${eventData.id}/tracking/surrogates/`, {
+                method: 'POST',
+                body: { user_id: u.id },
+              })
+            )
+          )
+        } catch (trackErr) {
+          console.error('Failed to configure tracking:', trackErr)
+        }
+      }
+
       onCreated?.()
     } catch (err) {
       setError(err?.response?.data?.detail || err?.message || 'Failed to save event')
@@ -382,6 +432,33 @@ export default function EventCreateModal({ onClose, onCreated, editEvent = null 
             <input value={name} onChange={e => setName(e.target.value)}
               className="cyber-input w-full px-4 py-2 text-sm" placeholder="e.g. Big Cave Survey Trip" />
           </div>
+
+          {/* Grotto event (at top for planning) */}
+          {grottos.length > 0 && (
+            <div className="border border-[var(--cyber-border)] rounded-xl p-4 space-y-3">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <div className={`relative w-9 h-5 rounded-full transition-all duration-300 cursor-pointer ${
+                  grottoId
+                    ? 'bg-cyan-900/50 border border-[var(--cyber-cyan)]'
+                    : 'bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]'
+                }`}
+                  onClick={(e) => { e.preventDefault(); grottoId ? setGrottoId('') : setGrottoId(grottos[0]?.id || '') }}
+                >
+                  <div className={`absolute top-0.5 w-3.5 h-3.5 rounded-full transition-all duration-300 ${
+                    grottoId ? 'left-[18px] bg-[var(--cyber-cyan)]' : 'left-0.5 bg-[var(--cyber-text-dim)]'
+                  }`} />
+                </div>
+                <span className="text-[var(--cyber-text)]">Create as grotto event</span>
+              </label>
+              {grottoId && (
+                <select value={grottoId} onChange={e => setGrottoId(e.target.value)}
+                  className="cyber-input w-full px-4 py-2 text-sm rounded-xl">
+                  <option value="">Select grotto...</option>
+                  {grottos.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              )}
+            </div>
+          )}
 
           {/* Type + Visibility */}
           <div className="grid grid-cols-2 gap-4">
@@ -738,29 +815,123 @@ export default function EventCreateModal({ onClose, onCreated, editEvent = null 
               className="cyber-input w-48 px-4 py-2 text-sm" placeholder="Unlimited" />
           </div>
 
-          {/* Grotto event (only when not already shown by visibility) */}
-          {!needsGrotto && grottos.length > 0 && (
-            <div className="border border-[var(--cyber-border)] rounded-xl p-4 space-y-3">
+          {/* Expedition Safety Tracking (only for new events) */}
+          {!editEvent && (
+            <div className="border border-[var(--cyber-border)] rounded-xl p-4 space-y-4">
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <div className={`relative w-9 h-5 rounded-full transition-all duration-300 cursor-pointer ${
-                  grottoId
-                    ? 'bg-cyan-900/50 border border-[var(--cyber-cyan)]'
+                  enableTracking
+                    ? 'bg-green-900/50 border border-green-500'
                     : 'bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]'
                 }`}
-                  onClick={(e) => { e.preventDefault(); grottoId ? setGrottoId('') : setGrottoId(grottos[0]?.id || '') }}
+                  onClick={(e) => { e.preventDefault(); setEnableTracking(!enableTracking) }}
                 >
                   <div className={`absolute top-0.5 w-3.5 h-3.5 rounded-full transition-all duration-300 ${
-                    grottoId ? 'left-[18px] bg-[var(--cyber-cyan)]' : 'left-0.5 bg-[var(--cyber-text-dim)]'
+                    enableTracking ? 'left-[18px] bg-green-400' : 'left-0.5 bg-[var(--cyber-text-dim)]'
                   }`} />
                 </div>
-                <span className="text-[var(--cyber-text)]">Create as grotto event</span>
+                <span className="text-[var(--cyber-text)]">Enable Expedition Safety Tracking</span>
               </label>
-              {grottoId && (
-                <select value={grottoId} onChange={e => setGrottoId(e.target.value)}
-                  className="cyber-input w-full px-4 py-2 text-sm rounded-xl">
-                  <option value="">Select grotto...</option>
-                  {grottos.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                </select>
+              {enableTracking && (
+                <div className="space-y-4 pt-1">
+                  <p className="text-[10px] text-[var(--cyber-text-dim)]">
+                    Configure check-in manifest, GPS tracking, emergency contacts, and surrogate notifications.
+                    You can also adjust these settings on the event detail page before starting.
+                  </p>
+
+                  {/* Expected return */}
+                  <div>
+                    <label className="text-xs text-[var(--cyber-text-dim)] block mb-1">Expected Return Time</label>
+                    <input type="datetime-local" value={expectedReturn}
+                      onChange={e => setExpectedReturn(e.target.value)}
+                      className="cyber-input w-full px-3 py-2 text-sm rounded-lg event-time-input" />
+                  </div>
+
+                  {/* Delay settings */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-[var(--cyber-text-dim)] block mb-1">Emergency Delay (min)</label>
+                      <input type="number" value={alertDelay} min={5}
+                        onChange={e => setAlertDelay(parseInt(e.target.value) || 30)}
+                        className="cyber-input w-full px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--cyber-text-dim)] block mb-1">GPS Stale (min)</label>
+                      <input type="number" value={gpsStale} min={5}
+                        onChange={e => setGpsStale(parseInt(e.target.value) || 15)}
+                        className="cyber-input w-full px-3 py-2 text-sm" />
+                    </div>
+                  </div>
+
+                  {/* Emergency contacts */}
+                  <div>
+                    <label className="text-xs text-[var(--cyber-text-dim)] block mb-1">Emergency Contacts</label>
+                    {emergencyContacts.map((c, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs mb-1">
+                        <span className="text-[var(--cyber-text)]">{c.name}</span>
+                        <span className="text-[var(--cyber-text-dim)]">{c.email}</span>
+                        {c.phone && <span className="text-[var(--cyber-text-dim)]">{c.phone}</span>}
+                        <button onClick={() => setEmergencyContacts(prev => prev.filter((_, idx) => idx !== i))}
+                          className="text-red-400 ml-auto">&times;</button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2 mt-2">
+                      <input placeholder="Name" value={newContact.name}
+                        onChange={e => setNewContact({ ...newContact, name: e.target.value })}
+                        className="cyber-input text-xs flex-1" />
+                      <input placeholder="Email *" value={newContact.email}
+                        onChange={e => setNewContact({ ...newContact, email: e.target.value })}
+                        className="cyber-input text-xs flex-1" />
+                      <input placeholder="Phone" value={newContact.phone}
+                        onChange={e => setNewContact({ ...newContact, phone: e.target.value })}
+                        className="cyber-input text-xs flex-[0.8]" />
+                      <button onClick={() => {
+                        if (!newContact.email) return
+                        setEmergencyContacts([...emergencyContacts, { ...newContact }])
+                        setNewContact({ name: '', email: '', phone: '' })
+                      }}
+                        disabled={!newContact.email}
+                        className="text-xs px-3 py-1 rounded border border-green-700/30 text-green-400 hover:bg-green-700/10 disabled:opacity-30">
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Surrogates */}
+                  <div>
+                    <label className="text-xs text-[var(--cyber-text-dim)] block mb-1">
+                      Safety Surrogates (notified of expedition status)
+                    </label>
+                    {addedSurrogates.map(s => (
+                      <div key={s.id} className="flex items-center gap-2 text-xs mb-1">
+                        <span className="text-[var(--cyber-text)]">{s.username}</span>
+                        <button onClick={() => setAddedSurrogates(prev => prev.filter(x => x.id !== s.id))}
+                          className="text-red-400 ml-auto">&times;</button>
+                      </div>
+                    ))}
+                    <div className="relative mt-2">
+                      <input placeholder="Search users to add as surrogate..."
+                        value={surrogateSearch}
+                        onChange={e => setSurrogateSearch(e.target.value)}
+                        className="cyber-input text-xs w-full" />
+                      {surrogateResults.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--cyber-surface-2)] border border-[var(--cyber-border)]
+                          rounded-xl overflow-hidden z-20 max-h-32 overflow-y-auto">
+                          {surrogateResults.map(u => (
+                            <button key={u.id} onClick={() => {
+                              setAddedSurrogates(prev => [...prev, u])
+                              setSurrogateSearch('')
+                              setSurrogateResults([])
+                            }}
+                              className="w-full text-left px-3 py-2 text-xs text-[var(--cyber-text)] hover:bg-[var(--cyber-cyan)]/10">
+                              {u.username}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           )}

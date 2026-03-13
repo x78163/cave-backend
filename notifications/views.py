@@ -87,6 +87,8 @@ def handle_email_action(request):
         return _handle_cave_access(data, status='denied')
     elif action == 'event_rsvp':
         return _handle_event_rsvp(data)
+    elif action == 'expedition_trigger_emergency':
+        return _handle_expedition_trigger_emergency(data)
     elif action == 'unsubscribe':
         return _handle_unsubscribe(data)
     else:
@@ -228,6 +230,55 @@ def _handle_event_rsvp(data):
         )
 
     return HttpResponseRedirect(_frontend_url(f'/events/{event.id}'))
+
+
+def _handle_expedition_trigger_emergency(data):
+    """Trigger emergency email for an overdue expedition via email action link."""
+    from events.models import ExpeditionTracking
+    from events.expedition_state import transition
+    from events.tasks import send_emergency_email
+
+    tracking_id = data.get('tracking_id')
+    try:
+        tracking = ExpeditionTracking.objects.select_related('event').get(id=tracking_id)
+    except ExpeditionTracking.DoesNotExist:
+        return _action_result_page(
+            'Not Found',
+            'This expedition tracking record no longer exists.',
+            link_url=_frontend_url('/events'),
+            link_text='View Events',
+        )
+
+    active_states = ('active', 'underground', 'surfaced', 'overdue', 'alert_sent')
+    if tracking.state not in active_states:
+        return _action_result_page(
+            'Expedition Inactive',
+            f'This expedition is currently "{tracking.get_state_display()}" and '
+            f'does not require emergency escalation.',
+            link_url=_frontend_url(f'/events/{tracking.event_id}'),
+            link_text='View Expedition',
+        )
+
+    # Walk through valid transitions to emergency_sent
+    if tracking.state in ('active', 'underground', 'surfaced'):
+        transition(tracking, 'overdue', note='Emergency triggered via email')
+        tracking.refresh_from_db()
+    if tracking.state == 'overdue':
+        transition(tracking, 'alert_sent', note='Emergency triggered via email')
+        tracking.refresh_from_db()
+    if tracking.state == 'alert_sent':
+        transition(tracking, 'emergency_sent', note='Emergency triggered via email by surrogate')
+
+    send_emergency_email.delay(str(tracking.id))
+
+    return _action_result_page(
+        'Emergency Alert Sent',
+        f'Emergency contacts for "{tracking.event.name}" have been notified. '
+        f'If you believe a rescue is needed, also contact local emergency '
+        f'services (911) and mention "cave rescue".',
+        link_url=_frontend_url(f'/events/{tracking.event_id}'),
+        link_text='View Expedition',
+    )
 
 
 def _handle_unsubscribe(data):

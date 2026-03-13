@@ -156,8 +156,11 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 - `User` - Django auth user (Google OAuth)
 - `UserProfile` - Extended profile (bio, stats, avatar, `invited_by` FK)
 - `Grotto` - Organization/group
-- `GrottoMembership` - User → Grotto relationship
+- `GrottoMembership` - User → Grotto relationship with roles (admin/officer/member), statuses (active/pending_application/pending_invitation/rejected)
 - `InviteCode` - Gated registration codes (8-char auto-generated, use counting, active/inactive toggle)
+
+#### Requests (requests_app)
+- `Request` - Universal request/approval model covering: cave_access, cave_edit, contact_access, contact_submission, event_access, grotto_membership, grotto_invitation, map_upload, admin_escalation. Polymorphic nullable FKs (cave, event, grotto). Statuses: pending/accepted/denied. Side effects on acceptance (e.g., create GrottoMembership).
 
 #### Device Management
 - `Device` - Registered Orange Pi devices
@@ -249,6 +252,24 @@ Cave Backend extends cave-server's schema with cloud-specific models:
 ### User Media Endpoints
 - `GET /api/users/profile/{id}/media/` - All user media (photos, documents, video links + post images)
 - `PATCH /api/users/media/{type}/{uuid}/` - Update media visibility (public/unlisted/private)
+
+### Grottos
+- `GET/POST /api/users/grottos/` - List all grottos / create new grotto
+- `GET/PATCH/DELETE /api/users/grottos/{id}/` - Grotto detail / edit (admin) / delete (creator)
+- `GET /api/users/grottos/{id}/members/` - List members (excludes rejected)
+- `POST /api/users/grottos/{id}/apply/` - Apply to join (creates grotto_membership Request)
+- `POST /api/users/grottos/{id}/invite/` - Invite user (officer+, creates grotto_invitation Request)
+- `POST /api/users/grottos/{id}/leave/` - Leave grotto (last admin cannot leave)
+- `PATCH/DELETE /api/users/grottos/{id}/members/{mid}/` - Update role/status (admin) or remove member (officer+)
+- `GET /api/users/grottos/{id}/caves/` - List grotto's caves (visibility-filtered by membership)
+- `GET /api/users/grottos/{id}/events/` - List grotto's events (visibility-filtered)
+- `GET /api/users/grottos/{id}/media/` - Photos from grotto-owned caves
+
+### Requests
+- `GET /api/requests/` - List user's requests (inbox + outgoing, with `?type=` filter)
+- `GET /api/requests/counts/` - Pending inbox/outgoing counts (for badge)
+- `PATCH /api/requests/{id}/resolve/` - Accept or deny a request (with side effects)
+- `DELETE /api/requests/{id}/` - Cancel (requester) or dismiss (target, auto-denies if pending)
 
 ### Survey Map Overlays
 - `GET /api/caves/{id}/survey-maps/` - List survey maps for cave
@@ -827,6 +848,16 @@ This project includes:
   - Chat integration: auto-creates channel on event creation ("{name} (event)"), auto-joins on RSVP going, first message with event link pill, event deletion cascades to chat channel
   - Wall post integration: `event` FK + `event_name_cache` on Post model, inline event pill + cave pill rendering ("Created event [pill] at [cave pill]")
   - 16 REST endpoints at `/api/events/` including user-events endpoint
+- Grotto system enhancement (officer roles, cave ownership, profile tabs, permissions)
+  - 3-tier role hierarchy: admin > officer > member on `GrottoMembership`
+  - Permission helpers in `users/models.py`: `get_grotto_role()`, `is_grotto_admin()`, `is_grotto_officer_or_above()`, `is_grotto_member_or_above()`
+  - Cave grotto ownership: `grotto` FK on Cave model, `_can_edit_cave()` centralizes owner/staff/grotto-officer checks
+  - Grotto members can view private/unlisted caves owned by their grotto
+  - Officers+ can invite, approve/reject members; only admins can change roles; officers cannot affect officers or admins
+  - Grotto profile endpoints: caves, events, media tabs with visibility filtering
+  - "On behalf of" cave/event creation: officer+ can create caves/events under a grotto
+  - Grotto-aware post deletion: grotto officers+ can delete posts with grotto FK
+  - `requests_app/` Django app: generic Request model with polymorphic nullable FKs and side effects on acceptance
 
 **Frontend (React/Vite)**:
 - Cyberpunk-themed UI with dark mode, "Cave Dragon" branding, Ubuntu font (Google Fonts), cyan dragon logo
@@ -931,6 +962,19 @@ This project includes:
   - Profile.jsx: "My Events" tab; UserProfilePage.jsx: "Events" tab
   - PostCard.jsx: inline event pill rendering with color-coded capsule + cave pill ("Created event [pill] at [cave]")
   - ChatMessages.jsx: `[event:/events/{id}|{name}]` token rendered as clickable event pills
+- Grottos page (`/grottos`) — enhanced grotto profiles with 5-tab layout
+  - Grotto list with search, create modal
+  - Grotto detail with tabs: Wall | Caves | Events | Media | Members(count)
+  - Lazy-loaded tab data (only fetches when tab is active via conditional `useApi`)
+  - Role badges: admin (magenta), officer (amber), member (gray border)
+  - Admin role dropdown on each member card (select admin/officer/member)
+  - Officer+ gated invite/approve/remove UI with role hierarchy enforcement
+  - Caves tab: card grid with visibility badges
+  - Events tab: event list with type badge and date
+  - Media tab: photo grid from grotto-owned caves
+  - "Create for Grotto" dropdown on CreateCave (officer+ grottos only)
+  - "Create for Grotto" dropdown on EventCreateModal (officer+ grottos only, decoupled from visibility)
+  - "by [Grotto Name]" badge on CaveDetail linking to grotto profile
 - 3D Point Cloud Editor (`/editor` or `/editor/:caveId`) — map stitching tool (Phases 1-7 complete)
   - Quad-viewport layout: Top (XZ), Free Camera, Front (XY), Profile (ZY) with resizable dividers
   - Single WebGL renderer with scissor test, 4 cameras per frame
@@ -1067,6 +1111,9 @@ This project includes:
 | `frontend/src/components/EventCreateModal.jsx` | Create/edit event modal with cave picker, grotto checkbox, RichTextEditor, meetup instructions |
 | `frontend/src/components/EventComments.jsx` | Comment list + composer for events |
 | `frontend/src/components/EventInviteModal.jsx` | User/grotto invite modal for private events |
+| `requests_app/models.py` | Generic Request model with polymorphic nullable FKs (cave, event, grotto), status lifecycle, side effects on acceptance |
+| `requests_app/views.py` | Request CRUD: list (filtered by user involvement), create, resolve (accept/deny with side effects) |
+| `frontend/src/pages/Groups.jsx` | Grottos page — list, create, 5-tab detail (wall/caves/events/media/members), role management, officer+ permissions |
 
 ### Migrations (caves app)
 - 0001: Initial Cave model
@@ -1088,6 +1135,7 @@ This project includes:
 - 0017: SurfaceAnnotation model (polygon overlays on surface map)
 - 0018: Increase tpad_link max_length to 500 (PostgreSQL compatibility)
 - 0019: EditorProject model (UUID PK, cave FK, owner FK, name, project_state JSONField)
+- 0022: Add nullable `grotto` FK to Cave (grotto ownership)
 
 ### Migrations (mapping app)
 - 0001: Initial PointOfInterest model
@@ -1113,6 +1161,12 @@ This project includes:
 ### Migrations (users app)
 - 0003: allow_dms BooleanField on UserProfile
 - 0004: InviteCode model + invited_by FK on UserProfile
+- 0010: Add OFFICER to GrottoMembership.Role choices
+
+### Migrations (requests_app)
+- 0001: Initial Request model (UUID PK, polymorphic FKs, status lifecycle)
+- 0002: Data migration — migrate existing CaveRequests to generic Request model
+- 0003: Expand request_type choices (grotto_membership, grotto_invitation, etc.)
 
 ### Migrations (events app)
 - 0001: Event, EventRSVP, EventInvitation, EventComment models with indexes and CheckConstraint
@@ -1150,8 +1204,6 @@ This project includes:
 **Remaining MVP items**:
 - S3 file storage (currently local media/)
 - Device-to-cloud sync mechanism
-- Grotto memberships and group permissions
-- Shared cave entry ownership
 
 **Questions to Resolve**:
 - Exact game engine choice for 3D exploration (deferred to Phase 4)

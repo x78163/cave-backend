@@ -223,6 +223,11 @@ class NotificationPreference(models.Model):
         default=True, help_text='Reminder 24h before an event',
     )
 
+    # Expedition safety
+    expedition_alert = models.BooleanField(
+        default=True, help_text='Expedition safety alerts (surrogate notifications)',
+    )
+
     # Social
     comment_on_post = models.BooleanField(
         default=True, help_text='Someone comments on your post',

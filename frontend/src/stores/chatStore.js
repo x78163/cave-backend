@@ -13,6 +13,7 @@ const useChatStore = create((set, get) => ({
   typing: {},             // { channelId: { userId: { username, timeout } } }
   notifications: [],
   unreadNotifications: 0,
+  expeditionUpdates: [],
   searchResults: null,
   searchLoading: false,
   pinnedMessages: {},     // { channelId: [msg, ...] }
@@ -277,6 +278,23 @@ const useChatStore = create((set, get) => ({
   handleNotification: (data) => {
     set(state => ({
       notifications: [data, ...state.notifications],
+      unreadNotifications: state.unreadNotifications + 1,
+    }))
+  },
+
+  handleExpeditionStateChange: (data) => {
+    // Store expedition state updates for any component to consume
+    set(state => ({
+      expeditionUpdates: [...(state.expeditionUpdates || []), data],
+      notifications: [
+        {
+          ...data,
+          notification_type: 'expedition',
+          is_read: false,
+          created_at: new Date().toISOString(),
+        },
+        ...state.notifications,
+      ],
       unreadNotifications: state.unreadNotifications + 1,
     }))
   },

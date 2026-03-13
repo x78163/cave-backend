@@ -236,6 +236,10 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=9, minute=0, day_of_week=1),  # Monday 9 AM
         'options': {'expires': 60 * 60 * 24},
     },
+    'check-expedition-timers': {
+        'task': 'events.tasks.check_expedition_timers',
+        'schedule': 60.0,  # every 60 seconds
+    },
 }
 
 # Sync settings
