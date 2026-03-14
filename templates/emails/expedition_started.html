@@ -1,0 +1,43 @@
+{% extends "emails/base.html" %}
+{% block title %}Expedition Started{% endblock %}
+
+{% block content %}
+<h2>Expedition Started</h2>
+<p>A caving expedition you are associated with has begun.</p>
+
+<div class="card">
+  <p><strong>Event:</strong> {{ event_name }}</p>
+  <p><strong>Cave:</strong> {{ cave_name }}</p>
+  <p><strong>Led by:</strong> {{ leader_name }}</p>
+  {% if expected_return %}
+  <p><strong>Expected Return:</strong> {{ expected_return|date:"M d, Y g:i A" }}</p>
+  {% endif %}
+</div>
+
+{% if participants %}
+<p><strong>Participants:</strong></p>
+<ul>
+  {% for name in participants %}
+  <li>{{ name }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if cave_latitude and cave_longitude %}
+<p>
+  <strong>Cave Location:</strong>
+  <a href="https://www.google.com/maps?q={{ cave_latitude }},{{ cave_longitude }}">
+    {{ cave_latitude }}, {{ cave_longitude }} (Google Maps)
+  </a>
+</p>
+{% endif %}
+
+<p style="text-align: center; margin-top: 24px;">
+  <a href="{{ event_url }}" class="btn btn-primary">View Expedition</a>
+</p>
+
+<p class="muted">
+  You are receiving this because you are listed as an emergency contact or safety surrogate
+  for this expedition. You will be contacted again if the party becomes overdue.
+</p>
+{% endblock %}

@@ -299,6 +299,80 @@ def send_emergency_email(self, tracking_id):
 
 
 @shared_task
+def notify_expedition_started(tracking_id):
+    """Notify surrogates (email + WS) and emergency contacts (email) that expedition started."""
+    try:
+        from .models import ExpeditionTracking
+        tracking = (
+            ExpeditionTracking.objects
+            .select_related('event', 'event__cave', 'event__created_by')
+            .get(id=tracking_id)
+        )
+    except Exception:
+        logger.warning('ExpeditionTracking %s not found', tracking_id)
+        return
+
+    from notifications.sender import send_notification_email
+
+    checkins = tracking.checkins.select_related('user').filter(checked_out_at__isnull=True)
+    participants = [c.user.username for c in checkins]
+    cave = tracking.event.cave
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'https://cavedragon.llc')
+
+    context = {
+        'event_name': tracking.event.name,
+        'cave_name': cave.name if cave else 'Unknown',
+        'cave_latitude': cave.latitude if cave else None,
+        'cave_longitude': cave.longitude if cave else None,
+        'expected_return': tracking.expected_return,
+        'leader_name': tracking.event.created_by.username,
+        'participants': participants,
+        'event_url': f'{frontend_url}/events/{tracking.event_id}',
+    }
+
+    # Email surrogates
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    surrogate_user_ids = _get_surrogate_user_ids(tracking)
+    for user in User.objects.filter(id__in=surrogate_user_ids):
+        try:
+            send_notification_email(
+                user=user,
+                subject=f'Expedition Started: {tracking.event.name}',
+                template_name='emails/expedition_started.html',
+                context=context,
+                preference_key='expedition_alert',
+            )
+        except Exception:
+            logger.exception('Failed to send start email to surrogate %s', user.username)
+
+    # Email emergency contacts directly (non-app users)
+    ec_context = {**context, 'frontend_url': frontend_url, 'unsubscribe_url': '', 'username': 'Emergency Contact'}
+    html_body = render_to_string('emails/expedition_started.html', ec_context)
+    text_body = strip_tags(html_body)
+
+    for contact in (tracking.emergency_contacts or []):
+        email = contact.get('email')
+        if not email:
+            continue
+        try:
+            send_mail(
+                subject=f'Expedition Started: {tracking.event.name}',
+                message=text_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                html_message=html_body,
+                fail_silently=False,
+            )
+            logger.info('Start email sent to emergency contact %s for expedition %s', email, tracking_id)
+        except Exception:
+            logger.exception('Failed to send start email to emergency contact %s', email)
+
+    # WS notification to surrogates + leader
+    _notify_state_change(tracking, 'preparing', 'active')
+
+
+@shared_task
 def notify_surrogate_added(tracking_id, surrogate_user_id):
     """Notify a user that they've been designated as a safety surrogate."""
     try:

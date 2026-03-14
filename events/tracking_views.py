@@ -161,6 +161,14 @@ def tracking_start(request, event_id):
             {'error': f'Cannot start from state "{tracking.state}".'},
             status=status.HTTP_409_CONFLICT,
         )
+
+    # Notify surrogates + emergency contacts that expedition has started
+    try:
+        from .tasks import notify_expedition_started
+        notify_expedition_started.delay(str(tracking.id))
+    except Exception:
+        logger.exception('Failed to dispatch expedition started notification')
+
     return Response(ExpeditionTrackingSerializer(tracking).data)
 
 
